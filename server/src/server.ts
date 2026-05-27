@@ -3,7 +3,10 @@ import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import { healthRoutes } from './routes/health.ts';
 import { authRoutes } from './auth/routes.ts';
+import { piecesRoutes } from './routes/pieces.ts';
+import { annotationRoutes } from './routes/annotations.ts';
 import { getConfig } from './config.ts';
+import { seedIfEmpty } from './seed.ts';
 
 const config = getConfig();
 
@@ -23,7 +26,12 @@ await app.register(cookie, {
 });
 
 await app.register(healthRoutes, { prefix: '/api' });
+await app.register(piecesRoutes, { prefix: '/api' });
+await app.register(annotationRoutes, { prefix: '/api' });
 await app.register(authRoutes, { prefix: '/auth' });
+
+// First-boot seed (no-op if pieces already exist).
+seedIfEmpty();
 
 try {
   await app.listen({ port: config.port, host: '0.0.0.0' });

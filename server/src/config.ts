@@ -13,6 +13,12 @@ function optional(name: string, fallback: string): string {
   return process.env[name] ?? fallback;
 }
 
+/** Strip leading slashes; ensure exactly one trailing slash. Empty string allowed. */
+function normalisePrefix(p: string): string {
+  const trimmed = p.replace(/^\/+/, '').replace(/\/+$/, '');
+  return trimmed === '' ? '' : `${trimmed}/`;
+}
+
 export interface Config {
   port: number;
   nodeEnv: 'development' | 'production' | 'test';
@@ -26,6 +32,10 @@ export interface Config {
     keyId: string;
     applicationKey: string;
     bucket: string;
+    /** Prefix prepended to every key choirfriend writes. Keeps choirfriend
+     *  files in their own folder when sharing a bucket with other SGMC
+     *  services. Should end with a trailing slash. */
+    keyPrefix: string;
     publicBaseUrl: string;
   };
 }
@@ -41,6 +51,7 @@ export function getConfig(): Config {
       keyId: optional('B2_KEY_ID', ''),
       applicationKey: optional('B2_APPLICATION_KEY', ''),
       bucket: optional('B2_BUCKET', 'choirfriend'),
+      keyPrefix: normalisePrefix(optional('B2_KEY_PREFIX', 'music/')),
       publicBaseUrl: optional('B2_PUBLIC_BASE_URL', 'https://media.mgd.scot'),
     },
   };

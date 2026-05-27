@@ -5,7 +5,7 @@ export const healthRoutes: FastifyPluginAsync = async (app) => {
   app.get('/health', async () => {
     let database: 'ok' | 'unreachable' = 'unreachable';
     try {
-      await db.query('SELECT 1');
+      db.prepare('SELECT 1').get();
       database = 'ok';
     } catch {
       database = 'unreachable';
