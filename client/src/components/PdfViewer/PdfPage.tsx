@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import type { PDFDocumentProxy } from '@/lib/pdfjs.ts';
-import type { Annotation, AnnotationLayer, AnnotationTool } from '@/types/annotations.ts';
+import type {
+  Annotation,
+  AnnotationLayer,
+  AnnotationTool,
+  InkAnnotation,
+  MarkerAnnotation,
+  MarkerKind,
+} from '@/types/annotations.ts';
+import { MarkerBadge } from './MarkerBadge.tsx';
 
 interface PdfPageProps {
   pdf: PDFDocumentProxy;
@@ -8,21 +16,28 @@ interface PdfPageProps {
   scale: number;
   /** Annotations to render on this page (already filtered by visibility). */
   annotations: Annotation[];
-  /** Where new strokes go. Null means drawing is disabled (different tool). */
+  /** Where new ink strokes / markers go. Null disables placement. */
   drawTarget: AnnotationLayer | null;
-  /** Current tool — controls which pointer events the overlay accepts. */
+  /** Current tool. */
   tool: AnnotationTool;
-  /** Stroke colour/width for new ink. */
+  /** Ink settings (only meaningful when tool === 'pen'). */
   inkColor: string;
   inkWidth: number;
-  /** Called whenever the user finishes a stroke. */
-  onAnnotationAdded: (annotation: Annotation) => void;
+  /** Marker settings (only meaningful when tool === 'marker'). */
+  markerKind: MarkerKind | null;
+  markerLabelInput: string;
+  onStrokeFinished: (input: { layer: AnnotationLayer; page: number; color: string; width: number; points: Array<{ x: number; y: number }> }) => void;
+  onMarkerPlaced: (input: { layer: AnnotationLayer; page: number; markerKind: MarkerKind; label: string | null; position: { x: number; y: number } }) => void;
+  onDeleteAnnotation: (id: string) => void;
 }
 
 /**
- * Renders a single PDF page to a canvas with a transparent annotation
- * canvas layered on top. The annotation canvas handles pointer events when
- * the pen tool is selected.
+ * Renders a single PDF page to a canvas with two overlays above it:
+ *   1. An annotation canvas for ink strokes (canvas-drawn for performance).
+ *   2. A DOM layer for marker badges (DOM so they're clickable / readable).
+ *
+ * The annotation canvas owns pointer events for the pen and marker tools.
+ * Marker badges are interactive only when no drawing tool is active.
  */
 export function PdfPage({
   pdf,
@@ -33,16 +48,21 @@ export function PdfPage({
   tool,
   inkColor,
   inkWidth,
-  onAnnotationAdded,
+  markerKind,
+  markerLabelInput,
+  onStrokeFinished,
+  onMarkerPlaced,
+  onDeleteAnnotation,
 }: PdfPageProps) {
   const pdfCanvasRef = useRef<HTMLCanvasElement>(null);
   const annotationCanvasRef = useRef<HTMLCanvasElement>(null);
   const [renderedSize, setRenderedSize] = useState<{ width: number; height: number } | null>(null);
   const activeStrokeRef = useRef<{ points: Array<{ x: number; y: number }> } | null>(null);
 
-  // Render the PDF page whenever the source or scale changes. We cancel
-  // any in-flight render task on unmount/rerender to avoid the "render
-  // task was destroyed" pdfjs error.
+  const inkAnnotations = annotations.filter((a): a is InkAnnotation => a.kind === 'ink');
+  const markerAnnotations = annotations.filter((a): a is MarkerAnnotation => a.kind === 'marker');
+
+  // Render the PDF page whenever the source or scale changes.
   useEffect(() => {
     let cancelled = false;
     let renderTask: { cancel: () => void; promise: Promise<void> } | null = null;
@@ -75,7 +95,7 @@ export function PdfPage({
     };
   }, [pdf, pageNumber, scale]);
 
-  // Redraw the annotation layer whenever the annotation list or size changes.
+  // Redraw the ink layer whenever the annotation list or rendered size changes.
   useEffect(() => {
     const canvas = annotationCanvasRef.current;
     if (!canvas || !renderedSize) return;
@@ -85,8 +105,8 @@ export function PdfPage({
     if (!ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    for (const a of annotations) {
-      if (a.kind !== 'ink' || a.points.length === 0) continue;
+    for (const a of inkAnnotations) {
+      if (a.points.length === 0) continue;
       ctx.strokeStyle = a.color;
       ctx.lineWidth = a.width * scale;
       ctx.lineCap = 'round';
@@ -100,7 +120,7 @@ export function PdfPage({
       }
       ctx.stroke();
     }
-  }, [annotations, renderedSize, scale]);
+  }, [inkAnnotations, renderedSize, scale]);
 
   function getNormalisedPoint(e: React.PointerEvent<HTMLCanvasElement>): { x: number; y: number } {
     const canvas = e.currentTarget;
@@ -129,36 +149,50 @@ export function PdfPage({
     ctx.stroke();
   }
 
-  const drawingEnabled = tool === 'pen' && drawTarget !== null;
+  const inkEnabled = tool === 'pen' && drawTarget !== null;
+  const markerEnabled = tool === 'marker' && drawTarget !== null && markerKind !== null;
+  const canvasInteractive = inkEnabled || markerEnabled;
 
   function handlePointerDown(e: React.PointerEvent<HTMLCanvasElement>): void {
-    if (!drawingEnabled) return;
-    (e.target as HTMLCanvasElement).setPointerCapture(e.pointerId);
-    activeStrokeRef.current = { points: [getNormalisedPoint(e)] };
+    if (inkEnabled) {
+      (e.target as HTMLCanvasElement).setPointerCapture(e.pointerId);
+      activeStrokeRef.current = { points: [getNormalisedPoint(e)] };
+      return;
+    }
+    if (markerEnabled && markerKind) {
+      const position = getNormalisedPoint(e);
+      const label = markerLabelInput.trim().length > 0 ? markerLabelInput.trim() : null;
+      onMarkerPlaced({
+        layer: drawTarget!,
+        page: pageNumber,
+        markerKind,
+        label,
+        position,
+      });
+    }
   }
 
   function handlePointerMove(e: React.PointerEvent<HTMLCanvasElement>): void {
-    if (!drawingEnabled || !activeStrokeRef.current) return;
+    if (!inkEnabled || !activeStrokeRef.current) return;
     activeStrokeRef.current.points.push(getNormalisedPoint(e));
     drawLiveStroke();
   }
 
-  function handlePointerUp(e: React.PointerEvent<HTMLCanvasElement>): void {
-    if (!drawingEnabled || !activeStrokeRef.current) return;
+  function handlePointerUp(): void {
+    if (!inkEnabled || !activeStrokeRef.current) return;
     const stroke = activeStrokeRef.current;
     activeStrokeRef.current = null;
     if (stroke.points.length < 2 || !drawTarget) return;
-    onAnnotationAdded({
-      id: crypto.randomUUID(),
+    onStrokeFinished({
       layer: drawTarget,
       page: pageNumber,
-      kind: 'ink',
       color: inkColor,
       width: inkWidth,
       points: stroke.points,
     });
-    void e; // setPointerCapture is released automatically on pointerup
   }
+
+  const cursor = inkEnabled ? 'crosshair' : markerEnabled ? 'copy' : 'default';
 
   return (
     <div className="relative inline-block shadow-md border border-border bg-white" data-page={pageNumber}>
@@ -168,14 +202,29 @@ export function PdfPage({
         className="absolute inset-0 block"
         style={{
           touchAction: 'none',
-          cursor: drawingEnabled ? 'crosshair' : 'default',
-          pointerEvents: drawingEnabled ? 'auto' : 'none',
+          cursor,
+          pointerEvents: canvasInteractive ? 'auto' : 'none',
         }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
       />
+      {/* Marker badges layered above. Interactive only when no drawing
+          tool is active, so they don't intercept pen/marker placement. */}
+      <div className="absolute inset-0 pointer-events-none">
+        {renderedSize &&
+          markerAnnotations.map((m) => (
+            <MarkerBadge
+              key={m.id}
+              marker={m}
+              pageWidth={renderedSize.width}
+              pageHeight={renderedSize.height}
+              interactive={tool === 'pan'}
+              onDelete={onDeleteAnnotation}
+            />
+          ))}
+      </div>
       <div className="absolute -left-10 top-2 text-xs text-muted-foreground select-none tabular-nums">
         {pageNumber}
       </div>

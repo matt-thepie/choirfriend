@@ -5,15 +5,13 @@
  * - `add()` does optimistic insert + background POST; rolls back on failure.
  * - `remove()` does optimistic delete + background DELETE; rolls back on failure.
  *
- * Conflict model is last-writer-wins for now. CRDT/OT can come later if we
- * find shared-layer collisions are common in practice (in a choir of dozens
- * editing during rehearsal, they probably aren't).
+ * Conflict model is last-writer-wins for now.
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import type { Annotation, AnnotationLayer } from '@/types/annotations.ts';
+import type { Annotation, AnnotationLayer, MarkerKind } from '@/types/annotations.ts';
 
-export interface NewAnnotationInput {
+interface NewInkInput {
   fileId: number;
   layer: AnnotationLayer;
   page: number;
@@ -23,12 +21,51 @@ export interface NewAnnotationInput {
   points: Array<{ x: number; y: number }>;
 }
 
+interface NewMarkerInput {
+  fileId: number;
+  layer: AnnotationLayer;
+  page: number;
+  kind: 'marker';
+  markerKind: MarkerKind;
+  label: string | null;
+  position: { x: number; y: number };
+}
+
+export type NewAnnotationInput = NewInkInput | NewMarkerInput;
+
 export interface UseAnnotationsResult {
   annotations: Annotation[];
   loading: boolean;
   error: string | null;
   add: (input: NewAnnotationInput) => Promise<void>;
   remove: (id: string) => Promise<void>;
+}
+
+function makeOptimistic(id: string, pieceId: number, input: NewAnnotationInput): Annotation {
+  const common = {
+    id,
+    layer: input.layer,
+    page: input.page,
+    pieceId,
+    fileId: input.fileId,
+    isMine: true,
+  };
+  if (input.kind === 'ink') {
+    return {
+      ...common,
+      kind: 'ink',
+      color: input.color,
+      width: input.width,
+      points: input.points,
+    };
+  }
+  return {
+    ...common,
+    kind: 'marker',
+    markerKind: input.markerKind,
+    label: input.label,
+    position: input.position,
+  };
 }
 
 export function useAnnotations(pieceId: number | null): UseAnnotationsResult {
@@ -68,18 +105,7 @@ export function useAnnotations(pieceId: number | null): UseAnnotationsResult {
     async (input: NewAnnotationInput): Promise<void> => {
       if (pieceId === null) return;
       const id = crypto.randomUUID();
-      const optimistic: Annotation = {
-        id,
-        layer: input.layer,
-        page: input.page,
-        kind: 'ink',
-        color: input.color,
-        width: input.width,
-        points: input.points,
-        pieceId,
-        fileId: input.fileId,
-        isMine: true,
-      };
+      const optimistic = makeOptimistic(id, pieceId, input);
       setAnnotations((prev) => [...prev, optimistic]);
 
       try {

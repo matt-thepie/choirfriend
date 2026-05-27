@@ -1,41 +1,71 @@
 /**
  * Annotation queries. The wire format pulls kind-specific fields up to the
- * top of the DTO (color, width, points for ink), but on disk those live
- * inside the `payload` JSON so adding new kinds doesn't require schema
- * changes.
+ * top of the DTO, but on disk those live inside the `payload` JSON column
+ * so adding new kinds doesn't require schema changes.
+ *
+ * Two kinds today: `ink` (drawn strokes) and `marker` (navigation marks
+ * like Segno, Coda, D.S. al Coda, etc.). The traversal logic that turns a
+ * placed marker set into "the bar order to actually play" lives on the
+ * client and isn't a server concern.
  *
  * Visibility rule for reads:
  *   - shared annotations: anyone in the choir sees them
  *   - private annotations: only the owner
  *
- * Edit rule for shared:
- *   - per matt's decision, anyone can delete/edit a shared annotation.
- *     Authorship is recorded for attribution but doesn't gate writes.
+ * Edit rule:
+ *   - private layer: only the owner can edit/delete
+ *   - shared layer: anyone authenticated (per matt's call)
  */
 
 import { db } from './index.ts';
 
 export type AnnotationLayer = 'private' | 'shared';
 
-export interface InkAnnotationDTO {
+export type MarkerKind =
+  | 'segno' // 𝄋
+  | 'coda' // 𝄌
+  | 'ds' // D.S. — qualifier in `label` (e.g. "al Coda")
+  | 'dc' // D.C. — qualifier in `label` (e.g. "al Fine")
+  | 'fine'
+  | 'to-coda' // → 𝄌
+  | 'repeat-start' // 𝄆
+  | 'repeat-end' // 𝄇
+  | 'volta-1'
+  | 'volta-2'
+  | 'bar' // bar number / rehearsal letter ("bar 24", "Letter B")
+  | 'custom';
+
+interface AnnotationCommon {
   id: string;
   pieceId: number;
   fileId: number;
   layer: AnnotationLayer;
   page: number;
-  kind: 'ink';
-  color: string;
-  width: number;
-  points: Array<{ x: number; y: number }>;
-  /** Email of the creator/last-editor. Useful in the shared layer. */
+  /** Email of the creator. Useful in the shared layer for attribution. */
   authorEmail: string;
-  /** Whether the current request user owns this annotation. */
+  /** Whether the requesting user owns this annotation. Server-computed. */
   isMine: boolean;
   createdAt: number;
   updatedAt: number;
 }
 
-export type AnnotationDTO = InkAnnotationDTO;
+export interface InkAnnotationDTO extends AnnotationCommon {
+  kind: 'ink';
+  color: string;
+  width: number;
+  points: Array<{ x: number; y: number }>;
+}
+
+export interface MarkerAnnotationDTO extends AnnotationCommon {
+  kind: 'marker';
+  markerKind: MarkerKind;
+  /** Override / qualifier text. Required for `custom` and `bar`; optional
+   *  for D.S./D.C. to carry "al Coda" / "al Fine". */
+  label: string | null;
+  position: { x: number; y: number };
+}
+
+export type AnnotationDTO = InkAnnotationDTO | MarkerAnnotationDTO;
 
 interface AnnotationRow {
   id: string;
@@ -52,30 +82,37 @@ interface AnnotationRow {
 }
 
 function rowToDTO(row: AnnotationRow, requesterId: number): AnnotationDTO {
-  // For now there's only ink. Future kinds branch here.
-  if (row.kind !== 'ink') {
-    throw new Error(`Unknown annotation kind: ${row.kind}`);
-  }
-  const payload = JSON.parse(row.payload) as {
-    color: string;
-    width: number;
-    points: Array<{ x: number; y: number }>;
-  };
-  return {
+  const payload = JSON.parse(row.payload) as Record<string, unknown>;
+  const common: AnnotationCommon = {
     id: row.id,
     pieceId: row.piece_id,
     fileId: row.file_id,
     layer: row.layer,
     page: row.page,
-    kind: 'ink',
-    color: payload.color,
-    width: payload.width,
-    points: payload.points,
     authorEmail: row.author_email,
     isMine: row.user_id === requesterId,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+  if (row.kind === 'ink') {
+    return {
+      ...common,
+      kind: 'ink',
+      color: payload.color as string,
+      width: payload.width as number,
+      points: payload.points as Array<{ x: number; y: number }>,
+    };
+  }
+  if (row.kind === 'marker') {
+    return {
+      ...common,
+      kind: 'marker',
+      markerKind: payload.markerKind as MarkerKind,
+      label: (payload.label as string | null | undefined) ?? null,
+      position: payload.position as { x: number; y: number },
+    };
+  }
+  throw new Error(`Unknown annotation kind: ${row.kind}`);
 }
 
 const listForPieceStmt = db.prepare(`
@@ -105,25 +142,35 @@ export function listAnnotationsForPiece(pieceId: number, requesterId: number): A
   return (listForPieceStmt.all(pieceId, requesterId) as AnnotationRow[]).map((r) => rowToDTO(r, requesterId));
 }
 
-export interface CreateAnnotationInput {
+interface CreateCommon {
   id: string;
   pieceId: number;
   fileId: number;
   userId: number;
   layer: AnnotationLayer;
   page: number;
-  kind: 'ink';
-  color: string;
-  width: number;
-  points: Array<{ x: number; y: number }>;
 }
 
+export type CreateAnnotationInput =
+  | (CreateCommon & {
+      kind: 'ink';
+      color: string;
+      width: number;
+      points: Array<{ x: number; y: number }>;
+    })
+  | (CreateCommon & {
+      kind: 'marker';
+      markerKind: MarkerKind;
+      label: string | null;
+      position: { x: number; y: number };
+    });
+
 export function createAnnotation(input: CreateAnnotationInput): AnnotationDTO {
-  const payload = JSON.stringify({
-    color: input.color,
-    width: input.width,
-    points: input.points,
-  });
+  const payload =
+    input.kind === 'ink'
+      ? JSON.stringify({ color: input.color, width: input.width, points: input.points })
+      : JSON.stringify({ markerKind: input.markerKind, label: input.label, position: input.position });
+
   insertStmt.run(
     input.id,
     input.pieceId,
@@ -144,11 +191,7 @@ export function getAnnotationById(id: string, requesterId: number): AnnotationDT
   return rowToDTO(row, requesterId);
 }
 
-/**
- * Returns true if the annotation was deleted, false if it didn't exist.
- * Caller is responsible for permission checks (see route).
- */
 export function deleteAnnotation(id: string): boolean {
   const info = deleteStmt.run(id);
-  return info.changes > 0;
+  return (info.changes as number) > 0;
 }
