@@ -3,7 +3,7 @@
  * loaded, an Error on failure.
  */
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 export interface PieceFile {
   id: number;
@@ -33,12 +33,17 @@ export interface UsePieceResult {
   piece: Piece | null;
   loading: boolean;
   error: string | null;
+  /** Refetch the piece — call after upload/delete so the file list updates. */
+  refresh: () => void;
 }
 
 export function usePiece(pieceId: number | null): UsePieceResult {
   const [piece, setPiece] = useState<Piece | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [tick, setTick] = useState(0);
+
+  const refresh = useCallback(() => setTick((t) => t + 1), []);
 
   useEffect(() => {
     if (pieceId === null) {
@@ -66,7 +71,7 @@ export function usePiece(pieceId: number | null): UsePieceResult {
     return () => {
       cancelled = true;
     };
-  }, [pieceId]);
+  }, [pieceId, tick]);
 
-  return { piece, loading, error };
+  return { piece, loading, error, refresh };
 }

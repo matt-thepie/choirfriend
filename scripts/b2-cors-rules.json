@@ -1,0 +1,20 @@
+[
+  {
+    "corsRuleName": "choirfriendUploads",
+    "_comment": "Browser PUTs from the app to presigned B2 URLs. Lock allowedOrigins to the dev origin and your prod app domain.",
+    "allowedOrigins": ["http://localhost:5173", "https://music.sgmc.org.uk"],
+    "allowedOperations": ["s3_put"],
+    "allowedHeaders": ["*"],
+    "exposeHeaders": ["etag"],
+    "maxAgeSeconds": 3600
+  },
+  {
+    "corsRuleName": "choirfriendReads",
+    "_comment": "Public reads from any origin. PDF.js needs CORS for range requests; HTML5 audio with crossorigin does too. `range` in allowedHeaders is the one people forget.",
+    "allowedOrigins": ["*"],
+    "allowedOperations": ["s3_get", "s3_head"],
+    "allowedHeaders": ["range", "content-type"],
+    "exposeHeaders": ["accept-ranges", "content-range", "content-length", "etag"],
+    "maxAgeSeconds": 3600
+  }
+]

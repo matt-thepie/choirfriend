@@ -15,9 +15,13 @@ import {
 import { usePiece } from '@/hooks/usePiece.ts';
 import { useAnnotations, type NewAnnotationInput } from '@/hooks/useAnnotations.ts';
 import { PdfPage } from './PdfPage.tsx';
+import { UploadButton } from './UploadButton.tsx';
 
 interface PdfViewerProps {
   pieceId: number;
+  /** Called after a file is added/removed so the parent's piece list can
+   *  refresh updated_at ordering. */
+  onPieceMutated?: () => void;
 }
 
 /** Marker kinds that benefit from a free-text label. `bar` and `custom`
@@ -38,9 +42,14 @@ const KIND_TAKES_LABEL: Record<MarkerKind, boolean> = {
   custom: true,
 };
 
-export function PdfViewer({ pieceId }: PdfViewerProps) {
-  const { piece, loading: pieceLoading, error: pieceError } = usePiece(pieceId);
+export function PdfViewer({ pieceId, onPieceMutated }: PdfViewerProps) {
+  const { piece, loading: pieceLoading, error: pieceError, refresh: refreshPiece } = usePiece(pieceId);
   const pdfFile = useMemo(() => piece?.files.find((f) => f.kind === 'pdf') ?? null, [piece]);
+
+  function handleUploaded(): void {
+    refreshPiece();
+    onPieceMutated?.();
+  }
 
   const { annotations, loading: annotationsLoading, error: annotationsError, add, remove } = useAnnotations(pieceId);
 
@@ -183,6 +192,10 @@ export function PdfViewer({ pieceId }: PdfViewerProps) {
           {piece && <h2 className="text-sm font-semibold mr-2">{piece.title}</h2>}
           {pieceLoading && <span className="text-xs text-muted-foreground">Loading piece…</span>}
           {pieceError && <span className="text-xs text-destructive">Piece error: {pieceError}</span>}
+
+          <UploadButton pieceId={pieceId} onUploaded={handleUploaded} />
+
+          <div className="h-6 w-px bg-border mx-1" />
 
           <div className="flex items-center rounded-md border border-border overflow-hidden">
             <ToolButton active={tool === 'pan'} onClick={() => setTool('pan')}>Pan</ToolButton>

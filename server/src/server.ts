@@ -4,6 +4,7 @@ import cors from '@fastify/cors';
 import { healthRoutes } from './routes/health.ts';
 import { authRoutes } from './auth/routes.ts';
 import { piecesRoutes } from './routes/pieces.ts';
+import { filesRoutes } from './routes/files.ts';
 import { annotationRoutes } from './routes/annotations.ts';
 import { getConfig } from './config.ts';
 import { seedIfEmpty } from './seed.ts';
@@ -27,6 +28,7 @@ await app.register(cookie, {
 
 await app.register(healthRoutes, { prefix: '/api' });
 await app.register(piecesRoutes, { prefix: '/api' });
+await app.register(filesRoutes, { prefix: '/api' });
 await app.register(annotationRoutes, { prefix: '/api' });
 await app.register(authRoutes, { prefix: '/auth' });
 

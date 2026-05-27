@@ -31,6 +31,7 @@ export interface FileRow {
   created_at: number;
 }
 
+
 export interface PieceDTO {
   id: number;
   title: string;
@@ -117,6 +118,9 @@ const insertFileStmt = db.prepare(`
   RETURNING *
 `);
 const countPiecesStmt = db.prepare(`SELECT COUNT(*) AS n FROM pieces`);
+const getFileByIdStmt = db.prepare(`SELECT * FROM files WHERE id = ?`);
+const deleteFileStmt = db.prepare(`DELETE FROM files WHERE id = ?`);
+const touchPieceStmt = db.prepare(`UPDATE pieces SET updated_at = unixepoch() WHERE id = ?`);
 
 export function listPieces(): PieceDTO[] {
   return (listPiecesStmt.all() as PieceRow[]).map(toPieceDTO);
@@ -174,5 +178,17 @@ export function createFile(input: CreateFileInput): FileDTO {
     input.mimeType ?? null,
     input.sortOrder ?? 0,
   ) as FileRow;
+  touchPieceStmt.run(input.pieceId);
   return toFileDTO(row);
+}
+
+/** Returns the raw row (with storage info) — callers that need to talk to
+ *  B2 about the file need the unprefixed key, which isn't in the DTO. */
+export function getFileRowById(id: number): FileRow | null {
+  return (getFileByIdStmt.get(id) as FileRow | undefined) ?? null;
+}
+
+export function deleteFileRow(id: number): boolean {
+  const info = deleteFileStmt.run(id);
+  return (info.changes as number) > 0;
 }

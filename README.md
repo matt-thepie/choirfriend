@@ -104,6 +104,22 @@ For SGMC's deployment specifically:
 - In production, set `AUTH_SGMC_IDENTITY_VERIFY_URL=http://localhost:3050/verify` so /verify calls stay on localhost.
 - In dev, the cookie won't cross `localhost:3050 → localhost:3001`. Either run both behind `/etc/hosts` aliases like `identity.localtest.me` + `music.localtest.me` with the cookie scoped to `.localtest.me`, or test authenticated flows against the live identity service.
 
+## Backblaze B2 setup
+
+choirfriend uploads files directly from the browser to B2 via presigned URLs (the API never sees the bytes). For this to work, the bucket needs CORS rules that allow PUTs from your app's origin and GETs from anywhere.
+
+```bash
+# Once
+b2 account authorize <YOUR_KEY_ID> <YOUR_APPLICATION_KEY>
+
+# Per bucket
+./scripts/apply-b2-cors.sh <BUCKET_NAME>
+```
+
+The rules applied are in `scripts/b2-cors-rules.json` — edit the `allowedOrigins` of the uploads rule if you're deploying to a different host. Both files are checked into the repo so the configuration is version-controlled, not buried in a Backblaze admin tab.
+
+⚠️ The script replaces the bucket's entire CORS array. If you share the bucket with other services and they also have CORS rules, merge by hand.
+
 ## Deployment
 
 The server has no build step. On the VPS, GitHub Actions runs:
