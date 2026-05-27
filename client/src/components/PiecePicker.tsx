@@ -8,6 +8,9 @@ interface PiecePickerProps {
   selectedId: number | null;
   onSelect: (id: number | null) => void;
   onCreated: () => void;
+  /** Hide the "+ New piece" affordance for non-admins. Server gates the
+   *  POST regardless; this just keeps the UI honest. */
+  canCreate?: boolean;
 }
 
 /**
@@ -17,7 +20,14 @@ interface PiecePickerProps {
  * flips it into an inline form (title + composer). On create, we refresh
  * the list and select the new piece.
  */
-export function PiecePicker({ pieces, loading, selectedId, onSelect, onCreated }: PiecePickerProps) {
+export function PiecePicker({
+  pieces,
+  loading,
+  selectedId,
+  onSelect,
+  onCreated,
+  canCreate = false,
+}: PiecePickerProps) {
   const [creating, setCreating] = useState(false);
   const [title, setTitle] = useState('');
   const [composer, setComposer] = useState('');
@@ -46,7 +56,7 @@ export function PiecePicker({ pieces, loading, selectedId, onSelect, onCreated }
     }
   }
 
-  if (creating) {
+  if (creating && canCreate) {
     return (
       <form onSubmit={handleCreate} className="flex items-center gap-2">
         <input
@@ -103,9 +113,11 @@ export function PiecePicker({ pieces, loading, selectedId, onSelect, onCreated }
           </option>
         ))}
       </select>
-      <Button size="sm" variant="outline" onClick={() => setCreating(true)}>
-        + New piece
-      </Button>
+      {canCreate && (
+        <Button size="sm" variant="outline" onClick={() => setCreating(true)}>
+          + New piece
+        </Button>
+      )}
     </div>
   );
 }

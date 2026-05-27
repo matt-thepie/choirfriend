@@ -4,6 +4,7 @@ import { AudioPlayer } from '@/components/AudioPlayer/index.ts';
 import { Piano } from '@/components/Piano/index.ts';
 import { PiecePicker } from '@/components/PiecePicker.tsx';
 import { HomeScreen } from '@/components/HomeScreen.tsx';
+import { SignInScreen } from '@/components/SignInScreen.tsx';
 import { usePieces } from '@/hooks/usePieces.ts';
 import { cn } from '@/lib/utils.ts';
 
@@ -23,24 +24,61 @@ interface MeResponse {
 /**
  * App shell.
  *
- * Views:
- *   - home — the landing page; searchable repertoire list with current/archive
- *     filter, "new piece", and (for admins) inline current↔archive toggle.
- *   - piece — the open piece: PdfViewer + AudioPlayer + (toggleable) Piano.
+ * Auth gate:
+ *   - While /auth/me is still loading, render nothing (avoid flicker).
+ *   - If not signed in, render <SignInScreen /> only. Don't even fetch the
+ *     repertoire — saves a 401 in the console and forces a real session
+ *     before showing any choir data.
+ *
+ * Views (when signed in):
+ *   - home — searchable repertoire list with current/archive filter.
+ *   - piece — open piece: PdfViewer + AudioPlayer + (toggleable) Piano.
  *
  * Display modes (only meaningful in piece view):
- *   - edit (default): header visible, full toolbar, scroll all pages.
- *   - read ("perform"): header hidden, minimal toolbar, page-turn nav by
- *     default (scroll on narrow viewports).
+ *   - edit (default): full toolbar, scroll all pages.
+ *   - read ("perform"): minimal toolbar, page-turn nav by default. App
+ *     header hides; Exit button on the viewer's minimal toolbar is the
+ *     canonical way out (Esc also works for desktop users).
+ *
+ * Write operations (create piece, upload files, archive/restore, delete
+ * files) are gated server-side behind `requireAdmin` (members of any
+ * ADMIN_ROLES group). The client mirrors that by hiding write UI when
+ * me.isAdmin is false — keeps the UI honest and avoids buttons that 403.
  */
 export function App() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [me, setMe] = useState<MeResponse | null>(null);
+  const [meLoaded, setMeLoaded] = useState(false);
 
+  useEffect(() => {
+    fetch('/api/health').then((r) => r.json()).then(setHealth).catch(() => setHealth(null));
+    fetch('/auth/me', { credentials: 'include' })
+      .then((r) => r.json())
+      .then(setMe)
+      .catch(() => setMe({ signedIn: false }))
+      .finally(() => setMeLoaded(true));
+  }, []);
+
+  // Until /auth/me resolves, render nothing — avoids a flash of the sign-in
+  // screen before the cookie check completes.
+  if (!meLoaded) {
+    return <div className="h-screen" />;
+  }
+
+  // Not signed in → sign-in only. Don't touch repertoire endpoints.
+  if (!me?.signedIn) {
+    return <SignInScreen />;
+  }
+
+  return <SignedInApp me={me} health={health} />;
+}
+
+function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | null }) {
   const { pieces, loading: piecesLoading, refresh: refreshPieces } = usePieces();
   const [pieceId, setPieceId] = useState<number | null>(null);
   const [pianoOpen, setPianoOpen] = useState(false);
   const [readMode, setReadMode] = useState(false);
+  const isAdmin = me.isAdmin === true;
 
   const [pieceRefreshTick, setPieceRefreshTick] = useState(0);
   function bumpPieceRefresh(): void {
@@ -52,11 +90,6 @@ export function App() {
     setPieceId(null);
     setReadMode(false);
   }
-
-  useEffect(() => {
-    fetch('/api/health').then((r) => r.json()).then(setHealth).catch(() => setHealth(null));
-    fetch('/auth/me', { credentials: 'include' }).then((r) => r.json()).then(setMe).catch(() => setMe(null));
-  }, []);
 
   const view: 'home' | 'piece' = pieceId === null ? 'home' : 'piece';
 
@@ -89,6 +122,7 @@ export function App() {
                 selectedId={pieceId}
                 onSelect={setPieceId}
                 onCreated={refreshPieces}
+                canCreate={isAdmin}
               />
             </>
           )}
@@ -110,14 +144,14 @@ export function App() {
           />
 
           <div className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
-            {me?.signedIn ? (
-              <span>
-                Signed in as {me.displayName}
-                {me.isAdmin && <span className="ml-1 text-[10px] uppercase tracking-wide font-semibold text-amber-700">admin</span>}
-              </span>
-            ) : (
-              <a href="/auth/login" className="underline hover:text-foreground">Sign in</a>
-            )}
+            <span>
+              Signed in as {me.displayName ?? me.email}
+              {isAdmin && (
+                <span className="ml-1 text-[10px] uppercase tracking-wide font-semibold text-amber-700">
+                  admin
+                </span>
+              )}
+            </span>
             <span title={`server: ${health?.status ?? '?'} · db: ${health?.database ?? '?'}`}>
               <span className={`inline-block w-2 h-2 rounded-full mr-1 ${health?.database === 'ok' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
               {health ? `server ${health.database}` : 'server …'}
@@ -131,7 +165,7 @@ export function App() {
           <HomeScreen
             pieces={pieces}
             loading={piecesLoading}
-            isAdmin={me?.isAdmin === true}
+            isAdmin={isAdmin}
             onOpenPiece={setPieceId}
             onPieceMutated={refreshPieces}
           />
@@ -144,6 +178,7 @@ export function App() {
                 onPieceMutated={bumpPieceRefresh}
                 readMode={readMode}
                 onExitReadMode={() => setReadMode(false)}
+                isAdmin={isAdmin}
               />
             </div>
             {pianoOpen && <Piano onClose={() => setPianoOpen(false)} />}

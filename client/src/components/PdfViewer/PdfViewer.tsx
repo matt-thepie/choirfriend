@@ -28,8 +28,11 @@ interface PdfViewerProps {
    *  parent (App) hides its own header when this is true. */
   readMode?: boolean;
   /** Called when the user exits read mode from within the viewer (e.g.
-   *  Esc, or the ✕ button on the minimal toolbar). */
+   *  Esc, or the Exit button on the minimal toolbar). */
   onExitReadMode?: () => void;
+  /** Whether the current user holds an admin role. Gates the upload and
+   *  delete UI so we don't show buttons that 403 on click. */
+  isAdmin?: boolean;
 }
 
 /** Marker kinds that benefit from a free-text label. */
@@ -63,6 +66,7 @@ export function PdfViewer({
   onPieceMutated,
   readMode = false,
   onExitReadMode,
+  isAdmin = false,
 }: PdfViewerProps) {
   const { piece, loading: pieceLoading, error: pieceError, refresh: refreshPiece } = usePiece(pieceId, refreshTick);
   const pdfFile = useMemo(() => piece?.files.find((f) => f.kind === 'pdf') ?? null, [piece]);
@@ -311,9 +315,8 @@ export function PdfViewer({
       {pieceLoading && <span className="text-xs text-muted-foreground">Loading piece…</span>}
       {pieceError && <span className="text-xs text-destructive">Piece error: {pieceError}</span>}
 
-      <UploadButton pieceId={pieceId} onUploaded={handleUploaded} />
-
-      <div className="h-6 w-px bg-border mx-1" />
+      {isAdmin && <UploadButton pieceId={pieceId} onUploaded={handleUploaded} />}
+      {isAdmin && <div className="h-6 w-px bg-border mx-1" />}
 
       <div className="flex items-center rounded-md border border-border overflow-hidden">
         <ToolButton active={tool === 'pan'} onClick={() => setTool('pan')}>Pan</ToolButton>

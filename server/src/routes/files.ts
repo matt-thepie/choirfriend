@@ -22,8 +22,37 @@ import {
   getFileRowById,
   getPieceWithFiles,
 } from '../db/pieces.ts';
-import { requireAuth } from '../auth/middleware.ts';
+import { requireAdmin } from '../auth/middleware.ts';
 import { deleteObject, isB2Configured, presignPut } from '../storage/b2.ts';
+
+/**
+ * Strict MIME allowlist by kind. Server is the source of truth — the client
+ * can claim any Content-Type but we refuse to *sign* a URL for anything
+ * outside this set, so an attacker can't upload an image as a "PDF" and
+ * smuggle bytes into the bucket. Defence in depth alongside the role gate.
+ */
+const ALLOWED_PDF_MIME = new Set(['application/pdf']);
+const ALLOWED_AUDIO_MIME = new Set([
+  'audio/mpeg', // .mp3
+  'audio/mp3',
+  'audio/mp4', // .m4a (often), .mp4
+  'audio/aac',
+  'audio/x-m4a',
+  'audio/ogg',
+  'audio/opus',
+  'audio/wav',
+  'audio/wave',
+  'audio/x-wav',
+  'audio/flac',
+  'audio/x-flac',
+  'audio/webm',
+]);
+
+function mimeMatchesKind(kind: 'pdf' | 'audio', mimeType: string): boolean {
+  const m = mimeType.toLowerCase();
+  if (kind === 'pdf') return ALLOWED_PDF_MIME.has(m);
+  return ALLOWED_AUDIO_MIME.has(m);
+}
 
 interface SignUploadBody {
   filename: string;
@@ -57,10 +86,12 @@ function sanitiseExt(filename: string): string {
 }
 
 export const filesRoutes: FastifyPluginAsync = async (app) => {
-  /** Returns a presigned PUT URL the browser will upload directly to B2. */
+  /** Returns a presigned PUT URL the browser will upload directly to B2.
+   *  Admin-only so a random signed-in member can't smuggle bytes into the
+   *  shared B2 bucket. */
   app.post<{ Params: { id: string }; Body: SignUploadBody }>(
     '/pieces/:id/files/sign-upload',
-    { preHandler: requireAuth },
+    { preHandler: requireAdmin },
     async (req, reply) => {
       if (!isB2Configured()) {
         return reply.code(503).send({
@@ -85,6 +116,12 @@ export const filesRoutes: FastifyPluginAsync = async (app) => {
       ) {
         return reply.code(400).send({ error: 'invalid payload' });
       }
+      if (!mimeMatchesKind(body.kind, body.mimeType)) {
+        return reply.code(415).send({
+          error: 'unsupported_media_type',
+          message: `${body.mimeType} is not allowed for kind=${body.kind}`,
+        });
+      }
       if (body.sizeBytes !== undefined && (typeof body.sizeBytes !== 'number' || body.sizeBytes > MAX_FILE_BYTES)) {
         return reply.code(413).send({ error: 'file too large' });
       }
@@ -102,10 +139,12 @@ export const filesRoutes: FastifyPluginAsync = async (app) => {
     },
   );
 
-  /** After the browser's PUT to B2 succeeds, create the row in our DB. */
+  /** After the browser's PUT to B2 succeeds, create the row in our DB.
+   *  Same admin gate as sign-upload so we can't be tricked into creating
+   *  a DB row that references an orphan some attacker dropped into B2. */
   app.post<{ Params: { id: string }; Body: CompleteUploadBody }>(
     '/pieces/:id/files/complete-upload',
-    { preHandler: requireAuth },
+    { preHandler: requireAdmin },
     async (req, reply) => {
       const pieceId = Number(req.params.id);
       if (!Number.isFinite(pieceId)) return reply.code(400).send({ error: 'invalid piece id' });
@@ -122,6 +161,9 @@ export const filesRoutes: FastifyPluginAsync = async (app) => {
         typeof body.mimeType !== 'string'
       ) {
         return reply.code(400).send({ error: 'invalid payload' });
+      }
+      if (!mimeMatchesKind(body.kind, body.mimeType)) {
+        return reply.code(415).send({ error: 'unsupported_media_type' });
       }
 
       // Sanity: the storage key has to be in this piece's namespace.
@@ -145,13 +187,14 @@ export const filesRoutes: FastifyPluginAsync = async (app) => {
   );
 
   /**
-   * Delete a file. Any authenticated user can delete (same trust model as
-   * shared annotations). The B2 object is best-effort deleted alongside.
-   * Local-storage files (the seeded sample) can't be removed via this API.
+   * Delete a file. Admin-only — ordinary members shouldn't be able to
+   * remove the MD's uploaded score. The B2 object is best-effort deleted
+   * alongside. Local-storage files (the seeded sample) can't be removed
+   * via this API.
    */
   app.delete<{ Params: { fileId: string } }>(
     '/files/:fileId',
-    { preHandler: requireAuth },
+    { preHandler: requireAdmin },
     async (req, reply) => {
       const id = Number(req.params.fileId);
       if (!Number.isFinite(id)) return reply.code(400).send({ error: 'invalid file id' });

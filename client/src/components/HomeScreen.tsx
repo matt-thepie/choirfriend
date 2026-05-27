@@ -105,14 +105,14 @@ export function HomeScreen({ pieces, loading, isAdmin, onOpenPiece, onPieceMutat
               Show archive
               {archiveCount > 0 && <span className="text-muted-foreground">({archiveCount})</span>}
             </label>
-            {!creating && (
+            {!creating && isAdmin && (
               <Button size="md" variant="outline" onClick={() => setCreating(true)}>
                 + New piece
               </Button>
             )}
           </div>
 
-          {creating && (
+          {creating && isAdmin && (
             <form
               onSubmit={handleCreate}
               className="rounded-md border border-border bg-background p-3 flex flex-wrap items-center gap-2"
@@ -173,7 +173,9 @@ export function HomeScreen({ pieces, loading, isAdmin, onOpenPiece, onPieceMutat
           )}
           {!loading && filtered.length === 0 && pieces.length === 0 && (
             <p className="text-sm text-muted-foreground">
-              No pieces yet. Use <strong>New piece</strong> to create one, then drop a PDF and learning tracks into it.
+              {isAdmin
+                ? <>No pieces yet. Use <strong>New piece</strong> to create one, then drop a PDF and learning tracks into it.</>
+                : 'No pieces yet. Ask an admin to add repertoire.'}
             </p>
           )}
           {!loading && filtered.length === 0 && pieces.length > 0 && (

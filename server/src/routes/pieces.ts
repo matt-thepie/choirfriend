@@ -20,24 +20,30 @@ interface UpdatePieceBody {
 const ALLOWED_PATCH_KEYS = new Set(['title', 'composer', 'arranger', 'notes', 'isCurrent']);
 
 export const piecesRoutes: FastifyPluginAsync = async (app) => {
-  /** Listing pieces is open — anyone can see the catalogue. */
-  app.get('/pieces', async () => {
+  /** Listing the repertoire requires a signed-in member. Matches the SGMC
+   *  platform posture — content is choir-internal, not public. Other
+   *  deployments that want a public catalogue can drop the preHandler. */
+  app.get('/pieces', { preHandler: requireAuth }, async () => {
     return listPieces();
   });
 
-  app.get<{ Params: { id: string } }>('/pieces/:id', async (req, reply) => {
-    const id = Number(req.params.id);
-    if (!Number.isFinite(id)) return reply.code(400).send({ error: 'invalid id' });
-    const piece = getPieceWithFiles(id);
-    if (!piece) return reply.code(404).send({ error: 'not found' });
-    return piece;
-  });
+  app.get<{ Params: { id: string } }>(
+    '/pieces/:id',
+    { preHandler: requireAuth },
+    async (req, reply) => {
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) return reply.code(400).send({ error: 'invalid id' });
+      const piece = getPieceWithFiles(id);
+      if (!piece) return reply.code(404).send({ error: 'not found' });
+      return piece;
+    },
+  );
 
-  /** Creating a piece requires auth — no per-role gating yet; any signed-in
-   *  member can add repertoire. Tighten to committee+ later if needed. */
+  /** Creating a piece is admin-only — members shouldn't be cluttering the
+   *  catalogue. Same gate as PATCH/DELETE for consistency. */
   app.post<{ Body: CreatePieceBody }>(
     '/pieces',
-    { preHandler: requireAuth },
+    { preHandler: requireAdmin },
     async (req, reply) => {
       const body = req.body;
       if (!body || typeof body.title !== 'string' || body.title.trim() === '') {
