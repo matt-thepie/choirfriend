@@ -17,9 +17,11 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             set -e
+            # Load nvm. This activates the default Node (where pm2 is installed,
+            # managing all the other apps). The choirfriend app itself is pinned
+            # to Node 24 below via --interpreter "$(nvm which 24)".
             export NVM_DIR="$HOME/.nvm"
             [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-            nvm use 24
 
             cd ~/github/choirfriend
             git pull origin main
