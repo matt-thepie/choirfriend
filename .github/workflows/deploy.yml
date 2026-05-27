@@ -1,0 +1,43 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: matt
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+            nvm use 24
+
+            cd ~/github/choirfriend
+            git pull origin main
+
+            # Server: runs .ts directly under Node 24, no build step.
+            cd server
+            npm ci
+            mkdir -p data   # SQLite lives at ./data/choirfriend.db (cwd = server/)
+
+            # Client: Vite SPA served statically by nginx from client/dist.
+            cd ../client
+            npm ci
+            npm run build
+
+            # Start (or reload) the Fastify app on the pinned Node 24 interpreter.
+            cd ../server
+            pm2 restart choirfriend --update-env || pm2 start src/server.ts \
+              --name choirfriend \
+              --interpreter "$(nvm which 24)" \
+              --node-args="--env-file=../.env"
+            pm2 save
