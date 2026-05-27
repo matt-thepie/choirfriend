@@ -1,0 +1,26 @@
+{
+  "name": "choirfriend-server",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Fastify backend for choirfriend. Runs .ts directly under Node 24 LTS — no build step.",
+  "type": "module",
+  "engines": {
+    "node": ">=24.12.0"
+  },
+  "scripts": {
+    "dev": "node --watch --env-file=../.env src/server.ts",
+    "start": "node --env-file=../.env src/server.ts"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^11.0.2",
+    "@fastify/cors": "^11.0.1",
+    "@fastify/static": "^8.2.0",
+    "fastify": "^5.8.5",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/pg": "^8.11.10",
+    "typescript": "^5.7.0"
+  }
+}
