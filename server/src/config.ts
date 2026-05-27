@@ -16,8 +16,11 @@ function optional(name: string, fallback: string): string {
 export interface Config {
   port: number;
   nodeEnv: 'development' | 'production' | 'test';
-  databaseUrl: string;
+  /** Path to the SQLite database file. Created on first run if missing. */
+  databaseFile: string;
+  /** Used for signed cookies if/when we set our own; not used for sgmc_token. */
   sessionSecret: string;
+  /** Where the React client lives — used for CORS + post-login redirect. */
   clientOrigin: string;
   b2: {
     keyId: string;
@@ -31,7 +34,7 @@ export function getConfig(): Config {
   return {
     port: Number(optional('PORT', '3001')),
     nodeEnv: (optional('NODE_ENV', 'development') as Config['nodeEnv']),
-    databaseUrl: required('DATABASE_URL'),
+    databaseFile: optional('DATABASE_FILE', './data/choirfriend.db'),
     sessionSecret: required('SESSION_SECRET'),
     clientOrigin: optional('CLIENT_ORIGIN', 'http://localhost:5173'),
     b2: {

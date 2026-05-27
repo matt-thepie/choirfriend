@@ -1,13 +1,14 @@
 /**
- * Generic OIDC provider.
+ * Generic OIDC provider — stub.
  *
  * Works against any spec-compliant OIDC issuer (Google, Microsoft Entra,
- * Keycloak, sgmc-identity, etc.). Configured via AUTH_OIDC_* env vars.
+ * Keycloak, etc.). Configured via AUTH_OIDC_* env vars. Implementation
+ * will use the `openid-client` library for discovery, PKCE, and token
+ * verification, plus its own session cookie that identifyUser reads.
  *
- * NOTE: This is a stub. The full implementation will use the `openid-client`
- * library to do discovery, PKCE, and token verification. Wiring it up
- * properly comes once matt drops the sgmc-identity code in so we have a
- * concrete reference issuer to test against.
+ * Not implemented yet — sgmc-identity is the first concrete provider
+ * (see ./sgmc-identity.ts). Bringing the OIDC variant up is the path
+ * for other choirs deploying choirfriend against their own identity.
  */
 
 import type { AuthProvider, AuthUser } from '../types.ts';
@@ -17,7 +18,6 @@ export function createOidcProvider(): AuthProvider {
   const clientId = process.env.AUTH_OIDC_CLIENT_ID ?? '';
   const clientSecret = process.env.AUTH_OIDC_CLIENT_SECRET ?? '';
   const redirectUri = process.env.AUTH_OIDC_REDIRECT_URI ?? '';
-  const scopes = (process.env.AUTH_OIDC_SCOPES ?? 'openid profile email').split(/\s+/);
   const label = process.env.AUTH_OIDC_LABEL ?? 'Sign in';
 
   if (!issuer || !clientId || !clientSecret || !redirectUri) {
@@ -30,20 +30,22 @@ export function createOidcProvider(): AuthProvider {
     name: 'oidc',
     label,
 
-    async startLogin() {
+    buildLoginUrl() {
       // TODO: real PKCE flow via openid-client.
-      // Discovery: await Issuer.discover(issuer)
-      // Build authorize URL with state + nonce, persist state in session.
       void issuer;
       void clientId;
       void redirectUri;
-      void scopes;
-      throw new Error('OIDC startLogin not yet implemented — see README');
+      throw new Error('OIDC buildLoginUrl not yet implemented — see README');
     },
 
-    async handleCallback(_query): Promise<AuthUser> {
-      // TODO: exchange code for tokens, verify id_token, project to AuthUser.
+    async identifyUser(): Promise<AuthUser | null> {
+      // TODO: read our own session cookie (set in handleCallback), look up the user.
       void clientSecret;
+      return null;
+    },
+
+    async handleCallback() {
+      // TODO: exchange code, verify id_token, set session cookie, redirect.
       throw new Error('OIDC handleCallback not yet implemented — see README');
     },
   };

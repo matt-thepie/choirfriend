@@ -11,3 +11,7 @@ npm-debug.log*
 coverage/
 .idea/
 .vscode/
+
+# Per SPEC: never commit runtime data or keys.
+data/
+keys/
