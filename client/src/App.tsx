@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { PdfViewer } from '@/components/PdfViewer/index.ts';
+import { AudioPlayer } from '@/components/AudioPlayer/index.ts';
 import { PiecePicker } from '@/components/PiecePicker.tsx';
 import { usePieces } from '@/hooks/usePieces.ts';
 
@@ -19,9 +20,19 @@ export function App() {
   const [me, setMe] = useState<MeResponse | null>(null);
 
   const { pieces, loading: piecesLoading, refresh: refreshPieces } = usePieces();
+  const [pieceId, setPieceId] = useState<number | null>(null);
+
+  // Single refresh signal shared by the viewer + audio player. Both consumers
+  // of usePiece will refetch when this increments, keeping their views in sync
+  // after a file upload or delete.
+  const [pieceRefreshTick, setPieceRefreshTick] = useState(0);
+  function bumpPieceRefresh(): void {
+    setPieceRefreshTick((t) => t + 1);
+    refreshPieces();
+  }
+
   // Auto-select the most recently updated piece on first load so the user
   // doesn't stare at an empty page.
-  const [pieceId, setPieceId] = useState<number | null>(null);
   useEffect(() => {
     if (pieceId === null && pieces.length > 0) setPieceId(pieces[0]!.id);
   }, [pieces, pieceId]);
@@ -55,15 +66,24 @@ export function App() {
         </div>
       </header>
 
-      <main className="flex-1 min-h-0">
+      <main className="flex-1 min-h-0 flex flex-col">
         {pieceId === null ? (
-          <div className="h-full flex items-center justify-center">
+          <div className="flex-1 flex items-center justify-center">
             <p className="text-sm text-muted-foreground">
               {piecesLoading ? 'Loading pieces…' : 'Pick a piece, or create a new one to get started.'}
             </p>
           </div>
         ) : (
-          <PdfViewer pieceId={pieceId} onPieceMutated={refreshPieces} />
+          <>
+            <div className="flex-1 min-h-0">
+              <PdfViewer
+                pieceId={pieceId}
+                refreshTick={pieceRefreshTick}
+                onPieceMutated={bumpPieceRefresh}
+              />
+            </div>
+            <AudioPlayer pieceId={pieceId} refreshTick={pieceRefreshTick} />
+          </>
         )}
       </main>
     </div>

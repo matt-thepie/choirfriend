@@ -19,8 +19,12 @@ import { UploadButton } from './UploadButton.tsx';
 
 interface PdfViewerProps {
   pieceId: number;
-  /** Called after a file is added/removed so the parent's piece list can
-   *  refresh updated_at ordering. */
+  /** Bump from the parent to force a refetch of the piece — keeps the
+   *  viewer in sync with sibling components (e.g. AudioPlayer) after a
+   *  mutation. */
+  refreshTick?: number;
+  /** Called after this viewer adds/removes a file, so the parent can
+   *  refresh siblings + the piece list's updated_at ordering. */
   onPieceMutated?: () => void;
 }
 
@@ -42,8 +46,8 @@ const KIND_TAKES_LABEL: Record<MarkerKind, boolean> = {
   custom: true,
 };
 
-export function PdfViewer({ pieceId, onPieceMutated }: PdfViewerProps) {
-  const { piece, loading: pieceLoading, error: pieceError, refresh: refreshPiece } = usePiece(pieceId);
+export function PdfViewer({ pieceId, refreshTick = 0, onPieceMutated }: PdfViewerProps) {
+  const { piece, loading: pieceLoading, error: pieceError, refresh: refreshPiece } = usePiece(pieceId, refreshTick);
   const pdfFile = useMemo(() => piece?.files.find((f) => f.kind === 'pdf') ?? null, [piece]);
 
   function handleUploaded(): void {

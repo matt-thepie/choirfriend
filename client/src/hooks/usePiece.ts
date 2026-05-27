@@ -37,7 +37,13 @@ export interface UsePieceResult {
   refresh: () => void;
 }
 
-export function usePiece(pieceId: number | null): UsePieceResult {
+/**
+ * @param pieceId — which piece to load (null = idle).
+ * @param externalRefreshKey — when this changes, refetch. Lets a parent
+ *   component drive multiple consumers (e.g. PdfViewer + AudioPlayer) to
+ *   refetch in lockstep after a mutation like a file upload.
+ */
+export function usePiece(pieceId: number | null, externalRefreshKey = 0): UsePieceResult {
   const [piece, setPiece] = useState<Piece | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -71,7 +77,7 @@ export function usePiece(pieceId: number | null): UsePieceResult {
     return () => {
       cancelled = true;
     };
-  }, [pieceId, tick]);
+  }, [pieceId, tick, externalRefreshKey]);
 
   return { piece, loading, error, refresh };
 }
