@@ -19,6 +19,14 @@ function normalisePrefix(p: string): string {
   return trimmed === '' ? '' : `${trimmed}/`;
 }
 
+/** Parse a comma-separated list of role names. Case-normalised to lowercase. */
+function parseRoleList(s: string): string[] {
+  return s
+    .split(',')
+    .map((r) => r.trim().toLowerCase())
+    .filter((r) => r.length > 0);
+}
+
 export interface Config {
   port: number;
   nodeEnv: 'development' | 'production' | 'test';
@@ -28,6 +36,10 @@ export interface Config {
   sessionSecret: string;
   /** Where the React client lives — used for CORS + post-login redirect. */
   clientOrigin: string;
+  /** Role names that grant repertoire-admin powers. Compared case-insensitively
+   *  against the user's groups (from sgmc-identity or whichever provider).
+   *  Default suits SGMC; other choirs override with ADMIN_ROLES env var. */
+  adminRoles: readonly string[];
   b2: {
     keyId: string;
     applicationKey: string;
@@ -51,6 +63,7 @@ export function getConfig(): Config {
     databaseFile: optional('DATABASE_FILE', './data/choirfriend.db'),
     sessionSecret: required('SESSION_SECRET'),
     clientOrigin: optional('CLIENT_ORIGIN', 'http://localhost:5173'),
+    adminRoles: parseRoleList(optional('ADMIN_ROLES', 'committee,trustee,admin')),
     b2: {
       keyId: optional('B2_KEY_ID', ''),
       applicationKey: optional('B2_APPLICATION_KEY', ''),

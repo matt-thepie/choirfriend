@@ -6,6 +6,7 @@ export interface PieceSummary {
   composer: string | null;
   arranger: string | null;
   notes: string | null;
+  isCurrent: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -69,6 +70,30 @@ export async function createPiece(input: CreatePieceInput): Promise<PieceSummary
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string };
     throw new Error(body.error ?? `HTTP ${res.status}`);
+  }
+  return (await res.json()) as PieceSummary;
+}
+
+export interface UpdatePieceInput {
+  title?: string;
+  composer?: string | null;
+  arranger?: string | null;
+  notes?: string | null;
+  isCurrent?: boolean;
+}
+
+/** Admin-only on the server. Caller is responsible for hiding the UI when
+ *  the current user isn't an admin; this function reports 403s as errors. */
+export async function patchPiece(id: number, input: UpdatePieceInput): Promise<PieceSummary> {
+  const res = await fetch(`/api/pieces/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+    throw new Error(body.message ?? body.error ?? `HTTP ${res.status}`);
   }
   return (await res.json()) as PieceSummary;
 }

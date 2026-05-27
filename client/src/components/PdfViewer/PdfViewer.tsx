@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { pdfjsLib, type PDFDocumentProxy } from '@/lib/pdfjs.ts';
 import { Button } from '@/components/ui/button.tsx';
 import { cn } from '@/lib/utils.ts';
@@ -20,17 +20,19 @@ import { UploadButton } from './UploadButton.tsx';
 interface PdfViewerProps {
   pieceId: number;
   /** Bump from the parent to force a refetch of the piece — keeps the
-   *  viewer in sync with sibling components (e.g. AudioPlayer) after a
-   *  mutation. */
+   *  viewer in sync with sibling components after a mutation. */
   refreshTick?: number;
-  /** Called after this viewer adds/removes a file, so the parent can
-   *  refresh siblings + the piece list's updated_at ordering. */
+  /** Called after this viewer adds/removes a file. */
   onPieceMutated?: () => void;
+  /** Read/perform mode: minimal chrome, page-turn nav by default. The
+   *  parent (App) hides its own header when this is true. */
+  readMode?: boolean;
+  /** Called when the user exits read mode from within the viewer (e.g.
+   *  Esc, or the ✕ button on the minimal toolbar). */
+  onExitReadMode?: () => void;
 }
 
-/** Marker kinds that benefit from a free-text label. `bar` and `custom`
- *  practically require one ("Bar 24", "Letter B"); D.S./D.C. accept one
- *  to carry "al Coda" / "al Fine". The rest ignore the input. */
+/** Marker kinds that benefit from a free-text label. */
 const KIND_TAKES_LABEL: Record<MarkerKind, boolean> = {
   segno: false,
   coda: false,
@@ -46,7 +48,22 @@ const KIND_TAKES_LABEL: Record<MarkerKind, boolean> = {
   custom: true,
 };
 
-export function PdfViewer({ pieceId, refreshTick = 0, onPieceMutated }: PdfViewerProps) {
+type NavMode = 'scroll' | 'page';
+
+/** Phones are typically narrow; users will be zoomed in so scroll is the
+ *  sensible default. Tablets and desktops default to one-page-at-a-time. */
+function pickInitialNavMode(): NavMode {
+  if (typeof window === 'undefined') return 'page';
+  return window.innerWidth < 768 ? 'scroll' : 'page';
+}
+
+export function PdfViewer({
+  pieceId,
+  refreshTick = 0,
+  onPieceMutated,
+  readMode = false,
+  onExitReadMode,
+}: PdfViewerProps) {
   const { piece, loading: pieceLoading, error: pieceError, refresh: refreshPiece } = usePiece(pieceId, refreshTick);
   const pdfFile = useMemo(() => piece?.files.find((f) => f.kind === 'pdf') ?? null, [piece]);
 
@@ -67,8 +84,27 @@ export function PdfViewer({ pieceId, refreshTick = 0, onPieceMutated }: PdfViewe
   const [markerKind, setMarkerKind] = useState<MarkerKind>('segno');
   const [markerLabelInput, setMarkerLabelInput] = useState('');
   const [jumpOpen, setJumpOpen] = useState(false);
+  const [navMode, setNavMode] = useState<NavMode>(pickInitialNavMode);
+  const [currentPage, setCurrentPage] = useState(1);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+
+  // Track container dimensions so we can fit-scale in page mode.
+  const [containerSize, setContainerSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver((entries) => {
+      const rect = entries[0]?.contentRect;
+      if (rect) setContainerSize({ w: rect.width, h: rect.height });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Page 1 intrinsic viewport — needed to compute fit-scale.
+  const [intrinsicPageSize, setIntrinsicPageSize] = useState<{ w: number; h: number } | null>(null);
 
   const inkPresets: Record<AnnotationLayer, { color: string; width: number }> = {
     private: { color: '#1d4ed8', width: 2 },
@@ -83,11 +119,21 @@ export function PdfViewer({ pieceId, refreshTick = 0, onPieceMutated }: PdfViewe
     }
     let cancelled = false;
     setPdf(null);
+    setIntrinsicPageSize(null);
     setPdfLoadError(null);
     const task = pdfjsLib.getDocument(pdfFile.url);
     task.promise.then(
-      (loaded) => {
-        if (!cancelled) setPdf(loaded);
+      async (loaded) => {
+        if (cancelled) return;
+        setPdf(loaded);
+        try {
+          const p = await loaded.getPage(1);
+          if (cancelled) return;
+          const vp = p.getViewport({ scale: 1 });
+          setIntrinsicPageSize({ w: vp.width, h: vp.height });
+        } catch {
+          // non-fatal — fit-scale will fall back to 1.0
+        }
       },
       (err: Error) => {
         if (!cancelled) setPdfLoadError(err.message);
@@ -98,6 +144,72 @@ export function PdfViewer({ pieceId, refreshTick = 0, onPieceMutated }: PdfViewe
       task.destroy();
     };
   }, [pdfFile]);
+
+  // Page-turn always re-renders one page; in edit mode we always scroll.
+  const effectiveNavMode: NavMode = readMode ? navMode : 'scroll';
+
+  // Fit-to-container scale used in page mode. ~32px margin gives the page
+  // visible breathing room and prevents the tap zones from sitting on top
+  // of content.
+  const fitScale = useMemo(() => {
+    if (!intrinsicPageSize || containerSize.w === 0 || containerSize.h === 0) return scale;
+    const margin = 32;
+    const w = (containerSize.w - margin * 2) / intrinsicPageSize.w;
+    const h = (containerSize.h - margin * 2) / intrinsicPageSize.h;
+    return Math.max(0.3, Math.min(4, Math.min(w, h)));
+  }, [containerSize, intrinsicPageSize, scale]);
+
+  const effectiveScale = effectiveNavMode === 'page' ? fitScale : scale;
+
+  // Clamp currentPage when the PDF changes.
+  const pageCount = pdf?.numPages ?? 0;
+  useEffect(() => {
+    if (pageCount > 0 && currentPage > pageCount) setCurrentPage(1);
+  }, [pageCount, currentPage]);
+
+  const nextPage = useCallback(() => {
+    setCurrentPage((p) => Math.min(pageCount, p + 1));
+  }, [pageCount]);
+  const prevPage = useCallback(() => {
+    setCurrentPage((p) => Math.max(1, p - 1));
+  }, []);
+
+  // Arrow keys + PageUp/PageDown in page mode.
+  useEffect(() => {
+    if (effectiveNavMode !== 'page') return;
+    function onKey(e: KeyboardEvent): void {
+      // Don't fight inputs/selects.
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT')) {
+        return;
+      }
+      if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') {
+        nextPage();
+        e.preventDefault();
+      } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+        prevPage();
+        e.preventDefault();
+      } else if (e.key === 'Escape' && readMode && onExitReadMode) {
+        onExitReadMode();
+        e.preventDefault();
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [effectiveNavMode, nextPage, prevPage, readMode, onExitReadMode]);
+
+  // Esc exit even in scroll-read-mode.
+  useEffect(() => {
+    if (!readMode || !onExitReadMode) return;
+    function onKey(e: KeyboardEvent): void {
+      if (e.key === 'Escape') {
+        onExitReadMode!();
+        e.preventDefault();
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [readMode, onExitReadMode]);
 
   const visibleAnnotationsByPage = useMemo(() => {
     const byPage = new Map<number, Annotation[]>();
@@ -111,7 +223,6 @@ export function PdfViewer({ pieceId, refreshTick = 0, onPieceMutated }: PdfViewe
     return byPage;
   }, [annotations, showPrivate, showShared]);
 
-  /** All visible markers sorted in reading order — page asc, then y, then x. */
   const markersInOrder = useMemo((): MarkerAnnotation[] => {
     const ms: MarkerAnnotation[] = [];
     for (const a of annotations) {
@@ -153,7 +264,6 @@ export function PdfViewer({ pieceId, refreshTick = 0, onPieceMutated }: PdfViewe
       kind: 'marker',
       ...input,
     });
-    // Clear the label so the next placement doesn't accidentally reuse it.
     if (KIND_TAKES_LABEL[input.markerKind]) {
       setMarkerLabelInput('');
     }
@@ -179,161 +289,216 @@ export function PdfViewer({ pieceId, refreshTick = 0, onPieceMutated }: PdfViewe
 
   function jumpToMarker(m: MarkerAnnotation): void {
     setJumpOpen(false);
-    const root = scrollContainerRef.current;
-    if (!root) return;
-    const pageEl = root.querySelector<HTMLElement>(`[data-page="${m.page}"]`);
-    if (!pageEl) return;
-    pageEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (effectiveNavMode === 'page') {
+      // In page mode, switch to the page that contains the marker.
+      setCurrentPage(m.page);
+    } else {
+      const root = scrollContainerRef.current;
+      if (!root) return;
+      const pageEl = root.querySelector<HTMLElement>(`[data-page="${m.page}"]`);
+      if (!pageEl) return;
+      pageEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   }
 
-  const pageCount = pdf?.numPages ?? 0;
   const myAnnotationCount = annotations.filter((a) => a.isMine !== false).length;
+
+  // ------- Toolbars -------------------------------------------------------
+
+  const fullToolbar = (
+    <div className="px-4 py-2 flex flex-wrap items-center gap-2">
+      {piece && <h2 className="text-sm font-semibold mr-2">{piece.title}</h2>}
+      {pieceLoading && <span className="text-xs text-muted-foreground">Loading piece…</span>}
+      {pieceError && <span className="text-xs text-destructive">Piece error: {pieceError}</span>}
+
+      <UploadButton pieceId={pieceId} onUploaded={handleUploaded} />
+
+      <div className="h-6 w-px bg-border mx-1" />
+
+      <div className="flex items-center rounded-md border border-border overflow-hidden">
+        <ToolButton active={tool === 'pan'} onClick={() => setTool('pan')}>Pan</ToolButton>
+        <ToolButton active={tool === 'pen'} onClick={() => setTool('pen')}>Pen</ToolButton>
+        <ToolButton active={tool === 'marker'} onClick={() => setTool('marker')}>Marker</ToolButton>
+      </div>
+
+      <div
+        className={cn(
+          'flex items-center rounded-md border border-border overflow-hidden',
+          tool === 'pan' && 'opacity-50',
+        )}
+      >
+        <ToolButton active={drawTarget === 'private'} onClick={() => setDrawTarget('private')}>
+          <span className="inline-block w-2 h-2 rounded-full mr-1.5" style={{ background: inkPresets.private.color }} />
+          Private
+        </ToolButton>
+        <ToolButton active={drawTarget === 'shared'} onClick={() => setDrawTarget('shared')}>
+          <span className="inline-block w-2 h-2 rounded-full mr-1.5" style={{ background: inkPresets.shared.color }} />
+          Shared
+        </ToolButton>
+      </div>
+
+      {tool === 'marker' && (
+        <>
+          <select
+            value={markerKind}
+            onChange={(e) => setMarkerKind(e.target.value as MarkerKind)}
+            className="text-xs h-8 px-2 rounded-md border border-border bg-background"
+          >
+            {MARKER_KIND_ORDER.map((k) => (
+              <option key={k} value={k}>
+                {MARKER_PICKER_LABEL[k]}
+              </option>
+            ))}
+          </select>
+          {KIND_TAKES_LABEL[markerKind] && (
+            <input
+              type="text"
+              value={markerLabelInput}
+              onChange={(e) => setMarkerLabelInput(e.target.value)}
+              placeholder={
+                markerKind === 'bar' ? 'e.g. "Bar 24" or "Letter B"' :
+                markerKind === 'custom' ? 'Label' :
+                'e.g. "al Coda"'
+              }
+              className="text-xs h-8 px-2 rounded-md border border-border bg-background w-44"
+            />
+          )}
+        </>
+      )}
+
+      <div className="h-6 w-px bg-border mx-1" />
+
+      <label className="text-xs flex items-center gap-1 select-none cursor-pointer">
+        <input type="checkbox" checked={showPrivate} onChange={(e) => setShowPrivate(e.target.checked)} />
+        Show private
+      </label>
+      <label className="text-xs flex items-center gap-1 select-none cursor-pointer">
+        <input type="checkbox" checked={showShared} onChange={(e) => setShowShared(e.target.checked)} />
+        Show shared
+      </label>
+
+      <div className="h-6 w-px bg-border mx-1" />
+
+      <ZoomControls scale={scale} onScale={setScale} />
+
+      <div className="ml-auto flex items-center gap-2">
+        <JumpToDropdown
+          markers={markersInOrder}
+          open={jumpOpen}
+          onOpenChange={setJumpOpen}
+          onJump={jumpToMarker}
+        />
+        <span className="text-xs text-muted-foreground">
+          {annotationsLoading ? 'Loading…' : `${annotations.length} mark${annotations.length === 1 ? '' : 's'}`}
+        </span>
+        <Button size="sm" variant="ghost" onClick={handleUndo} disabled={myAnnotationCount === 0}>
+          Undo mine
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => handleClearMine(drawTarget)} disabled={myAnnotationCount === 0}>
+          Clear my {drawTarget}
+        </Button>
+      </div>
+    </div>
+  );
+
+  /** Read-mode toolbar. Only what you'd want while singing:
+   *    pen on/off, layer, page nav (page mode), zoom (scroll mode), jump-to, scroll/pages toggle, exit. */
+  const minimalToolbar = (
+    <div className="px-3 py-1.5 flex flex-wrap items-center gap-2">
+      {piece && <h2 className="text-sm font-semibold mr-1 truncate max-w-[12rem]" title={piece.title}>{piece.title}</h2>}
+
+      <div className="flex items-center rounded-md border border-border overflow-hidden">
+        <ToolButton active={tool === 'pan'} onClick={() => setTool('pan')}>Look</ToolButton>
+        <ToolButton active={tool === 'pen'} onClick={() => setTool('pen')}>Pen</ToolButton>
+      </div>
+
+      {tool === 'pen' && (
+        <div className="flex items-center rounded-md border border-border overflow-hidden">
+          <ToolButton active={drawTarget === 'private'} onClick={() => setDrawTarget('private')}>
+            <span className="inline-block w-2 h-2 rounded-full mr-1.5" style={{ background: inkPresets.private.color }} />
+            Private
+          </ToolButton>
+          <ToolButton active={drawTarget === 'shared'} onClick={() => setDrawTarget('shared')}>
+            <span className="inline-block w-2 h-2 rounded-full mr-1.5" style={{ background: inkPresets.shared.color }} />
+            Shared
+          </ToolButton>
+        </div>
+      )}
+
+      <div className="h-5 w-px bg-border mx-1" />
+
+      {/* Scroll / Pages toggle */}
+      <div className="flex items-center rounded-md border border-border overflow-hidden">
+        <ToolButton active={navMode === 'scroll'} onClick={() => setNavMode('scroll')}>Scroll</ToolButton>
+        <ToolButton active={navMode === 'page'} onClick={() => setNavMode('page')}>Pages</ToolButton>
+      </div>
+
+      {effectiveNavMode === 'page' && pageCount > 0 && (
+        <>
+          <Button size="sm" variant="outline" onClick={prevPage} disabled={currentPage <= 1} aria-label="Previous page">◀</Button>
+          <span className="text-xs tabular-nums w-14 text-center">{currentPage} / {pageCount}</span>
+          <Button size="sm" variant="outline" onClick={nextPage} disabled={currentPage >= pageCount} aria-label="Next page">▶</Button>
+        </>
+      )}
+
+      {effectiveNavMode === 'scroll' && <ZoomControls scale={scale} onScale={setScale} />}
+
+      <div className="ml-auto flex items-center gap-2">
+        <JumpToDropdown
+          markers={markersInOrder}
+          open={jumpOpen}
+          onOpenChange={setJumpOpen}
+          onJump={jumpToMarker}
+        />
+        {onExitReadMode && (
+          <button
+            type="button"
+            onClick={onExitReadMode}
+            aria-label="Exit read mode"
+            className="inline-flex items-center gap-1 h-9 px-3 rounded-md bg-primary text-primary-foreground font-medium text-xs hover:opacity-90 active:opacity-80"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden>
+              <path d="M6 6 18 18" />
+              <path d="M18 6 6 18" />
+            </svg>
+            Exit
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
+  // ------- Render --------------------------------------------------------
 
   return (
     <div className="flex flex-col h-full">
       <header className="sticky top-0 z-10 bg-background/95 backdrop-blur border-b border-border">
-        <div className="px-4 py-2 flex flex-wrap items-center gap-2">
-          {piece && <h2 className="text-sm font-semibold mr-2">{piece.title}</h2>}
-          {pieceLoading && <span className="text-xs text-muted-foreground">Loading piece…</span>}
-          {pieceError && <span className="text-xs text-destructive">Piece error: {pieceError}</span>}
-
-          <UploadButton pieceId={pieceId} onUploaded={handleUploaded} />
-
-          <div className="h-6 w-px bg-border mx-1" />
-
-          <div className="flex items-center rounded-md border border-border overflow-hidden">
-            <ToolButton active={tool === 'pan'} onClick={() => setTool('pan')}>Pan</ToolButton>
-            <ToolButton active={tool === 'pen'} onClick={() => setTool('pen')}>Pen</ToolButton>
-            <ToolButton active={tool === 'marker'} onClick={() => setTool('marker')}>Marker</ToolButton>
-          </div>
-
-          <div
-            className={cn(
-              'flex items-center rounded-md border border-border overflow-hidden',
-              tool === 'pan' && 'opacity-50',
-            )}
-          >
-            <ToolButton active={drawTarget === 'private'} onClick={() => setDrawTarget('private')}>
-              <span className="inline-block w-2 h-2 rounded-full mr-1.5" style={{ background: inkPresets.private.color }} />
-              Private
-            </ToolButton>
-            <ToolButton active={drawTarget === 'shared'} onClick={() => setDrawTarget('shared')}>
-              <span className="inline-block w-2 h-2 rounded-full mr-1.5" style={{ background: inkPresets.shared.color }} />
-              Shared
-            </ToolButton>
-          </div>
-
-          {tool === 'marker' && (
-            <>
-              <select
-                value={markerKind}
-                onChange={(e) => setMarkerKind(e.target.value as MarkerKind)}
-                className="text-xs h-8 px-2 rounded-md border border-border bg-background"
-              >
-                {MARKER_KIND_ORDER.map((k) => (
-                  <option key={k} value={k}>
-                    {MARKER_PICKER_LABEL[k]}
-                  </option>
-                ))}
-              </select>
-              {KIND_TAKES_LABEL[markerKind] && (
-                <input
-                  type="text"
-                  value={markerLabelInput}
-                  onChange={(e) => setMarkerLabelInput(e.target.value)}
-                  placeholder={
-                    markerKind === 'bar' ? 'e.g. "Bar 24" or "Letter B"' :
-                    markerKind === 'custom' ? 'Label' :
-                    'e.g. "al Coda"'
-                  }
-                  className="text-xs h-8 px-2 rounded-md border border-border bg-background w-44"
-                />
-              )}
-            </>
-          )}
-
-          <div className="h-6 w-px bg-border mx-1" />
-
-          <label className="text-xs flex items-center gap-1 select-none cursor-pointer">
-            <input type="checkbox" checked={showPrivate} onChange={(e) => setShowPrivate(e.target.checked)} />
-            Show private
-          </label>
-          <label className="text-xs flex items-center gap-1 select-none cursor-pointer">
-            <input type="checkbox" checked={showShared} onChange={(e) => setShowShared(e.target.checked)} />
-            Show shared
-          </label>
-
-          <div className="h-6 w-px bg-border mx-1" />
-
-          <div className="flex items-center gap-1">
-            <Button size="sm" variant="outline" onClick={() => setScale((s) => Math.max(0.5, s - 0.1))}>−</Button>
-            <span className="text-xs tabular-nums w-12 text-center">{Math.round(scale * 100)}%</span>
-            <Button size="sm" variant="outline" onClick={() => setScale((s) => Math.min(3, s + 0.1))}>+</Button>
-          </div>
-
-          <div className="ml-auto flex items-center gap-2">
-            <div className="relative">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setJumpOpen((o) => !o)}
-                disabled={markersInOrder.length === 0}
-              >
-                Jump to ▾ ({markersInOrder.length})
-              </Button>
-              {jumpOpen && markersInOrder.length > 0 && (
-                <div className="absolute right-0 top-full mt-1 bg-background border border-border rounded-md shadow-lg z-30 max-h-72 overflow-auto min-w-48">
-                  {markersInOrder.map((m) => (
-                    <button
-                      key={m.id}
-                      type="button"
-                      className="block w-full text-left px-3 py-1.5 text-xs hover:bg-accent"
-                      onClick={() => jumpToMarker(m)}
-                    >
-                      <span className="font-mono mr-2">p.{m.page}</span>
-                      <span className="font-semibold">{markerLabel(m)}</span>
-                      {m.label && m.markerKind !== 'bar' && m.markerKind !== 'custom' && (
-                        <span className="ml-2 text-muted-foreground">{m.label}</span>
-                      )}
-                      <span className={cn('ml-2 text-[10px] uppercase', m.layer === 'shared' ? 'text-amber-700' : 'text-blue-700')}>
-                        {m.layer}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-            <span className="text-xs text-muted-foreground">
-              {annotationsLoading ? 'Loading…' : `${annotations.length} mark${annotations.length === 1 ? '' : 's'}`}
-            </span>
-            <Button size="sm" variant="ghost" onClick={handleUndo} disabled={myAnnotationCount === 0}>
-              Undo mine
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => handleClearMine(drawTarget)} disabled={myAnnotationCount === 0}>
-              Clear my {drawTarget}
-            </Button>
-          </div>
-        </div>
+        {readMode ? minimalToolbar : fullToolbar}
         {annotationsError && (
           <div className="px-4 pb-2 text-xs text-destructive">Annotation sync issue: {annotationsError}</div>
         )}
       </header>
 
-      <div ref={scrollContainerRef} className="flex-1 overflow-auto bg-muted/40">
-        <div className="flex flex-col items-center gap-6 py-6 pl-12 pr-6">
-          {pieceLoading && <p className="text-sm text-muted-foreground">Loading piece…</p>}
-          {!pieceLoading && !pdfFile && <p className="text-sm text-muted-foreground">No PDF in this piece yet.</p>}
-          {pdfLoadError && <p className="text-sm text-destructive">Failed to load PDF: {pdfLoadError}</p>}
-          {pdfFile && !pdf && !pdfLoadError && <p className="text-sm text-muted-foreground">Loading PDF…</p>}
+      <div ref={stageRef} className="flex-1 relative min-h-0">
+        <div ref={scrollContainerRef} className="absolute inset-0 overflow-auto bg-muted/40">
+          <div
+            className={cn(
+              'flex flex-col items-center gap-6',
+              effectiveNavMode === 'page' ? 'py-4 px-4 justify-center min-h-full' : 'py-6 pl-12 pr-6',
+            )}
+          >
+            {pieceLoading && <p className="text-sm text-muted-foreground">Loading piece…</p>}
+            {!pieceLoading && !pdfFile && <p className="text-sm text-muted-foreground">No PDF in this piece yet.</p>}
+            {pdfLoadError && <p className="text-sm text-destructive">Failed to load PDF: {pdfLoadError}</p>}
+            {pdfFile && !pdf && !pdfLoadError && <p className="text-sm text-muted-foreground">Loading PDF…</p>}
 
-          {pdf &&
-            Array.from({ length: pageCount }, (_, i) => i + 1).map((pageNumber) => (
+            {pdf && effectiveNavMode === 'page' && currentPage >= 1 && currentPage <= pageCount && (
               <PdfPage
-                key={pageNumber}
+                key={`page-${currentPage}`}
                 pdf={pdf}
-                pageNumber={pageNumber}
-                scale={scale}
-                annotations={visibleAnnotationsByPage.get(pageNumber) ?? []}
+                pageNumber={currentPage}
+                scale={effectiveScale}
+                annotations={visibleAnnotationsByPage.get(currentPage) ?? []}
                 drawTarget={tool === 'pan' ? null : drawTarget}
                 tool={tool}
                 inkColor={activeInk.color}
@@ -344,8 +509,53 @@ export function PdfViewer({ pieceId, refreshTick = 0, onPieceMutated }: PdfViewe
                 onMarkerPlaced={handleMarkerPlaced}
                 onDeleteAnnotation={(id) => void remove(id)}
               />
-            ))}
+            )}
+
+            {pdf && effectiveNavMode === 'scroll' &&
+              Array.from({ length: pageCount }, (_, i) => i + 1).map((pageNumber) => (
+                <PdfPage
+                  key={pageNumber}
+                  pdf={pdf}
+                  pageNumber={pageNumber}
+                  scale={effectiveScale}
+                  annotations={visibleAnnotationsByPage.get(pageNumber) ?? []}
+                  drawTarget={tool === 'pan' ? null : drawTarget}
+                  tool={tool}
+                  inkColor={activeInk.color}
+                  inkWidth={activeInk.width}
+                  markerKind={tool === 'marker' ? markerKind : null}
+                  markerLabelInput={markerLabelInput}
+                  onStrokeFinished={handleStrokeFinished}
+                  onMarkerPlaced={handleMarkerPlaced}
+                  onDeleteAnnotation={(id) => void remove(id)}
+                />
+              ))}
+          </div>
         </div>
+
+        {/* Edge tap zones for page-turn nav. Narrow so the middle of the
+            page is free for pen strokes. Disabled while marker tool is
+            active so a placement at the page edge doesn't trigger a flip. */}
+        {effectiveNavMode === 'page' && pageCount > 0 && tool !== 'marker' && (
+          <>
+            <button
+              type="button"
+              aria-label="Previous page"
+              onClick={prevPage}
+              disabled={currentPage <= 1}
+              className="absolute left-0 top-0 bottom-0 w-16 z-10 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-black/5 focus-visible:bg-black/10 transition-colors"
+              style={{ cursor: currentPage > 1 ? 'w-resize' : 'not-allowed' }}
+            />
+            <button
+              type="button"
+              aria-label="Next page"
+              onClick={nextPage}
+              disabled={currentPage >= pageCount}
+              className="absolute right-0 top-0 bottom-0 w-16 z-10 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-black/5 focus-visible:bg-black/10 transition-colors"
+              style={{ cursor: currentPage < pageCount ? 'e-resize' : 'not-allowed' }}
+            />
+          </>
+        )}
       </div>
     </div>
   );
@@ -371,5 +581,58 @@ function ToolButton({
     >
       {children}
     </button>
+  );
+}
+
+function ZoomControls({ scale, onScale }: { scale: number; onScale: (s: number) => void }) {
+  return (
+    <div className="flex items-center gap-1">
+      <Button size="sm" variant="outline" onClick={() => onScale(Math.max(0.5, scale - 0.1))}>−</Button>
+      <span className="text-xs tabular-nums w-12 text-center">{Math.round(scale * 100)}%</span>
+      <Button size="sm" variant="outline" onClick={() => onScale(Math.min(3, scale + 0.1))}>+</Button>
+    </div>
+  );
+}
+
+interface JumpToDropdownProps {
+  markers: MarkerAnnotation[];
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onJump: (m: MarkerAnnotation) => void;
+}
+
+function JumpToDropdown({ markers, open, onOpenChange, onJump }: JumpToDropdownProps) {
+  return (
+    <div className="relative">
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={() => onOpenChange(!open)}
+        disabled={markers.length === 0}
+      >
+        Jump to ▾ ({markers.length})
+      </Button>
+      {open && markers.length > 0 && (
+        <div className="absolute right-0 top-full mt-1 bg-background border border-border rounded-md shadow-lg z-30 max-h-72 overflow-auto min-w-48">
+          {markers.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              className="block w-full text-left px-3 py-1.5 text-xs hover:bg-accent"
+              onClick={() => onJump(m)}
+            >
+              <span className="font-mono mr-2">p.{m.page}</span>
+              <span className="font-semibold">{markerLabel(m)}</span>
+              {m.label && m.markerKind !== 'bar' && m.markerKind !== 'custom' && (
+                <span className="ml-2 text-muted-foreground">{m.label}</span>
+              )}
+              <span className={cn('ml-2 text-[10px] uppercase', m.layer === 'shared' ? 'text-amber-700' : 'text-blue-700')}>
+                {m.layer}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

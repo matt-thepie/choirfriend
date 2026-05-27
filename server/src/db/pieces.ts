@@ -13,6 +13,7 @@ export interface PieceRow {
   composer: string | null;
   arranger: string | null;
   notes: string | null;
+  is_current: number; // 0 | 1 — SQLite stores booleans as integers
   created_at: number;
   updated_at: number;
 }
@@ -38,6 +39,7 @@ export interface PieceDTO {
   composer: string | null;
   arranger: string | null;
   notes: string | null;
+  isCurrent: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -68,6 +70,7 @@ function toPieceDTO(row: PieceRow): PieceDTO {
     composer: row.composer,
     arranger: row.arranger,
     notes: row.notes,
+    isCurrent: row.is_current === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -101,7 +104,7 @@ function toFileDTO(row: FileRow): FileDTO {
 }
 
 const listPiecesStmt = db.prepare(`
-  SELECT * FROM pieces ORDER BY updated_at DESC, id DESC
+  SELECT * FROM pieces ORDER BY title COLLATE NOCASE, id
 `);
 const getPieceStmt = db.prepare(`SELECT * FROM pieces WHERE id = ?`);
 const listFilesForPieceStmt = db.prepare(`
@@ -152,6 +155,56 @@ export function createPiece(input: CreatePieceInput): PieceDTO {
     input.notes ?? null,
   ) as PieceRow;
   return toPieceDTO(row);
+}
+
+export interface UpdatePieceInput {
+  title?: string;
+  composer?: string | null;
+  arranger?: string | null;
+  notes?: string | null;
+  isCurrent?: boolean;
+}
+
+/**
+ * Patch a piece. Only the provided fields are updated; everything else is
+ * left alone. Always bumps updated_at. Returns null if the id doesn't exist.
+ */
+export function updatePiece(id: number, input: UpdatePieceInput): PieceDTO | null {
+  const sets: string[] = [];
+  const params: Array<string | number | null> = [];
+
+  if (input.title !== undefined) {
+    sets.push('title = ?');
+    params.push(input.title);
+  }
+  if (input.composer !== undefined) {
+    sets.push('composer = ?');
+    params.push(input.composer);
+  }
+  if (input.arranger !== undefined) {
+    sets.push('arranger = ?');
+    params.push(input.arranger);
+  }
+  if (input.notes !== undefined) {
+    sets.push('notes = ?');
+    params.push(input.notes);
+  }
+  if (input.isCurrent !== undefined) {
+    sets.push('is_current = ?');
+    params.push(input.isCurrent ? 1 : 0);
+  }
+
+  if (sets.length === 0) {
+    // Nothing to change — just return the current row.
+    return (getPieceStmt.get(id) as PieceRow | undefined) ? toPieceDTO(getPieceStmt.get(id) as PieceRow) : null;
+  }
+
+  sets.push('updated_at = unixepoch()');
+  const sql = `UPDATE pieces SET ${sets.join(', ')} WHERE id = ? RETURNING *`;
+  params.push(id);
+
+  const row = db.prepare(sql).get(...params) as PieceRow | undefined;
+  return row ? toPieceDTO(row) : null;
 }
 
 export interface CreateFileInput {

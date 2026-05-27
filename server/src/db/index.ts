@@ -22,6 +22,19 @@ db.exec('PRAGMA journal_mode = WAL');
 db.exec('PRAGMA foreign_keys = ON');
 db.exec('PRAGMA busy_timeout = 5000');
 
+/**
+ * Add a column if it isn't already present. SQLite can't `ALTER TABLE ADD
+ * COLUMN IF NOT EXISTS`, so we inspect PRAGMA table_info first. This keeps
+ * the schema additive without a migrations runner — fine until we need a
+ * destructive change.
+ */
+function addColumnIfMissing(table: string, columnDef: string): void {
+  const columnName = columnDef.trim().split(/\s+/)[0]!;
+  const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  if (rows.some((r) => r.name === columnName)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${columnDef}`);
+}
+
 // --- Schema ----------------------------------------------------------------
 
 db.exec(`
@@ -42,6 +55,9 @@ db.exec(`
     composer TEXT,
     arranger TEXT,
     notes TEXT,
+    -- Current repertoire vs archive. 1 = current (default), 0 = archived.
+    -- Choristers see current by default; archive is opt-in.
+    is_current INTEGER NOT NULL DEFAULT 1,
     created_at INTEGER NOT NULL DEFAULT (unixepoch()),
     updated_at INTEGER NOT NULL DEFAULT (unixepoch())
   );
@@ -89,6 +105,11 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_annotations_lookup ON annotations(piece_id, file_id, page, layer);
   CREATE INDEX IF NOT EXISTS idx_annotations_user ON annotations(user_id);
 `);
+
+// Additive migrations for tables that may have existed before a column was added.
+// Existing pieces (the seeded sample, anything created before this change) default
+// to is_current = 1, which is the "current repertoire" state. Admins can flip later.
+addColumnIfMissing('pieces', 'is_current INTEGER NOT NULL DEFAULT 1');
 
 // --- User upsert (used by auth middleware) --------------------------------
 

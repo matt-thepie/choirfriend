@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { getProvider, listProviders } from './index.ts';
-import { requireAuth, resolveUser } from './middleware.ts';
+import { isAdmin, requireAuth, resolveUser } from './middleware.ts';
 import { getConfig } from '../config.ts';
 
 export const authRoutes: FastifyPluginAsync = async (app) => {
@@ -67,6 +67,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       email: user.email,
       displayName: user.displayName,
       groups: user.groups,
+      isAdmin: isAdmin(user),
     };
   });
 
