@@ -16,6 +16,9 @@ export interface PieceFile {
   sortOrder: number;
   url: string;
   createdAt: number;
+  createdByUserId: number | null;
+  /** Uploader's display name, or null for seeded/legacy files. */
+  createdByName: string | null;
 }
 
 export interface Piece {

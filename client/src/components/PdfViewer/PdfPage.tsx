@@ -29,6 +29,8 @@ interface PdfPageProps {
   onStrokeFinished: (input: { layer: AnnotationLayer; page: number; color: string; width: number; points: Array<{ x: number; y: number }> }) => void;
   onMarkerPlaced: (input: { layer: AnnotationLayer; page: number; markerKind: MarkerKind; label: string | null; position: { x: number; y: number } }) => void;
   onDeleteAnnotation: (id: string) => void;
+  /** Resolves a marker's "follow" action (e.g. D.S. → Segno), or null. */
+  markerFollow?: (m: MarkerAnnotation) => { label: string; run: () => void } | null;
 }
 
 /**
@@ -53,6 +55,7 @@ export function PdfPage({
   onStrokeFinished,
   onMarkerPlaced,
   onDeleteAnnotation,
+  markerFollow,
 }: PdfPageProps) {
   const pdfCanvasRef = useRef<HTMLCanvasElement>(null);
   const annotationCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -221,6 +224,7 @@ export function PdfPage({
               pageWidth={renderedSize.width}
               pageHeight={renderedSize.height}
               interactive={tool === 'pan'}
+              follow={markerFollow?.(m) ?? null}
               onDelete={onDeleteAnnotation}
             />
           ))}

@@ -111,6 +111,12 @@ db.exec(`
 // to is_current = 1, which is the "current repertoire" state. Admins can flip later.
 addColumnIfMissing('pieces', 'is_current INTEGER NOT NULL DEFAULT 1');
 
+// Attribution for uploads — who added this file. Nullable: the seeded sample
+// and anything uploaded before this column existed have no recorded creator.
+// No ON DELETE behaviour (SQLite can't add FK constraints via ALTER anyway):
+// if a user is removed we keep the orphaned id rather than nulling history.
+addColumnIfMissing('files', 'created_by_user_id INTEGER REFERENCES users(id)');
+
 // --- User upsert (used by auth middleware) --------------------------------
 
 const upsertStmt = db.prepare(`

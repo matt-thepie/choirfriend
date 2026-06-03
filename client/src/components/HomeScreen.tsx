@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button.tsx';
-import { cn } from '@/lib/utils.ts';
 import { createPiece, patchPiece, type PieceSummary } from '@/hooks/usePieces.ts';
 
 interface HomeScreenProps {
@@ -9,19 +8,25 @@ interface HomeScreenProps {
   isAdmin: boolean;
   onOpenPiece: (id: number) => void;
   onPieceMutated: () => void;
+  /** Admin only — open the bulk importer. Undefined hides the button. */
+  onImport?: () => void;
 }
 
 /**
  * The app's landing page. Choristers find a piece here, then click into the
- * viewer. Defaults to "current repertoire only"; the archive toggle reveals
- * older material (useful when the MD calls one back at the last minute).
+ * viewer.
  *
- * Admins (per ADMIN_ROLES) see a small inline toggle on each row to flip a
- * piece between current and archive.
+ * Two always-visible lists, split by each piece's `is_current` flag:
+ *   - "Active repertoire" — the songs we're currently practising.
+ *   - "All other songs"   — everything else. Still fully visible and
+ *                           searchable; nothing is hidden behind a toggle.
+ *
+ * The search box filters both lists at once. Admins (per ADMIN_ROLES) get a
+ * per-row button to move a song between the two: "Add to repertoire" /
+ * "Remove from repertoire".
  */
-export function HomeScreen({ pieces, loading, isAdmin, onOpenPiece, onPieceMutated }: HomeScreenProps) {
+export function HomeScreen({ pieces, loading, isAdmin, onOpenPiece, onPieceMutated, onImport }: HomeScreenProps) {
   const [query, setQuery] = useState('');
-  const [showArchive, setShowArchive] = useState(false);
   const [creating, setCreating] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newComposer, setNewComposer] = useState('');
@@ -29,18 +34,25 @@ export function HomeScreen({ pieces, loading, isAdmin, onOpenPiece, onPieceMutat
   const [createSubmitting, setCreateSubmitting] = useState(false);
   const [busyPieceId, setBusyPieceId] = useState<number | null>(null);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return pieces.filter((p) => {
-      if (!showArchive && !p.isCurrent) return false;
-      if (q === '') return true;
-      const haystack = `${p.title} ${p.composer ?? ''} ${p.arranger ?? ''}`.toLowerCase();
-      return haystack.includes(q);
-    });
-  }, [pieces, query, showArchive]);
+  const q = query.trim().toLowerCase();
+  const searching = q !== '';
 
-  const currentCount = pieces.filter((p) => p.isCurrent).length;
-  const archiveCount = pieces.length - currentCount;
+  const { active, others, activeTotal, othersTotal } = useMemo(() => {
+    const matches = (p: PieceSummary): boolean => {
+      if (!searching) return true;
+      return `${p.title} ${p.composer ?? ''} ${p.arranger ?? ''}`.toLowerCase().includes(q);
+    };
+    const activeAll = pieces.filter((p) => p.isCurrent);
+    const othersAll = pieces.filter((p) => !p.isCurrent);
+    return {
+      active: activeAll.filter(matches),
+      others: othersAll.filter(matches),
+      activeTotal: activeAll.length,
+      othersTotal: othersAll.length,
+    };
+  }, [pieces, q, searching]);
+
+  const noMatches = searching && active.length === 0 && others.length === 0;
 
   async function handleCreate(e: React.FormEvent): Promise<void> {
     e.preventDefault();
@@ -64,14 +76,15 @@ export function HomeScreen({ pieces, loading, isAdmin, onOpenPiece, onPieceMutat
     }
   }
 
-  async function handleToggleArchived(p: PieceSummary): Promise<void> {
+  /** Move a song into or out of the active repertoire. */
+  async function handleToggleRepertoire(p: PieceSummary): Promise<void> {
     if (busyPieceId === p.id) return;
     setBusyPieceId(p.id);
     try {
       await patchPiece(p.id, { isCurrent: !p.isCurrent });
       onPieceMutated();
     } catch (e) {
-      console.error('[home] toggle failed:', e);
+      console.error('[home] repertoire toggle failed:', e);
     } finally {
       setBusyPieceId(null);
     }
@@ -84,7 +97,7 @@ export function HomeScreen({ pieces, loading, isAdmin, onOpenPiece, onPieceMutat
           <div className="flex flex-wrap items-end gap-3">
             <div className="flex-1 min-w-48">
               <label htmlFor="repertoire-search" className="block text-xs text-muted-foreground mb-1">
-                Search repertoire
+                Search songs
               </label>
               <input
                 id="repertoire-search"
@@ -96,18 +109,14 @@ export function HomeScreen({ pieces, loading, isAdmin, onOpenPiece, onPieceMutat
                 className="w-full h-10 px-3 rounded-md border border-border bg-background text-sm"
               />
             </div>
-            <label className="text-xs flex items-center gap-1.5 select-none cursor-pointer h-10 px-3 rounded-md border border-border bg-background">
-              <input
-                type="checkbox"
-                checked={showArchive}
-                onChange={(e) => setShowArchive(e.target.checked)}
-              />
-              Show archive
-              {archiveCount > 0 && <span className="text-muted-foreground">({archiveCount})</span>}
-            </label>
             {!creating && isAdmin && (
               <Button size="md" variant="outline" onClick={() => setCreating(true)}>
-                + New piece
+                + New song
+              </Button>
+            )}
+            {!creating && isAdmin && onImport && (
+              <Button size="md" variant="outline" onClick={onImport}>
+                Import files
               </Button>
             )}
           </div>
@@ -155,79 +164,139 @@ export function HomeScreen({ pieces, loading, isAdmin, onOpenPiece, onPieceMutat
           )}
         </section>
 
-        <section className="space-y-1">
-          <div className="flex items-baseline justify-between mb-2">
-            <h2 className="text-sm font-semibold">
-              {showArchive ? 'All pieces' : 'Current repertoire'}
-              <span className="text-muted-foreground font-normal ml-2">
-                {loading ? '' : `(${filtered.length}${filtered.length !== pieces.length ? ` of ${pieces.length}` : ''})`}
-              </span>
-            </h2>
-            {!showArchive && (
-              <span className="text-xs text-muted-foreground">{currentCount} current</span>
+        {loading && pieces.length === 0 && (
+          <p className="text-sm text-muted-foreground">Loading songs…</p>
+        )}
+
+        {!loading && pieces.length === 0 && (
+          <p className="text-sm text-muted-foreground">
+            {isAdmin ? (
+              <>No songs yet. Use <strong>New song</strong> to add one, then drop a PDF and learning tracks into it.</>
+            ) : (
+              'No songs yet. Ask an admin to add some.'
             )}
-          </div>
+          </p>
+        )}
 
-          {loading && filtered.length === 0 && (
-            <p className="text-sm text-muted-foreground">Loading pieces…</p>
-          )}
-          {!loading && filtered.length === 0 && pieces.length === 0 && (
-            <p className="text-sm text-muted-foreground">
-              {isAdmin
-                ? <>No pieces yet. Use <strong>New piece</strong> to create one, then drop a PDF and learning tracks into it.</>
-                : 'No pieces yet. Ask an admin to add repertoire.'}
-            </p>
-          )}
-          {!loading && filtered.length === 0 && pieces.length > 0 && (
-            <p className="text-sm text-muted-foreground">
-              No matches. {query ? 'Try a different search,' : ''} {!showArchive && 'tick "Show archive"'} {query && !showArchive && 'or'} {query && 'clear the search'}.
-            </p>
-          )}
+        {noMatches && (
+          <p className="text-sm text-muted-foreground">No songs match “{query.trim()}”.</p>
+        )}
 
-          <ul className="divide-y divide-border rounded-md border border-border bg-background overflow-hidden">
-            {filtered.map((p) => (
-              <li
-                key={p.id}
-                className={cn(
-                  'flex items-center gap-3 px-4 py-3 hover:bg-accent/40 cursor-pointer',
-                  !p.isCurrent && 'opacity-60',
-                )}
-                onClick={() => onOpenPiece(p.id)}
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium truncate">{p.title}</div>
-                  {(p.composer || p.arranger) && (
-                    <div className="text-xs text-muted-foreground truncate">
-                      {[p.composer, p.arranger ? `arr. ${p.arranger}` : null].filter(Boolean).join(' · ')}
-                    </div>
-                  )}
-                </div>
-                {!p.isCurrent && (
-                  <span className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-                    archive
-                  </span>
-                )}
-                {isAdmin && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    disabled={busyPieceId === p.id}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void handleToggleArchived(p);
-                    }}
-                  >
-                    {p.isCurrent ? 'Archive' : 'Restore'}
-                  </Button>
-                )}
-                <span className="text-muted-foreground" aria-hidden>
-                  ›
-                </span>
-              </li>
-            ))}
-          </ul>
-        </section>
+        {pieces.length > 0 && !noMatches && (
+          <>
+            <PieceSection
+              title="Active repertoire"
+              shown={active.length}
+              total={activeTotal}
+              searching={searching}
+              pieces={active}
+              isAdmin={isAdmin}
+              busyPieceId={busyPieceId}
+              actionLabel="Remove from repertoire"
+              emptyText={searching ? null : 'Nothing being practised right now.'}
+              onOpenPiece={onOpenPiece}
+              onToggleRepertoire={handleToggleRepertoire}
+            />
+            <PieceSection
+              title="All other songs"
+              shown={others.length}
+              total={othersTotal}
+              searching={searching}
+              pieces={others}
+              isAdmin={isAdmin}
+              busyPieceId={busyPieceId}
+              actionLabel="Add to repertoire"
+              emptyText={searching || othersTotal > 0 ? null : 'Every song is in the active repertoire.'}
+              onOpenPiece={onOpenPiece}
+              onToggleRepertoire={handleToggleRepertoire}
+            />
+          </>
+        )}
       </div>
     </div>
+  );
+}
+
+interface PieceSectionProps {
+  title: string;
+  shown: number;
+  total: number;
+  searching: boolean;
+  pieces: PieceSummary[];
+  isAdmin: boolean;
+  busyPieceId: number | null;
+  /** Label for the per-row admin button that moves a song between lists. */
+  actionLabel: string;
+  /** Shown in place of the list when there are no pieces; null = render nothing. */
+  emptyText: string | null;
+  onOpenPiece: (id: number) => void;
+  onToggleRepertoire: (p: PieceSummary) => void;
+}
+
+function PieceSection({
+  title,
+  shown,
+  total,
+  searching,
+  pieces,
+  isAdmin,
+  busyPieceId,
+  actionLabel,
+  emptyText,
+  onOpenPiece,
+  onToggleRepertoire,
+}: PieceSectionProps) {
+  // While searching, a section with no matches just disappears (unless it had
+  // nothing to begin with and has its own empty hint). Otherwise it's noise.
+  if (pieces.length === 0 && (searching || emptyText === null)) return null;
+
+  return (
+    <section className="space-y-1">
+      <h2 className="text-sm font-semibold mb-2">
+        {title}
+        <span className="text-muted-foreground font-normal ml-2">
+          ({searching && shown !== total ? `${shown} of ${total}` : total})
+        </span>
+      </h2>
+
+      {pieces.length === 0 ? (
+        emptyText && <p className="text-sm text-muted-foreground">{emptyText}</p>
+      ) : (
+        <ul className="divide-y divide-border rounded-md border border-border bg-background overflow-hidden">
+          {pieces.map((p) => (
+            <li
+              key={p.id}
+              className="flex items-center gap-3 px-4 py-3 hover:bg-accent/40 cursor-pointer"
+              onClick={() => onOpenPiece(p.id)}
+            >
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium truncate">{p.title}</div>
+                {(p.composer || p.arranger) && (
+                  <div className="text-xs text-muted-foreground truncate">
+                    {[p.composer, p.arranger ? `arr. ${p.arranger}` : null].filter(Boolean).join(' · ')}
+                  </div>
+                )}
+              </div>
+              {isAdmin && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={busyPieceId === p.id}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleRepertoire(p);
+                  }}
+                >
+                  {actionLabel}
+                </Button>
+              )}
+              <span className="text-muted-foreground" aria-hidden>
+                ›
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }

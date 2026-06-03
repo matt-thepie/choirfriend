@@ -70,7 +70,9 @@ export function useAudioPlayer(src: string | null): UseAudioPlayerResult {
     audio.playbackRate = rate;
   }, [rate, src]);
 
-  // Bind listeners once on mount.
+  // Bind listeners. Keyed on `src` because the <audio> element doesn't exist on
+  // first mount (the player renders nothing until a track loads) — so a []-dep
+  // effect would bind to nothing. Re-running when src appears/changes catches it.
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
@@ -113,6 +115,11 @@ export function useAudioPlayer(src: string | null): UseAudioPlayerResult {
     audio.addEventListener('ended', handleEnded);
     audio.addEventListener('error', handleError);
 
+    // Sync now, in case metadata loaded / playback started before we (re)bound.
+    if (Number.isFinite(audio.duration)) setDuration(audio.duration);
+    setIsPlaying(!audio.paused);
+    setCurrentTime(audio.currentTime);
+
     return () => {
       audio.removeEventListener('play', handlePlay);
       audio.removeEventListener('pause', handlePause);
@@ -121,7 +128,7 @@ export function useAudioPlayer(src: string | null): UseAudioPlayerResult {
       audio.removeEventListener('ended', handleEnded);
       audio.removeEventListener('error', handleError);
     };
-  }, []);
+  }, [src]);
 
   const toggle = useCallback((): void => {
     const a = audioRef.current;

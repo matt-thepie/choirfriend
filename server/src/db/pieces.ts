@@ -30,6 +30,14 @@ export interface FileRow {
   mime_type: string | null;
   sort_order: number;
   created_at: number;
+  created_by_user_id: number | null;
+}
+
+/** A FileRow joined to the uploader's display name. The list/get queries
+ *  LEFT JOIN users so the DTO can show "uploaded by X" without a second
+ *  round-trip. created_by_name is null for files with no recorded creator. */
+interface FileRowWithCreator extends FileRow {
+  created_by_name: string | null;
 }
 
 
@@ -57,6 +65,10 @@ export interface FileDTO {
    *  B2 files served via the public CDN domain. */
   url: string;
   createdAt: number;
+  /** Internal id of the uploader, or null for seeded/legacy files. */
+  createdByUserId: number | null;
+  /** Uploader's display name, joined from users. Null if unknown. */
+  createdByName: string | null;
 }
 
 export interface PieceWithFiles extends PieceDTO {
@@ -88,7 +100,7 @@ function resolveFileUrl(row: FileRow): string {
   return `${base}/${b2.keyPrefix}${row.storage_key}`;
 }
 
-function toFileDTO(row: FileRow): FileDTO {
+function toFileDTO(row: FileRow | FileRowWithCreator): FileDTO {
   return {
     id: row.id,
     pieceId: row.piece_id,
@@ -100,6 +112,8 @@ function toFileDTO(row: FileRow): FileDTO {
     sortOrder: row.sort_order,
     url: resolveFileUrl(row),
     createdAt: row.created_at,
+    createdByUserId: row.created_by_user_id,
+    createdByName: 'created_by_name' in row ? row.created_by_name : null,
   };
 }
 
@@ -108,7 +122,11 @@ const listPiecesStmt = db.prepare(`
 `);
 const getPieceStmt = db.prepare(`SELECT * FROM pieces WHERE id = ?`);
 const listFilesForPieceStmt = db.prepare(`
-  SELECT * FROM files WHERE piece_id = ? ORDER BY kind, sort_order, id
+  SELECT f.*, u.display_name AS created_by_name
+  FROM files f
+  LEFT JOIN users u ON u.id = f.created_by_user_id
+  WHERE f.piece_id = ?
+  ORDER BY f.kind, f.sort_order, f.id
 `);
 const insertPieceStmt = db.prepare(`
   INSERT INTO pieces (title, composer, arranger, notes)
@@ -116,8 +134,8 @@ const insertPieceStmt = db.prepare(`
   RETURNING *
 `);
 const insertFileStmt = db.prepare(`
-  INSERT INTO files (piece_id, kind, label, storage, storage_key, filename, size_bytes, mime_type, sort_order)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  INSERT INTO files (piece_id, kind, label, storage, storage_key, filename, size_bytes, mime_type, sort_order, created_by_user_id)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   RETURNING *
 `);
 const countPiecesStmt = db.prepare(`SELECT COUNT(*) AS n FROM pieces`);
@@ -217,6 +235,8 @@ export interface CreateFileInput {
   sizeBytes?: number | null;
   mimeType?: string | null;
   sortOrder?: number;
+  /** Internal id of the uploader (req.user.internalId). Null for system inserts. */
+  createdByUserId?: number | null;
 }
 
 export function createFile(input: CreateFileInput): FileDTO {
@@ -230,6 +250,7 @@ export function createFile(input: CreateFileInput): FileDTO {
     input.sizeBytes ?? null,
     input.mimeType ?? null,
     input.sortOrder ?? 0,
+    input.createdByUserId ?? null,
   ) as FileRow;
   touchPieceStmt.run(input.pieceId);
   return toFileDTO(row);
@@ -244,4 +265,12 @@ export function getFileRowById(id: number): FileRow | null {
 export function deleteFileRow(id: number): boolean {
   const info = deleteFileStmt.run(id);
   return (info.changes as number) > 0;
+}
+
+const updateFileLabelStmt = db.prepare(`UPDATE files SET label = ? WHERE id = ? RETURNING *`);
+
+/** Set (or clear, with null) a file's label, e.g. renaming a track to "Tenor 1". */
+export function updateFileLabel(id: number, label: string | null): FileDTO | null {
+  const row = updateFileLabelStmt.get(label, id) as FileRow | undefined;
+  return row ? toFileDTO(row) : null;
 }

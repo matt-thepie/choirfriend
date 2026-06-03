@@ -12,10 +12,11 @@ import {
   type MarkerAnnotation,
   type MarkerKind,
 } from '@/types/annotations.ts';
-import { usePiece } from '@/hooks/usePiece.ts';
+import { usePiece, type PieceFile } from '@/hooks/usePiece.ts';
 import { useAnnotations, type NewAnnotationInput } from '@/hooks/useAnnotations.ts';
 import { PdfPage } from './PdfPage.tsx';
 import { UploadButton } from './UploadButton.tsx';
+import { MarkerGlyph } from './markerIcons.tsx';
 
 interface PdfViewerProps {
   pieceId: number;
@@ -83,11 +84,17 @@ export function PdfViewer({
   const [scale, setScale] = useState(1.25);
   const [drawTarget, setDrawTarget] = useState<AnnotationLayer>('shared');
   const [tool, setTool] = useState<AnnotationTool>('pan');
+  // Entering read mode drops the marker tool — you're performing, not placing
+  // marks, so taps should jump/navigate rather than drop new markers.
+  useEffect(() => {
+    if (readMode) setTool((t) => (t === 'marker' ? 'pan' : t));
+  }, [readMode]);
   const [showPrivate, setShowPrivate] = useState(true);
   const [showShared, setShowShared] = useState(true);
   const [markerKind, setMarkerKind] = useState<MarkerKind>('segno');
   const [markerLabelInput, setMarkerLabelInput] = useState('');
   const [jumpOpen, setJumpOpen] = useState(false);
+  const [filesOpen, setFilesOpen] = useState(false);
   const [navMode, setNavMode] = useState<NavMode>(pickInitialNavMode);
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -271,6 +278,9 @@ export function PdfViewer({
     if (KIND_TAKES_LABEL[input.markerKind]) {
       setMarkerLabelInput('');
     }
+    // One-and-done: you wouldn't place the same marker twice, so drop back to
+    // the Look tool after a placement.
+    setTool('pan');
   }
 
   function handleUndo(): void {
@@ -291,17 +301,71 @@ export function PdfViewer({
     }
   }
 
+  /** Scroll so the marker's own position sits just below the top edge —
+   *  instantly, no animation (you want to be there immediately when singing). */
+  function scrollMarkerIntoView(m: MarkerAnnotation): void {
+    const root = scrollContainerRef.current;
+    const pageEl = root?.querySelector<HTMLElement>(`[data-page="${m.page}"]`);
+    if (!root || !pageEl) return;
+    const rootRect = root.getBoundingClientRect();
+    const pageRect = pageEl.getBoundingClientRect();
+    const markerY = pageRect.top + m.position.y * pageRect.height; // viewport coords
+    const top = root.scrollTop + (markerY - rootRect.top) - 24; // small gap above
+    root.scrollTo({ top: Math.max(0, top), behavior: 'auto' });
+  }
+
   function jumpToMarker(m: MarkerAnnotation): void {
     setJumpOpen(false);
     if (effectiveNavMode === 'page') {
-      // In page mode, switch to the page that contains the marker.
       setCurrentPage(m.page);
+      // Let the page render, then land on the marker's spot.
+      requestAnimationFrame(() => scrollMarkerIntoView(m));
     } else {
-      const root = scrollContainerRef.current;
-      if (!root) return;
-      const pageEl = root.querySelector<HTMLElement>(`[data-page="${m.page}"]`);
-      if (!pageEl) return;
-      pageEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      scrollMarkerIntoView(m);
+    }
+  }
+
+  function jumpToTop(): void {
+    if (effectiveNavMode === 'page') setCurrentPage(1);
+    else scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'auto' });
+  }
+
+  /** "Follow" action for a navigation marker: where a singer goes when they hit
+   *  it. D.S. → the Segno, To Coda → the Coda, D.C. → back to the start. Returns
+   *  null for markers that are jump TARGETS rather than sources. */
+  function markerFollow(m: MarkerAnnotation): { label: string; run: () => void } | null {
+    if (m.markerKind === 'ds') {
+      const segno = markersInOrder.find((x) => x.markerKind === 'segno');
+      if (segno) return { label: 'Go to Segno', run: () => jumpToMarker(segno) };
+    }
+    if (m.markerKind === 'to-coda') {
+      const coda = markersInOrder.find((x) => x.markerKind === 'coda');
+      if (coda) return { label: 'Go to Coda', run: () => jumpToMarker(coda) };
+    }
+    if (m.markerKind === 'dc') {
+      return { label: 'Back to start', run: jumpToTop };
+    }
+    return null;
+  }
+
+  async function renameFile(id: number, label: string | null): Promise<void> {
+    const res = await fetch(`/api/files/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ label }),
+    });
+    if (res.ok) {
+      refreshPiece();
+      onPieceMutated?.();
+    }
+  }
+
+  async function deleteFile(id: number): Promise<void> {
+    const res = await fetch(`/api/files/${id}`, { method: 'DELETE', credentials: 'include' });
+    if (res.ok) {
+      refreshPiece();
+      onPieceMutated?.();
     }
   }
 
@@ -316,6 +380,15 @@ export function PdfViewer({
       {pieceError && <span className="text-xs text-destructive">Piece error: {pieceError}</span>}
 
       {isAdmin && <UploadButton pieceId={pieceId} onUploaded={handleUploaded} />}
+      {isAdmin && piece && (
+        <FilesDropdown
+          files={piece.files}
+          open={filesOpen}
+          onOpenChange={setFilesOpen}
+          onRename={renameFile}
+          onDelete={deleteFile}
+        />
+      )}
       {isAdmin && <div className="h-6 w-px bg-border mx-1" />}
 
       <div className="flex items-center rounded-md border border-border overflow-hidden">
@@ -339,35 +412,6 @@ export function PdfViewer({
           Shared
         </ToolButton>
       </div>
-
-      {tool === 'marker' && (
-        <>
-          <select
-            value={markerKind}
-            onChange={(e) => setMarkerKind(e.target.value as MarkerKind)}
-            className="text-xs h-8 px-2 rounded-md border border-border bg-background"
-          >
-            {MARKER_KIND_ORDER.map((k) => (
-              <option key={k} value={k}>
-                {MARKER_PICKER_LABEL[k]}
-              </option>
-            ))}
-          </select>
-          {KIND_TAKES_LABEL[markerKind] && (
-            <input
-              type="text"
-              value={markerLabelInput}
-              onChange={(e) => setMarkerLabelInput(e.target.value)}
-              placeholder={
-                markerKind === 'bar' ? 'e.g. "Bar 24" or "Letter B"' :
-                markerKind === 'custom' ? 'Label' :
-                'e.g. "al Coda"'
-              }
-              className="text-xs h-8 px-2 rounded-md border border-border bg-background w-44"
-            />
-          )}
-        </>
-      )}
 
       <div className="h-6 w-px bg-border mx-1" />
 
@@ -471,12 +515,52 @@ export function PdfViewer({
     </div>
   );
 
+  // Second toolbar row, shown only while the Marker tool is active — keeps the
+  // crowded main row clear and gives the marker kinds room (incl. voltas) as
+  // tappable icon buttons. Placing a marker drops back to the Look tool.
+  const markerToolbar = (
+    <div className="px-4 py-1.5 flex flex-wrap items-center gap-1 border-t border-border bg-muted/40">
+      <span className="text-xs text-muted-foreground mr-1 self-center">Place:</span>
+      {MARKER_KIND_ORDER.map((k) => (
+        <button
+          key={k}
+          type="button"
+          onClick={() => setMarkerKind(k)}
+          title={MARKER_PICKER_LABEL[k]}
+          className={cn(
+            'inline-flex items-center justify-center gap-1 h-8 min-w-[2rem] px-2 rounded-md border text-xs font-medium',
+            markerKind === k
+              ? 'bg-primary text-primary-foreground border-primary'
+              : 'border-border bg-background hover:bg-accent',
+          )}
+        >
+          <MarkerGlyph kind={k} className="w-4 h-4" />
+        </button>
+      ))}
+      {KIND_TAKES_LABEL[markerKind] && (
+        <input
+          type="text"
+          value={markerLabelInput}
+          onChange={(e) => setMarkerLabelInput(e.target.value)}
+          placeholder={
+            markerKind === 'bar' ? 'e.g. "Bar 24" or "Letter B"' :
+            markerKind === 'custom' ? 'Label' :
+            'e.g. "al Coda"'
+          }
+          className="text-xs h-8 px-2 rounded-md border border-border bg-background w-40 ml-1"
+        />
+      )}
+      <span className="text-[11px] text-muted-foreground ml-auto self-center">Tap the score to place</span>
+    </div>
+  );
+
   // ------- Render --------------------------------------------------------
 
   return (
     <div className="flex flex-col h-full">
       <header className="sticky top-0 z-10 bg-background/95 backdrop-blur border-b border-border">
         {readMode ? minimalToolbar : fullToolbar}
+        {!readMode && tool === 'marker' && markerToolbar}
         {annotationsError && (
           <div className="px-4 pb-2 text-xs text-destructive">Annotation sync issue: {annotationsError}</div>
         )}
@@ -511,6 +595,7 @@ export function PdfViewer({
                 onStrokeFinished={handleStrokeFinished}
                 onMarkerPlaced={handleMarkerPlaced}
                 onDeleteAnnotation={(id) => void remove(id)}
+                markerFollow={markerFollow}
               />
             )}
 
@@ -531,6 +616,7 @@ export function PdfViewer({
                   onStrokeFinished={handleStrokeFinished}
                   onMarkerPlaced={handleMarkerPlaced}
                   onDeleteAnnotation={(id) => void remove(id)}
+                  markerFollow={markerFollow}
                 />
               ))}
           </div>
@@ -635,6 +721,103 @@ function JumpToDropdown({ markers, open, onOpenChange, onJump }: JumpToDropdownP
             </button>
           ))}
         </div>
+      )}
+    </div>
+  );
+}
+
+// --- Files panel: rename labels, delete, see who uploaded ------------------
+
+interface FilesDropdownProps {
+  files: PieceFile[];
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onRename: (id: number, label: string | null) => void;
+  onDelete: (id: number) => void;
+}
+
+function FilesDropdown({ files, open, onOpenChange, onRename, onDelete }: FilesDropdownProps) {
+  return (
+    <div className="relative">
+      <Button size="sm" variant="outline" onClick={() => onOpenChange(!open)} disabled={files.length === 0}>
+        Files ({files.length}) ▾
+      </Button>
+      {open && files.length > 0 && (
+        <div className="absolute left-0 top-full mt-1 w-80 max-h-96 overflow-auto bg-background border border-border rounded-md shadow-lg z-30 p-1">
+          {files.map((f) => (
+            <FileRow key={f.id} file={f} onRename={onRename} onDelete={onDelete} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FileRow({
+  file,
+  onRename,
+  onDelete,
+}: {
+  file: PieceFile;
+  onRename: (id: number, label: string | null) => void;
+  onDelete: (id: number) => void;
+}) {
+  const [label, setLabel] = useState(file.label ?? '');
+  const [confirming, setConfirming] = useState(false);
+  useEffect(() => setLabel(file.label ?? ''), [file.label]);
+
+  function save(): void {
+    const next = label.trim() || null;
+    if (next !== (file.label ?? null)) onRename(file.id, next);
+  }
+
+  return (
+    <div className="flex items-center gap-2 px-1.5 py-1.5 rounded hover:bg-accent/40">
+      <span
+        className={cn(
+          'text-[9px] uppercase font-semibold px-1 py-0.5 rounded shrink-0',
+          file.kind === 'pdf' ? 'bg-sky-100 text-sky-800' : 'bg-violet-100 text-violet-800',
+        )}
+      >
+        {file.kind === 'pdf' ? 'PDF' : 'Audio'}
+      </span>
+      <div className="flex-1 min-w-0">
+        <input
+          type="text"
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          onBlur={save}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+          }}
+          placeholder={file.kind === 'audio' ? 'Voice part (e.g. Tenor 1)' : 'Label (optional)'}
+          className="w-full text-xs h-7 px-1.5 rounded border border-transparent hover:border-border focus:border-border focus:outline-none bg-transparent"
+        />
+        <div className="text-[10px] text-muted-foreground truncate px-1.5" title={file.filename}>
+          {file.filename}
+          {file.createdByName ? ` · ${file.createdByName}` : ''}
+        </div>
+      </div>
+      {confirming ? (
+        <div className="flex items-center gap-1 shrink-0">
+          <button type="button" onClick={() => onDelete(file.id)} className="text-[10px] px-1.5 py-0.5 rounded bg-destructive text-white">
+            Delete
+          </button>
+          <button type="button" onClick={() => setConfirming(false)} className="text-[10px] px-1 text-muted-foreground">
+            cancel
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          aria-label="Delete file"
+          onClick={() => setConfirming(true)}
+          className="text-muted-foreground hover:text-destructive shrink-0"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+            <path d="M6 6 18 18M18 6 6 18" />
+          </svg>
+        </button>
       )}
     </div>
   );

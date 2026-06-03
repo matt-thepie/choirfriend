@@ -35,15 +35,17 @@ export type MarkerKind =
 
 /** Default badge text for each marker kind. `bar` and `custom` always use
  *  the user-supplied label; the others fall back here when no label is set. */
+// NB: plain text, not musical Unicode glyphs (𝄋 𝄌 𝄆 𝄇) — those aren't in
+// standard system fonts and render as tofu boxes.
 export const MARKER_DEFAULT_LABEL: Record<MarkerKind, string> = {
-  segno: '𝄋',
-  coda: '𝄌',
+  segno: 'Segno',
+  coda: 'Coda',
   ds: 'D.S.',
   dc: 'D.C.',
   fine: 'Fine',
-  'to-coda': '→ 𝄌',
-  'repeat-start': '𝄆',
-  'repeat-end': '𝄇',
+  'to-coda': 'To Coda',
+  'repeat-start': '|:',
+  'repeat-end': ':|',
   'volta-1': '1.',
   'volta-2': '2.',
   bar: '?',
@@ -52,14 +54,14 @@ export const MARKER_DEFAULT_LABEL: Record<MarkerKind, string> = {
 
 /** Human label for the toolbar marker-kind picker. */
 export const MARKER_PICKER_LABEL: Record<MarkerKind, string> = {
-  segno: 'Segno (𝄋)',
-  coda: 'Coda (𝄌)',
-  ds: 'D.S.',
-  dc: 'D.C.',
+  segno: 'Segno',
+  coda: 'Coda',
+  ds: 'D.S. (dal segno)',
+  dc: 'D.C. (da capo)',
   fine: 'Fine',
-  'to-coda': 'To Coda (→ 𝄌)',
-  'repeat-start': 'Repeat start (𝄆)',
-  'repeat-end': 'Repeat end (𝄇)',
+  'to-coda': 'To Coda',
+  'repeat-start': 'Repeat start |:',
+  'repeat-end': 'Repeat end :|',
   'volta-1': 'Volta 1',
   'volta-2': 'Volta 2',
   bar: 'Bar / letter',

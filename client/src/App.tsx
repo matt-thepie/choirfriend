@@ -2,11 +2,10 @@ import { useEffect, useState } from 'react';
 import { PdfViewer } from '@/components/PdfViewer/index.ts';
 import { AudioPlayer } from '@/components/AudioPlayer/index.ts';
 import { Piano } from '@/components/Piano/index.ts';
-import { PiecePicker } from '@/components/PiecePicker.tsx';
 import { HomeScreen } from '@/components/HomeScreen.tsx';
+import { ImportScreen } from '@/components/ImportScreen.tsx';
 import { SignInScreen } from '@/components/SignInScreen.tsx';
 import { usePieces } from '@/hooks/usePieces.ts';
-import { cn } from '@/lib/utils.ts';
 
 interface HealthResponse {
   status: string;
@@ -31,7 +30,7 @@ interface MeResponse {
  *     before showing any choir data.
  *
  * Views (when signed in):
- *   - home — searchable repertoire list with current/archive filter.
+ *   - home — search across two lists: active repertoire + all other songs.
  *   - piece — open piece: PdfViewer + AudioPlayer + (toggleable) Piano.
  *
  * Display modes (only meaningful in piece view):
@@ -40,8 +39,8 @@ interface MeResponse {
  *     header hides; Exit button on the viewer's minimal toolbar is the
  *     canonical way out (Esc also works for desktop users).
  *
- * Write operations (create piece, upload files, archive/restore, delete
- * files) are gated server-side behind `requireAdmin` (members of any
+ * Write operations (create piece, upload files, move in/out of repertoire,
+ * delete files) are gated server-side behind `requireAdmin` (members of any
  * ADMIN_ROLES group). The client mirrors that by hiding write UI when
  * me.isAdmin is false — keeps the UI honest and avoids buttons that 403.
  */
@@ -78,7 +77,10 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
   const [pieceId, setPieceId] = useState<number | null>(null);
   const [pianoOpen, setPianoOpen] = useState(false);
   const [readMode, setReadMode] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const isAdmin = me.isAdmin === true;
+  const currentPiece = pieces.find((p) => p.id === pieceId) ?? null;
 
   const [pieceRefreshTick, setPieceRefreshTick] = useState(0);
   function bumpPieceRefresh(): void {
@@ -89,85 +91,100 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
   function goHome(): void {
     setPieceId(null);
     setReadMode(false);
+    setImporting(false);
   }
 
   const view: 'home' | 'piece' = pieceId === null ? 'home' : 'piece';
 
   return (
-    <div className="h-screen flex flex-col">
+    <div className="h-dvh flex flex-col">
       {!readMode && (
-        <header className="px-4 py-2 border-b border-border flex items-center gap-3 text-sm flex-wrap">
-          <button
-            type="button"
-            onClick={goHome}
-            className="font-semibold hover:opacity-80"
-            aria-label="Go to home"
-          >
-            choirfriend
-          </button>
-
-          {view === 'piece' && (
-            <>
-              <span className="text-muted-foreground" aria-hidden>·</span>
-              <button
-                type="button"
-                onClick={goHome}
-                className="text-xs underline text-muted-foreground hover:text-foreground"
-              >
-                Home
-              </button>
-              <PiecePicker
-                pieces={pieces}
-                loading={piecesLoading}
-                selectedId={pieceId}
-                onSelect={setPieceId}
-                onCreated={refreshPieces}
-                canCreate={isAdmin}
-              />
-            </>
+        <header className="px-3 py-2 border-b border-border flex items-center gap-2 text-sm shrink-0">
+          {view === 'piece' ? (
+            <button
+              type="button"
+              onClick={goHome}
+              className="inline-flex items-center gap-1.5 font-medium hover:opacity-80 shrink-0"
+              aria-label="Back to song list"
+            >
+              <BackIcon /> Songs
+            </button>
+          ) : (
+            <span className="font-semibold">choirfriend</span>
           )}
 
-          <div className="h-6 w-px bg-border mx-1" />
+          {view === 'piece' && currentPiece && (
+            <span className="font-semibold truncate min-w-0">{currentPiece.title}</span>
+          )}
 
-          <ToolToggle
-            label="Piano"
-            icon={<PianoIcon />}
-            active={pianoOpen}
-            onToggle={() => setPianoOpen((o) => !o)}
-          />
-          <ToolToggle
-            label="Read mode"
-            icon={<ReadIcon />}
-            active={readMode}
-            onToggle={() => setReadMode((r) => !r)}
-            disabled={pieceId === null}
-          />
-
-          <div className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
-            <span>
-              Signed in as {me.displayName ?? me.email}
-              {isAdmin && (
-                <span className="ml-1 text-[10px] uppercase tracking-wide font-semibold text-amber-700">
-                  admin
-                </span>
-              )}
-            </span>
-            <span title={`server: ${health?.status ?? '?'} · db: ${health?.database ?? '?'}`}>
-              <span className={`inline-block w-2 h-2 rounded-full mr-1 ${health?.database === 'ok' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-              {health ? `server ${health.database}` : 'server …'}
-            </span>
+          <div className="ml-auto relative shrink-0">
+            <button
+              type="button"
+              onClick={() => setMenuOpen((o) => !o)}
+              aria-label="Menu"
+              aria-expanded={menuOpen}
+              className="inline-flex items-center justify-center w-9 h-9 rounded-md border border-border hover:bg-accent"
+            >
+              <MenuIcon />
+            </button>
+            {menuOpen && (
+              <>
+                <div className="fixed inset-0 z-20" onClick={() => setMenuOpen(false)} aria-hidden />
+                <div className="absolute right-0 top-full mt-1 w-56 bg-background border border-border rounded-md shadow-lg z-30 p-1">
+                  {view === 'piece' && (
+                    <>
+                      <MenuItem
+                        icon={<PianoIcon />}
+                        label="Piano"
+                        active={pianoOpen}
+                        onClick={() => {
+                          setPianoOpen((o) => !o);
+                          setMenuOpen(false);
+                        }}
+                      />
+                      <MenuItem
+                        icon={<ReadIcon />}
+                        label="Read mode"
+                        active={readMode}
+                        onClick={() => {
+                          setReadMode((r) => !r);
+                          setMenuOpen(false);
+                        }}
+                      />
+                      <div className="h-px bg-border my-1" />
+                    </>
+                  )}
+                  <div className="px-3 py-1.5 text-xs text-muted-foreground">
+                    Signed in as {me.displayName ?? me.email}
+                    {isAdmin && <span className="ml-1 uppercase tracking-wide font-semibold text-amber-700">admin</span>}
+                  </div>
+                  <div className="px-3 py-1 text-xs text-muted-foreground flex items-center gap-1.5">
+                    <span className={`inline-block w-2 h-2 rounded-full ${health?.database === 'ok' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                    server {health?.database ?? '…'}
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </header>
       )}
 
       <main className="flex-1 min-h-0 flex flex-col">
-        {view === 'home' ? (
+        {importing ? (
+          <ImportScreen
+            onClose={() => {
+              setImporting(false);
+              refreshPieces();
+            }}
+          />
+        ) : view === 'home' ? (
           <HomeScreen
             pieces={pieces}
             loading={piecesLoading}
             isAdmin={isAdmin}
             onOpenPiece={setPieceId}
             onPieceMutated={refreshPieces}
+            onImport={isAdmin ? () => setImporting(true) : undefined}
           />
         ) : (
           <>
@@ -190,32 +207,49 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
   );
 }
 
-interface ToolToggleProps {
+function MenuItem({
+  label,
+  icon,
+  active,
+  onClick,
+}: {
   label: string;
   icon: React.ReactNode;
-  active: boolean;
-  onToggle: () => void;
-  disabled?: boolean;
-}
-
-function ToolToggle({ label, icon, active, onToggle, disabled }: ToolToggleProps) {
+  active?: boolean;
+  onClick: () => void;
+}) {
   return (
     <button
       type="button"
-      onClick={onToggle}
-      aria-pressed={active}
-      disabled={disabled}
-      className={cn(
-        'inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md border text-xs font-medium transition-colors',
-        'disabled:opacity-50 disabled:cursor-not-allowed',
-        active
-          ? 'bg-primary text-primary-foreground border-primary'
-          : 'border-border bg-background hover:bg-accent',
-      )}
+      onClick={onClick}
+      className="flex w-full items-center gap-2 px-3 py-2 rounded text-sm hover:bg-accent text-left"
     >
-      <span className="inline-flex">{icon}</span>
-      <span>{label}</span>
+      <span className="inline-flex text-muted-foreground">{icon}</span>
+      <span className="flex-1">{label}</span>
+      {active && (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-primary" aria-hidden>
+          <path d="M5 12l5 5L20 7" />
+        </svg>
+      )}
     </button>
+  );
+}
+
+function MenuIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+      <line x1="4" y1="7" x2="20" y2="7" />
+      <line x1="4" y1="12" x2="20" y2="12" />
+      <line x1="4" y1="17" x2="20" y2="17" />
+    </svg>
+  );
+}
+
+function BackIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden>
+      <path d="M15 6l-6 6 6 6" />
+    </svg>
   );
 }
 

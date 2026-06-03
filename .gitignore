@@ -15,3 +15,9 @@ coverage/
 # Per SPEC: never commit runtime data or keys.
 data/
 keys/
+
+# Local sample music library for importer testing (do not commit)
+Music/
+
+# Local importer storage (B2 emulation in dev) — runtime data, never commit
+/client/public/imported/

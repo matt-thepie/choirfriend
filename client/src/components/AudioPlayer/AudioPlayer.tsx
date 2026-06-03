@@ -11,8 +11,6 @@ interface AudioPlayerProps {
   refreshTick?: number;
 }
 
-const RATE_PRESETS = [0.5, 0.65, 0.75, 0.85, 1.0, 1.15, 1.25] as const;
-
 /**
  * Sticky bottom panel for the current piece's audio tracks. Renders nothing
  * when there's no audio attached, so a piece with only sheet music is
@@ -96,20 +94,27 @@ export function AudioPlayer({ pieceId, refreshTick = 0 }: AudioPlayerProps) {
             className="w-24 accent-primary"
           />
           <span className="tabular-nums w-10 text-right">{ratePct}%</span>
-          {RATE_PRESETS.includes(player.rate as typeof RATE_PRESETS[number]) ? null : (
-            <Button size="sm" variant="ghost" onClick={() => player.setRate(1.0)} className="h-6 px-2">
-              reset
-            </Button>
-          )}
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => player.setRate(1.0)}
+            disabled={player.rate === 1}
+            className="h-6 px-2"
+          >
+            reset
+          </Button>
         </div>
 
-        {/* Loop A/B */}
+        {/* A–B practice loop: set two points, playback repeats between them. */}
         <div className="flex items-center gap-1">
+          <span className="text-muted-foreground select-none mr-1" title="Repeat a passage: set a start (A) and end (B), and playback loops between them.">
+            Loop
+          </span>
           <Button
             size="sm"
             variant={player.loop.start !== null ? 'default' : 'outline'}
             onClick={player.setLoopStart}
-            title={player.loop.start !== null ? `A at ${formatTime(player.loop.start)}` : 'Set loop A at current time'}
+            title="Set the loop START (A) at the current position"
             className="h-7"
           >
             {player.loop.start !== null ? `A ${formatTime(player.loop.start)}` : 'Set A'}
@@ -118,7 +123,7 @@ export function AudioPlayer({ pieceId, refreshTick = 0 }: AudioPlayerProps) {
             size="sm"
             variant={player.loop.end !== null ? 'default' : 'outline'}
             onClick={player.setLoopEnd}
-            title={player.loop.end !== null ? `B at ${formatTime(player.loop.end)}` : 'Set loop B at current time'}
+            title="Set the loop END (B) at the current position — playback then repeats A→B"
             className="h-7"
           >
             {player.loop.end !== null ? `B ${formatTime(player.loop.end)}` : 'Set B'}

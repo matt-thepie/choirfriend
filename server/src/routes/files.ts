@@ -13,17 +13,17 @@
  * what files actually exist as far as choirfriend is concerned.
  */
 
-import crypto from 'node:crypto';
-import path from 'node:path';
 import type { FastifyPluginAsync } from 'fastify';
 import {
   createFile,
   deleteFileRow,
   getFileRowById,
   getPieceWithFiles,
+  updateFileLabel,
 } from '../db/pieces.ts';
 import { requireAdmin } from '../auth/middleware.ts';
 import { deleteObject, isB2Configured, presignPut } from '../storage/b2.ts';
+import { deleteLocalFile, readableStoredName } from '../import/storage.ts';
 
 /**
  * Strict MIME allowlist by kind. Server is the source of truth — the client
@@ -78,13 +78,6 @@ interface CompleteUploadBody {
  *  now; can become a config knob later. */
 const MAX_FILE_BYTES = 200 * 1024 * 1024;
 
-function sanitiseExt(filename: string): string {
-  const ext = path.extname(filename).toLowerCase();
-  // Strip anything weird. Two-letter to five-letter alphanumeric only.
-  if (!/^\.[a-z0-9]{1,5}$/.test(ext)) return '';
-  return ext;
-}
-
 export const filesRoutes: FastifyPluginAsync = async (app) => {
   /** Returns a presigned PUT URL the browser will upload directly to B2.
    *  Admin-only so a random signed-in member can't smuggle bytes into the
@@ -126,10 +119,9 @@ export const filesRoutes: FastifyPluginAsync = async (app) => {
         return reply.code(413).send({ error: 'file too large' });
       }
 
-      const ext = sanitiseExt(body.filename);
-      // Random UUID keeps keys unguessable, avoids collisions, and lets the
-      // client retry without needing a new key.
-      const storageKey = `pieces/${pieceId}/files/${crypto.randomUUID()}${ext}`;
+      // Readable filename, with uniqueness from a short random subfolder (keeps
+      // the name legible while still collision-proof and hard to guess).
+      const storageKey = `pieces/${pieceId}/files/${readableStoredName(body.filename)}`;
       const signed = await presignPut({
         storageKey,
         contentType: body.mimeType,
@@ -181,16 +173,39 @@ export const filesRoutes: FastifyPluginAsync = async (app) => {
         mimeType: body.mimeType,
         sizeBytes: body.sizeBytes ?? null,
         sortOrder: body.sortOrder ?? 0,
+        // requireAdmin guarantees req.user is set.
+        createdByUserId: req.user!.internalId,
       });
       return reply.code(201).send(fileDto);
     },
   );
 
   /**
-   * Delete a file. Admin-only — ordinary members shouldn't be able to
-   * remove the MD's uploaded score. The B2 object is best-effort deleted
-   * alongside. Local-storage files (the seeded sample) can't be removed
-   * via this API.
+   * Rename a file's label (admin) — e.g. an imported track from "Tenor 1" to
+   * "Tenor 1 (with piano)". Send { label: string } or { label: null } to clear.
+   */
+  app.patch<{ Params: { id: string }; Body: { label?: string | null } }>(
+    '/files/:id',
+    { preHandler: requireAdmin },
+    async (req, reply) => {
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) return reply.code(400).send({ error: 'invalid file id' });
+      const raw = req.body?.label;
+      if (raw !== undefined && raw !== null && typeof raw !== 'string') {
+        return reply.code(400).send({ error: 'label must be a string or null' });
+      }
+      const label = typeof raw === 'string' ? raw.trim() || null : null;
+      const updated = updateFileLabel(id, label);
+      if (!updated) return reply.code(404).send({ error: 'not found' });
+      return updated;
+    },
+  );
+
+  /**
+   * Delete a file (admin). The stored object is best-effort removed alongside
+   * the DB row — from B2 if that's where it lives, or from client/public for an
+   * imported local file. The seeded sample (local, not under imported/) is left
+   * on disk by deleteLocalFile, but its row can still be removed.
    */
   app.delete<{ Params: { fileId: string } }>(
     '/files/:fileId',
@@ -202,16 +217,13 @@ export const filesRoutes: FastifyPluginAsync = async (app) => {
       const row = getFileRowById(id);
       if (!row) return reply.code(404).send({ error: 'not found' });
 
-      if (row.storage === 'local') {
-        return reply.code(403).send({ error: 'cannot delete local/seeded files via API' });
-      }
-
-      // Remove the DB row first so a failed B2 delete doesn't strand an
-      // unreferenced file. The B2 delete is best-effort and just logs on
-      // failure (see storage/b2.ts).
+      // Remove the DB row first so a failed object delete doesn't strand an
+      // unreferenced file. Both object deletes are best-effort.
       deleteFileRow(id);
       if (row.storage === 'b2' && isB2Configured()) {
         await deleteObject(row.storage_key);
+      } else if (row.storage === 'local') {
+        await deleteLocalFile(row.storage_key);
       }
       return reply.code(204).send();
     },

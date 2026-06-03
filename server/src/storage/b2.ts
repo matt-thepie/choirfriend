@@ -12,6 +12,7 @@
  */
 
 import { DeleteObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import type { Buffer } from 'node:buffer';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { getConfig } from '../config.ts';
 
@@ -81,6 +82,29 @@ export async function presignPut(opts: {
   );
 
   return { url, storageKey: opts.storageKey, expiresIn };
+}
+
+/**
+ * Upload bytes directly to B2 from the server (not via a presigned browser
+ * PUT). Used by the bulk importer, which has the file bytes locally and
+ * doesn't need the browser round-trip. `unprefixedKey` is relative to
+ * B2_KEY_PREFIX, same as everywhere else in this module.
+ */
+export async function putObject(opts: {
+  unprefixedKey: string;
+  body: Buffer | Uint8Array;
+  contentType: string;
+}): Promise<void> {
+  const { b2 } = getConfig();
+  const client = makeClient();
+  await client.send(
+    new PutObjectCommand({
+      Bucket: b2.bucket,
+      Key: prefixedKey(opts.unprefixedKey),
+      Body: opts.body,
+      ContentType: opts.contentType,
+    }),
+  );
 }
 
 /**

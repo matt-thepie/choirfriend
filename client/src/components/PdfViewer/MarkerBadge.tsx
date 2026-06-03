@@ -1,6 +1,6 @@
-import { useState } from 'react';
 import { cn } from '@/lib/utils.ts';
 import { markerLabel, type MarkerAnnotation, type MarkerKind } from '@/types/annotations.ts';
+import { MarkerGlyph } from './markerIcons.tsx';
 
 /** Tailwind classes for the badge per marker kind. Keeps the visual
  *  vocabulary tight so a quick glance at the score reads as "Segno",
@@ -24,14 +24,15 @@ interface MarkerBadgeProps {
   marker: MarkerAnnotation;
   pageWidth: number;
   pageHeight: number;
-  /** If interactive, the badge captures clicks for the action menu. */
+  /** If interactive, the badge responds to taps (jump) and shows a delete ×. */
   interactive: boolean;
-  onJump?: () => void;
+  /** Context "follow" action (e.g. D.S. → Go to Segno), or null. A single tap
+   *  on the badge runs it — no menu, no second tap. */
+  follow?: { label: string; run: () => void } | null;
   onDelete?: (id: string) => void;
 }
 
-export function MarkerBadge({ marker, pageWidth, pageHeight, interactive, onJump, onDelete }: MarkerBadgeProps) {
-  const [menuOpen, setMenuOpen] = useState(false);
+export function MarkerBadge({ marker, pageWidth, pageHeight, interactive, follow, onDelete }: MarkerBadgeProps) {
   const styles = KIND_STYLES[marker.markerKind];
   const label = markerLabel(marker);
   const canDelete = onDelete && (marker.layer === 'shared' || marker.isMine !== false);
@@ -45,54 +46,39 @@ export function MarkerBadge({ marker, pageWidth, pageHeight, interactive, onJump
         transform: 'translate(-50%, -50%)',
         pointerEvents: interactive ? 'auto' : 'none',
       }}
-      onClick={(e) => {
-        if (!interactive) return;
-        e.stopPropagation();
-        setMenuOpen((o) => !o);
-      }}
     >
       <button
         type="button"
+        onClick={(e) => {
+          if (!interactive) return;
+          e.stopPropagation();
+          follow?.run(); // single tap jumps; no-op for markers that aren't a jump source
+        }}
         className={cn(
-          'inline-flex items-center px-2 py-0.5 rounded-md border text-xs font-semibold shadow-sm',
-          'whitespace-nowrap select-none',
+          'inline-flex items-center px-2 py-0.5 rounded-md border text-xs font-semibold shadow-sm whitespace-nowrap select-none',
           styles,
-          interactive && 'cursor-pointer hover:shadow-md',
+          interactive && follow ? 'cursor-pointer hover:shadow-md' : 'cursor-default',
         )}
-        title={`${marker.markerKind}${marker.label ? ` · ${marker.label}` : ''}`}
+        title={follow ? follow.label : `${marker.markerKind}${marker.label ? ` · ${marker.label}` : ''}`}
       >
-        {label}
+        <MarkerGlyph kind={marker.markerKind} label={label} className="w-4 h-4" />
+        {follow && <span className="ml-1 opacity-70">→</span>}
       </button>
 
-      {menuOpen && (
-        <div
-          className="absolute left-1/2 top-full mt-1 -translate-x-1/2 bg-background border border-border rounded-md shadow-lg text-xs z-20 min-w-32"
-          onClick={(e) => e.stopPropagation()}
+      {interactive && canDelete && (
+        <button
+          type="button"
+          aria-label="Delete marker"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete!(marker.id);
+          }}
+          className="absolute -top-2 -right-2 inline-flex items-center justify-center w-4 h-4 rounded-full bg-background border border-border text-muted-foreground hover:text-destructive hover:border-destructive shadow"
         >
-          <button
-            type="button"
-            className="block w-full text-left px-3 py-1.5 hover:bg-accent disabled:opacity-50"
-            onClick={() => {
-              onJump?.();
-              setMenuOpen(false);
-            }}
-            disabled={!onJump}
-          >
-            Jump here
-          </button>
-          {canDelete && (
-            <button
-              type="button"
-              className="block w-full text-left px-3 py-1.5 hover:bg-accent text-destructive"
-              onClick={() => {
-                onDelete!(marker.id);
-                setMenuOpen(false);
-              }}
-            >
-              Delete
-            </button>
-          )}
-        </div>
+          <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" aria-hidden>
+            <path d="M6 6 18 18M18 6 6 18" />
+          </svg>
+        </button>
       )}
     </div>
   );
