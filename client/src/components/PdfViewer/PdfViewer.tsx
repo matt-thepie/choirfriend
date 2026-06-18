@@ -13,6 +13,7 @@ import {
   type MarkerKind,
 } from '@/types/annotations.ts';
 import { usePiece, type PieceFile } from '@/hooks/usePiece.ts';
+import { replaceFile } from '@/hooks/useUploadFile.ts';
 import { useAnnotations, type NewAnnotationInput } from '@/hooks/useAnnotations.ts';
 import { PdfPage } from './PdfPage.tsx';
 import { UploadButton } from './UploadButton.tsx';
@@ -70,7 +71,15 @@ export function PdfViewer({
   isAdmin = false,
 }: PdfViewerProps) {
   const { piece, loading: pieceLoading, error: pieceError, refresh: refreshPiece } = usePiece(pieceId, refreshTick);
-  const pdfFile = useMemo(() => piece?.files.find((f) => f.kind === 'pdf') ?? null, [piece]);
+
+  // A piece can carry several PDFs — a score, a lyrics sheet, extra parts.
+  // Members pick which one to view; the first is the default.
+  const pdfFiles = useMemo(() => piece?.files.filter((f) => f.kind === 'pdf') ?? [], [piece]);
+  const [selectedPdfId, setSelectedPdfId] = useState<number | null>(null);
+  const pdfFile = useMemo(
+    () => pdfFiles.find((f) => f.id === selectedPdfId) ?? pdfFiles[0] ?? null,
+    [pdfFiles, selectedPdfId],
+  );
 
   function handleUploaded(): void {
     refreshPiece();
@@ -172,6 +181,11 @@ export function PdfViewer({
 
   const effectiveScale = effectiveNavMode === 'page' ? fitScale : scale;
 
+  // Switching to a different PDF in the piece starts at its first page.
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [pdfFile?.id]);
+
   // Clamp currentPage when the PDF changes.
   const pageCount = pdf?.numPages ?? 0;
   useEffect(() => {
@@ -222,9 +236,18 @@ export function PdfViewer({
     return () => window.removeEventListener('keydown', onKey);
   }, [readMode, onExitReadMode]);
 
+  // Annotations belong to a specific file. With several PDFs per piece we must
+  // only show marks made on the PDF currently open, or they'd bleed across
+  // documents at the same page number. Legacy marks with no fileId show on all.
+  const belongsToActivePdf = useCallback(
+    (a: Annotation): boolean => !pdfFile || a.fileId === undefined || a.fileId === pdfFile.id,
+    [pdfFile],
+  );
+
   const visibleAnnotationsByPage = useMemo(() => {
     const byPage = new Map<number, Annotation[]>();
     for (const a of annotations) {
+      if (!belongsToActivePdf(a)) continue;
       if (a.layer === 'private' && !showPrivate) continue;
       if (a.layer === 'shared' && !showShared) continue;
       const list = byPage.get(a.page) ?? [];
@@ -232,19 +255,20 @@ export function PdfViewer({
       byPage.set(a.page, list);
     }
     return byPage;
-  }, [annotations, showPrivate, showShared]);
+  }, [annotations, showPrivate, showShared, belongsToActivePdf]);
 
   const markersInOrder = useMemo((): MarkerAnnotation[] => {
     const ms: MarkerAnnotation[] = [];
     for (const a of annotations) {
       if (a.kind !== 'marker') continue;
+      if (!belongsToActivePdf(a)) continue;
       if (a.layer === 'private' && !showPrivate) continue;
       if (a.layer === 'shared' && !showShared) continue;
       ms.push(a);
     }
     ms.sort((a, b) => a.page - b.page || a.position.y - b.position.y || a.position.x - b.position.x);
     return ms;
-  }, [annotations, showPrivate, showShared]);
+  }, [annotations, showPrivate, showShared, belongsToActivePdf]);
 
   function handleStrokeFinished(input: {
     layer: AnnotationLayer;
@@ -286,7 +310,7 @@ export function PdfViewer({
   function handleUndo(): void {
     for (let i = annotations.length - 1; i >= 0; i--) {
       const a = annotations[i]!;
-      if (a.isMine !== false) {
+      if (a.isMine !== false && belongsToActivePdf(a)) {
         void remove(a.id);
         return;
       }
@@ -295,7 +319,7 @@ export function PdfViewer({
 
   function handleClearMine(layer: AnnotationLayer): void {
     for (const a of annotations) {
-      if (a.layer === layer && a.isMine !== false) {
+      if (a.layer === layer && a.isMine !== false && belongsToActivePdf(a)) {
         void remove(a.id);
       }
     }
@@ -369,15 +393,21 @@ export function PdfViewer({
     }
   }
 
-  const myAnnotationCount = annotations.filter((a) => a.isMine !== false).length;
+  const myAnnotationCount = annotations.filter((a) => a.isMine !== false && belongsToActivePdf(a)).length;
 
   // ------- Toolbars -------------------------------------------------------
 
   const fullToolbar = (
-    <div className="px-4 py-2 flex flex-wrap items-center gap-2">
+    // On phones the toolbar stays a single horizontally-scrollable row so it
+    // doesn't stack into several rows and eat the vertical space the score
+    // needs. From md up it wraps as before. [&>*]:shrink-0 stops the groups
+    // squashing in the scroll row.
+    <div className="px-4 py-2 flex items-center gap-2 flex-nowrap overflow-x-auto [&>*]:shrink-0 md:flex-wrap md:overflow-visible">
       {piece && <h2 className="text-sm font-semibold mr-2">{piece.title}</h2>}
       {pieceLoading && <span className="text-xs text-muted-foreground">Loading piece…</span>}
       {pieceError && <span className="text-xs text-destructive">Piece error: {pieceError}</span>}
+
+      <PdfSwitcher files={pdfFiles} selectedId={pdfFile?.id ?? null} onSelect={setSelectedPdfId} />
 
       {isAdmin && <UploadButton pieceId={pieceId} onUploaded={handleUploaded} />}
       {isAdmin && piece && (
@@ -387,6 +417,7 @@ export function PdfViewer({
           onOpenChange={setFilesOpen}
           onRename={renameFile}
           onDelete={deleteFile}
+          onReplaced={handleUploaded}
         />
       )}
       {isAdmin && <div className="h-6 w-px bg-border mx-1" />}
@@ -451,8 +482,10 @@ export function PdfViewer({
   /** Read-mode toolbar. Only what you'd want while singing:
    *    pen on/off, layer, page nav (page mode), zoom (scroll mode), jump-to, scroll/pages toggle, exit. */
   const minimalToolbar = (
-    <div className="px-3 py-1.5 flex flex-wrap items-center gap-2">
+    <div className="px-3 py-1.5 flex items-center gap-2 flex-nowrap overflow-x-auto [&>*]:shrink-0 md:flex-wrap md:overflow-visible">
       {piece && <h2 className="text-sm font-semibold mr-1 truncate max-w-[12rem]" title={piece.title}>{piece.title}</h2>}
+
+      <PdfSwitcher files={pdfFiles} selectedId={pdfFile?.id ?? null} onSelect={setSelectedPdfId} />
 
       <div className="flex items-center rounded-md border border-border overflow-hidden">
         <ToolButton active={tool === 'pan'} onClick={() => setTool('pan')}>Look</ToolButton>
@@ -673,6 +706,38 @@ function ToolButton({
   );
 }
 
+/** Switch between the PDFs attached to a piece (score / lyrics / extra parts).
+ *  Renders nothing when there's only one PDF — no point in a one-option menu. */
+function PdfSwitcher({
+  files,
+  selectedId,
+  onSelect,
+}: {
+  files: PieceFile[];
+  selectedId: number | null;
+  onSelect: (id: number) => void;
+}) {
+  if (files.length < 2) return null;
+  const current = files.find((f) => f.id === selectedId) ?? files[0]!;
+  return (
+    <label className="flex items-center gap-1 text-xs shrink-0">
+      <span className="text-muted-foreground hidden sm:inline">PDF</span>
+      <select
+        value={current.id}
+        onChange={(e) => onSelect(Number(e.target.value))}
+        aria-label="Choose PDF"
+        className="h-8 max-w-[11rem] rounded-md border border-border bg-background px-2 text-xs font-medium"
+      >
+        {files.map((f, i) => (
+          <option key={f.id} value={f.id}>
+            {f.label?.trim() || f.filename || `PDF ${i + 1}`}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 function ZoomControls({ scale, onScale }: { scale: number; onScale: (s: number) => void }) {
   return (
     <div className="flex items-center gap-1">
@@ -734,9 +799,11 @@ interface FilesDropdownProps {
   onOpenChange: (open: boolean) => void;
   onRename: (id: number, label: string | null) => void;
   onDelete: (id: number) => void;
+  /** Called after a file's bytes are replaced in place — refresh the piece. */
+  onReplaced: () => void;
 }
 
-function FilesDropdown({ files, open, onOpenChange, onRename, onDelete }: FilesDropdownProps) {
+function FilesDropdown({ files, open, onOpenChange, onRename, onDelete, onReplaced }: FilesDropdownProps) {
   return (
     <div className="relative">
       <Button size="sm" variant="outline" onClick={() => onOpenChange(!open)} disabled={files.length === 0}>
@@ -745,7 +812,7 @@ function FilesDropdown({ files, open, onOpenChange, onRename, onDelete }: FilesD
       {open && files.length > 0 && (
         <div className="absolute left-0 top-full mt-1 w-80 max-h-96 overflow-auto bg-background border border-border rounded-md shadow-lg z-30 p-1">
           {files.map((f) => (
-            <FileRow key={f.id} file={f} onRename={onRename} onDelete={onDelete} />
+            <FileRow key={f.id} file={f} onRename={onRename} onDelete={onDelete} onReplaced={onReplaced} />
           ))}
         </div>
       )}
@@ -753,22 +820,49 @@ function FilesDropdown({ files, open, onOpenChange, onRename, onDelete }: FilesD
   );
 }
 
+/** Accept string for the replace picker, scoped to the file's kind so you can't
+ *  swap a PDF for audio (which would orphan its annotations). */
+const ACCEPT_BY_KIND: Record<'pdf' | 'audio', string> = {
+  pdf: 'application/pdf,.pdf',
+  audio: 'audio/*,.mp3,.m4a,.aac,.ogg,.wav,.flac',
+};
+
 function FileRow({
   file,
   onRename,
   onDelete,
+  onReplaced,
 }: {
   file: PieceFile;
   onRename: (id: number, label: string | null) => void;
   onDelete: (id: number) => void;
+  onReplaced: () => void;
 }) {
   const [label, setLabel] = useState(file.label ?? '');
   const [confirming, setConfirming] = useState(false);
+  const [replacing, setReplacing] = useState(false);
+  const [replaceError, setReplaceError] = useState<string | null>(null);
+  const replaceInputRef = useRef<HTMLInputElement>(null);
   useEffect(() => setLabel(file.label ?? ''), [file.label]);
 
   function save(): void {
     const next = label.trim() || null;
     if (next !== (file.label ?? null)) onRename(file.id, next);
+  }
+
+  async function handleReplacePicked(picked: File | undefined): Promise<void> {
+    if (replaceInputRef.current) replaceInputRef.current.value = '';
+    if (!picked) return;
+    setReplacing(true);
+    setReplaceError(null);
+    try {
+      await replaceFile(file.id, picked, file.kind);
+      onReplaced();
+    } catch (e) {
+      setReplaceError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setReplacing(false);
+    }
   }
 
   return (
@@ -794,10 +888,33 @@ function FileRow({
           className="w-full text-xs h-7 px-1.5 rounded border border-transparent hover:border-border focus:border-border focus:outline-none bg-transparent"
         />
         <div className="text-[10px] text-muted-foreground truncate px-1.5" title={file.filename}>
-          {file.filename}
-          {file.createdByName ? ` · ${file.createdByName}` : ''}
+          {replacing ? 'Replacing…' : replaceError ? <span className="text-destructive">{replaceError}</span> : (
+            <>
+              {file.filename}
+              {file.createdByName ? ` · ${file.createdByName}` : ''}
+            </>
+          )}
         </div>
       </div>
+
+      <input
+        ref={replaceInputRef}
+        type="file"
+        accept={ACCEPT_BY_KIND[file.kind]}
+        className="hidden"
+        onChange={(e) => void handleReplacePicked(e.target.files?.[0])}
+      />
+      <button
+        type="button"
+        title={`Replace this ${file.kind === 'pdf' ? 'PDF' : 'track'} (keeps annotations)`}
+        aria-label="Replace file"
+        disabled={replacing}
+        onClick={() => replaceInputRef.current?.click()}
+        className="text-[10px] px-1.5 py-0.5 rounded border border-border text-muted-foreground hover:bg-accent shrink-0 disabled:opacity-50"
+      >
+        Replace
+      </button>
+
       {confirming ? (
         <div className="flex items-center gap-1 shrink-0">
           <button type="button" onClick={() => onDelete(file.id)} className="text-[10px] px-1.5 py-0.5 rounded bg-destructive text-white">

@@ -19,6 +19,7 @@ import {
   deleteFileRow,
   getFileRowById,
   getPieceWithFiles,
+  replaceFileStorage,
   updateFileLabel,
 } from '../db/pieces.ts';
 import { requireAdmin } from '../auth/middleware.ts';
@@ -197,6 +198,106 @@ export const filesRoutes: FastifyPluginAsync = async (app) => {
       const label = typeof raw === 'string' ? raw.trim() || null : null;
       const updated = updateFileLabel(id, label);
       if (!updated) return reply.code(404).send({ error: 'not found' });
+      return updated;
+    },
+  );
+
+  /**
+   * Replace a file's bytes in place (admin) — e.g. a corrected score or a
+   * re-recorded track. The DB row keeps its id, kind, label and sort order, so
+   * existing annotations stay attached. Same presign + complete shape as a
+   * fresh upload, but the kind is fixed to the existing file's kind.
+   */
+  app.post<{ Params: { id: string }; Body: { filename: string; mimeType: string; sizeBytes?: number } }>(
+    '/files/:id/sign-replace',
+    { preHandler: requireAdmin },
+    async (req, reply) => {
+      if (!isB2Configured()) {
+        return reply.code(503).send({
+          error: 'b2_not_configured',
+          message:
+            'Backblaze B2 is not configured. Set B2_KEY_ID, B2_APPLICATION_KEY, B2_BUCKET, B2_ENDPOINT, B2_REGION.',
+        });
+      }
+
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) return reply.code(400).send({ error: 'invalid file id' });
+
+      const row = getFileRowById(id);
+      if (!row) return reply.code(404).send({ error: 'not found' });
+
+      const body = req.body;
+      if (!body || typeof body.filename !== 'string' || typeof body.mimeType !== 'string') {
+        return reply.code(400).send({ error: 'invalid payload' });
+      }
+      // The replacement must be the same kind as the original — you can't turn
+      // a score PDF into an audio track and keep its annotations.
+      if (!mimeMatchesKind(row.kind, body.mimeType)) {
+        return reply.code(415).send({
+          error: 'unsupported_media_type',
+          message: `${body.mimeType} is not allowed for kind=${row.kind}`,
+        });
+      }
+      if (body.sizeBytes !== undefined && (typeof body.sizeBytes !== 'number' || body.sizeBytes > MAX_FILE_BYTES)) {
+        return reply.code(413).send({ error: 'file too large' });
+      }
+
+      const storageKey = `pieces/${row.piece_id}/files/${readableStoredName(body.filename)}`;
+      const signed = await presignPut({ storageKey, contentType: body.mimeType });
+      return signed;
+    },
+  );
+
+  /** After the browser PUTs the replacement bytes to B2, point the row at the
+   *  new object and best-effort delete the old one. */
+  app.post<{ Params: { id: string }; Body: { storageKey: string; filename: string; mimeType: string; sizeBytes?: number } }>(
+    '/files/:id/complete-replace',
+    { preHandler: requireAdmin },
+    async (req, reply) => {
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) return reply.code(400).send({ error: 'invalid file id' });
+
+      const row = getFileRowById(id);
+      if (!row) return reply.code(404).send({ error: 'not found' });
+
+      const body = req.body;
+      if (
+        !body ||
+        typeof body.storageKey !== 'string' ||
+        typeof body.filename !== 'string' ||
+        typeof body.mimeType !== 'string'
+      ) {
+        return reply.code(400).send({ error: 'invalid payload' });
+      }
+      if (!mimeMatchesKind(row.kind, body.mimeType)) {
+        return reply.code(415).send({ error: 'unsupported_media_type' });
+      }
+      if (!body.storageKey.startsWith(`pieces/${row.piece_id}/files/`)) {
+        return reply.code(400).send({ error: 'storage key outside piece namespace' });
+      }
+
+      // Remember where the old bytes lived so we can clean them up once the row
+      // points at the new object.
+      const oldStorage = row.storage;
+      const oldKey = row.storage_key;
+
+      const updated = replaceFileStorage(id, {
+        storage: 'b2',
+        storageKey: body.storageKey,
+        filename: body.filename,
+        mimeType: body.mimeType,
+        sizeBytes: body.sizeBytes ?? null,
+        createdByUserId: req.user!.internalId,
+      });
+      if (!updated) return reply.code(404).send({ error: 'not found' });
+
+      if (oldKey !== body.storageKey) {
+        if (oldStorage === 'b2' && isB2Configured()) {
+          await deleteObject(oldKey);
+        } else if (oldStorage === 'local') {
+          await deleteLocalFile(oldKey);
+        }
+      }
       return updated;
     },
   );

@@ -106,6 +106,46 @@ export function useUploadFile(pieceId: number | null): UseUploadFileResult {
   return { status, upload };
 }
 
+/**
+ * Replace an existing file's bytes in place: sign-replace → PUT to B2 →
+ * complete-replace. The file keeps its id/label/kind so annotations stay
+ * attached. Throws on failure; the caller manages its own busy/error UI.
+ */
+export async function replaceFile(fileId: number, file: File, kind: 'pdf' | 'audio'): Promise<PieceFile> {
+  const mimeType = file.type || (kind === 'pdf' ? 'application/pdf' : 'application/octet-stream');
+
+  const signRes = await fetch(`/api/files/${fileId}/sign-replace`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ filename: file.name, mimeType, sizeBytes: file.size }),
+  });
+  if (!signRes.ok) {
+    const body = (await signRes.json().catch(() => ({}))) as { error?: string; message?: string };
+    throw new Error(body.message ?? body.error ?? `sign failed (HTTP ${signRes.status})`);
+  }
+  const signed = (await signRes.json()) as SignResponse;
+
+  const putRes = await fetch(signed.url, {
+    method: 'PUT',
+    headers: { 'Content-Type': mimeType },
+    body: file,
+  });
+  if (!putRes.ok) throw new Error(`upload to B2 failed (HTTP ${putRes.status})`);
+
+  const completeRes = await fetch(`/api/files/${fileId}/complete-replace`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ storageKey: signed.storageKey, filename: file.name, mimeType, sizeBytes: file.size }),
+  });
+  if (!completeRes.ok) {
+    const body = (await completeRes.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? `replace failed (HTTP ${completeRes.status})`);
+  }
+  return (await completeRes.json()) as PieceFile;
+}
+
 /** Convenience: pick the right `kind` from the File's MIME type. */
 export function inferKind(file: File): 'pdf' | 'audio' | null {
   if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) return 'pdf';

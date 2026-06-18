@@ -274,3 +274,42 @@ export function updateFileLabel(id: number, label: string | null): FileDTO | nul
   const row = updateFileLabelStmt.get(label, id) as FileRow | undefined;
   return row ? toFileDTO(row) : null;
 }
+
+const replaceFileStorageStmt = db.prepare(`
+  UPDATE files
+  SET storage = ?, storage_key = ?, filename = ?, size_bytes = ?, mime_type = ?, created_by_user_id = ?
+  WHERE id = ?
+  RETURNING *
+`);
+
+export interface ReplaceFileStorageInput {
+  storage: 'b2' | 'local';
+  storageKey: string;
+  filename: string;
+  sizeBytes?: number | null;
+  mimeType?: string | null;
+  /** The user performing the replacement — becomes the file's recorded owner,
+   *  since they're responsible for the current bytes. */
+  createdByUserId?: number | null;
+}
+
+/**
+ * Swap a file's stored bytes in place — same row id, same kind, same label and
+ * sort order. Used when an admin uploads a corrected version of a score/track.
+ * Keeping the id means existing annotations (which reference fileId) stay
+ * attached. Bumps the parent piece's updated_at. Returns null if id is unknown.
+ */
+export function replaceFileStorage(id: number, input: ReplaceFileStorageInput): FileDTO | null {
+  const row = replaceFileStorageStmt.get(
+    input.storage,
+    input.storageKey,
+    input.filename,
+    input.sizeBytes ?? null,
+    input.mimeType ?? null,
+    input.createdByUserId ?? null,
+    id,
+  ) as FileRow | undefined;
+  if (!row) return null;
+  touchPieceStmt.run(row.piece_id);
+  return toFileDTO(row);
+}
