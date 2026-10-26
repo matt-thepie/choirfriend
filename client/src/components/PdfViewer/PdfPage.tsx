@@ -59,7 +59,7 @@ export function PdfPage({
 }: PdfPageProps) {
   const pdfCanvasRef = useRef<HTMLCanvasElement>(null);
   const annotationCanvasRef = useRef<HTMLCanvasElement>(null);
-  const [renderedSize, setRenderedSize] = useState<{ width: number; height: number } | null>(null);
+  const [renderedSize, setRenderedSize] = useState<{ width: number; height: number; dpr: number } | null>(null);
   const activeStrokeRef = useRef<{ points: Array<{ x: number; y: number }> } | null>(null);
 
   const inkAnnotations = annotations.filter((a): a is InkAnnotation => a.kind === 'ink');
@@ -80,11 +80,19 @@ export function PdfPage({
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
-      canvas.width = Math.floor(viewport.width);
-      canvas.height = Math.floor(viewport.height);
-      setRenderedSize({ width: canvas.width, height: canvas.height });
+      // Render at device resolution so phones/tablets aren't blurry, but lay
+      // the canvas out at CSS-pixel size. renderedSize stays in CSS px —
+      // badges and pointer maths use it.
+      const dpr = Math.min(3, window.devicePixelRatio || 1);
+      const cssW = Math.floor(viewport.width);
+      const cssH = Math.floor(viewport.height);
+      canvas.width = Math.floor(viewport.width * dpr);
+      canvas.height = Math.floor(viewport.height * dpr);
+      canvas.style.width = `${cssW}px`;
+      canvas.style.height = `${cssH}px`;
+      setRenderedSize({ width: cssW, height: cssH, dpr });
 
-      renderTask = page.render({ canvas, canvasContext: ctx, viewport });
+      renderTask = page.render({ canvas, canvasContext: ctx, viewport, transform: dpr === 1 ? undefined : [dpr, 0, 0, dpr, 0, 0] });
       try {
         await renderTask.promise;
       } catch {
@@ -102,8 +110,10 @@ export function PdfPage({
   useEffect(() => {
     const canvas = annotationCanvasRef.current;
     if (!canvas || !renderedSize) return;
-    canvas.width = renderedSize.width;
-    canvas.height = renderedSize.height;
+    canvas.width = renderedSize.width * renderedSize.dpr;
+    canvas.height = renderedSize.height * renderedSize.dpr;
+    canvas.style.width = `${renderedSize.width}px`;
+    canvas.style.height = `${renderedSize.height}px`;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -111,7 +121,7 @@ export function PdfPage({
     for (const a of inkAnnotations) {
       if (a.points.length === 0) continue;
       ctx.strokeStyle = a.color;
-      ctx.lineWidth = a.width * scale;
+      ctx.lineWidth = a.width * scale * renderedSize.dpr;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       ctx.beginPath();
@@ -141,7 +151,7 @@ export function PdfPage({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.strokeStyle = inkColor;
-    ctx.lineWidth = inkWidth * scale;
+    ctx.lineWidth = inkWidth * scale * (renderedSize?.dpr ?? 1);
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.beginPath();

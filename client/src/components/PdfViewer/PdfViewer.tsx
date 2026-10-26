@@ -91,7 +91,10 @@ export function PdfViewer({
 
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
   const [pdfLoadError, setPdfLoadError] = useState<string | null>(null);
-  const [scale, setScale] = useState(1.25);
+  // User zoom in scroll mode, relative to the fit-to-width base. 1 = "fits
+  // the screen width" (capped at 125% on wide screens so desktop pages don't
+  // balloon).
+  const [zoom, setZoom] = useState(1);
   const [drawTarget, setDrawTarget] = useState<AnnotationLayer>('shared');
   const [tool, setTool] = useState<AnnotationTool>('pan');
   // Entering read mode drops the marker tool — you're performing, not placing
@@ -110,6 +113,7 @@ export function PdfViewer({
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
 
   // Track container dimensions so we can fit-scale in page mode.
   const [containerSize, setContainerSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
@@ -119,6 +123,20 @@ export function PdfViewer({
     const ro = new ResizeObserver((entries) => {
       const rect = entries[0]?.contentRect;
       if (rect) setContainerSize({ w: rect.width, h: rect.height });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Width available to a page in scroll mode (the content box of the padded
+  // column, so padding is already excluded). Drives fit-to-width.
+  const [contentWidth, setContentWidth] = useState(0);
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver((entries) => {
+      const rect = entries[0]?.contentRect;
+      if (rect) setContentWidth(rect.width);
     });
     ro.observe(el);
     return () => ro.disconnect();
@@ -173,14 +191,21 @@ export function PdfViewer({
   // visible breathing room and prevents the tap zones from sitting on top
   // of content.
   const fitScale = useMemo(() => {
-    if (!intrinsicPageSize || containerSize.w === 0 || containerSize.h === 0) return scale;
+    if (!intrinsicPageSize || containerSize.w === 0 || containerSize.h === 0) return 1.25;
     const margin = 32;
     const w = (containerSize.w - margin * 2) / intrinsicPageSize.w;
     const h = (containerSize.h - margin * 2) / intrinsicPageSize.h;
     return Math.max(0.3, Math.min(4, Math.min(w, h)));
-  }, [containerSize, intrinsicPageSize, scale]);
+  }, [containerSize, intrinsicPageSize]);
 
-  const effectiveScale = effectiveNavMode === 'page' ? fitScale : scale;
+  // Scroll-mode base: fit the page to the available width (phones), but no
+  // larger than the old fixed 125% (desktops). Zoom multiplies this.
+  const scrollBaseScale = useMemo(() => {
+    if (!intrinsicPageSize || contentWidth === 0) return 1.25;
+    return Math.max(0.3, Math.min(1.25, contentWidth / intrinsicPageSize.w));
+  }, [contentWidth, intrinsicPageSize]);
+
+  const effectiveScale = effectiveNavMode === 'page' ? fitScale : scrollBaseScale * zoom;
 
   // Switching to a different PDF in the piece starts at its first page.
   useEffect(() => {
@@ -458,7 +483,7 @@ export function PdfViewer({
 
       <div className="h-6 w-px bg-border mx-1" />
 
-      <ZoomControls scale={scale} onScale={setScale} />
+      <ZoomControls zoom={zoom} onZoom={setZoom} />
 
       <div className="ml-auto flex items-center gap-2">
         <JumpToDropdown
@@ -522,7 +547,7 @@ export function PdfViewer({
         </>
       )}
 
-      {effectiveNavMode === 'scroll' && <ZoomControls scale={scale} onScale={setScale} />}
+      {effectiveNavMode === 'scroll' && <ZoomControls zoom={zoom} onZoom={setZoom} />}
 
       <div className="ml-auto flex items-center gap-2">
         <JumpToDropdown
@@ -603,9 +628,10 @@ export function PdfViewer({
       <div ref={stageRef} className="flex-1 relative min-h-0">
         <div ref={scrollContainerRef} className="absolute inset-0 overflow-auto bg-muted/40">
           <div
+            ref={contentRef}
             className={cn(
               'flex flex-col items-center gap-6',
-              effectiveNavMode === 'page' ? 'py-4 px-4 justify-center min-h-full' : 'py-6 pl-12 pr-6',
+              effectiveNavMode === 'page' ? 'py-4 px-4 justify-center min-h-full' : 'py-4 pl-10 pr-2 sm:py-6 sm:pl-12 sm:pr-6',
             )}
           >
             {pieceLoading && <p className="text-sm text-muted-foreground">Loading piece…</p>}
@@ -739,12 +765,21 @@ function PdfSwitcher({
   );
 }
 
-function ZoomControls({ scale, onScale }: { scale: number; onScale: (s: number) => void }) {
+/** Zoom relative to fit-to-width: 100% means the page fills the screen width. */
+function ZoomControls({ zoom, onZoom }: { zoom: number; onZoom: (z: number) => void }) {
+  const step = (d: number) => onZoom(Math.round(Math.min(3, Math.max(0.5, zoom + d)) * 10) / 10);
   return (
     <div className="flex items-center gap-1">
-      <Button size="sm" variant="outline" onClick={() => onScale(Math.max(0.5, scale - 0.1))}>−</Button>
-      <span className="text-xs tabular-nums w-12 text-center">{Math.round(scale * 100)}%</span>
-      <Button size="sm" variant="outline" onClick={() => onScale(Math.min(3, scale + 0.1))}>+</Button>
+      <Button size="sm" variant="outline" onClick={() => step(-0.1)} aria-label="Zoom out">−</Button>
+      <button
+        type="button"
+        className="text-xs tabular-nums w-12 text-center hover:underline"
+        onClick={() => onZoom(1)}
+        title="Reset to fit width"
+      >
+        {Math.round(zoom * 100)}%
+      </button>
+      <Button size="sm" variant="outline" onClick={() => step(0.1)} aria-label="Zoom in">+</Button>
     </div>
   );
 }
