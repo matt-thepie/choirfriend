@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { pdfjsLib, type PDFDocumentProxy } from '@/lib/pdfjs.ts';
-import { Button } from '@/components/ui/button.tsx';
+import { Button, Icon } from '@/components/ui/button.tsx';
 import { cn } from '@/lib/utils.ts';
 import {
   MARKER_KIND_ORDER,
@@ -34,6 +34,8 @@ interface PdfViewerProps {
   /** Called when the user exits read mode from within the viewer (e.g.
    *  Esc, or the Exit button on the minimal toolbar). */
   onExitReadMode?: () => void;
+  /** Enter read mode from the toolbar button. */
+  onEnterReadMode?: () => void;
   /** Whether the current user holds an admin role. Gates the upload and
    *  delete UI so we don't show buttons that 403 on click. */
   isAdmin?: boolean;
@@ -72,6 +74,7 @@ export function PdfViewer({
   onPieceMutated,
   readMode = false,
   onExitReadMode,
+  onEnterReadMode,
   isAdmin = false,
   initialFileId = null,
 }: PdfViewerProps) {
@@ -438,6 +441,12 @@ export function PdfViewer({
     // squashing in the scroll row.
     <div className="px-4 py-2 flex items-center gap-2 flex-nowrap overflow-x-auto [&>*]:shrink-0 md:flex-wrap md:overflow-visible">
       {piece && <h2 className="text-sm font-semibold mr-2">{piece.title}</h2>}
+      {onEnterReadMode && (
+        <Button size="sm" onClick={onEnterReadMode} title="Hide the editing tools and sing from the score">
+          <Icon name="auto_stories" className="text-xl" />
+          Read mode
+        </Button>
+      )}
       {pieceLoading && <span className="text-xs text-muted-foreground">Loading piece…</span>}
       {pieceError && <span className="text-xs text-destructive">Piece error: {pieceError}</span>}
 

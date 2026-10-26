@@ -176,3 +176,11 @@
     accent-color: var(--accent);
   }
 }
+
+/* Seek bar on the mini player: a thin track with a round thumb that is not
+   clipped by the card's overflow-hidden (the input is taller than the track). */
+.seek::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: var(--card-2); }
+.seek::-webkit-slider-thumb { appearance: none; width: 12px; height: 12px; margin-top: -3px; border-radius: 50%; background: var(--accent); }
+.seek::-moz-range-track { height: 6px; border-radius: 3px; background: var(--card-2); }
+.seek::-moz-range-thumb { width: 12px; height: 12px; border: 0; border-radius: 50%; background: var(--accent); }
+.seek:disabled::-webkit-slider-thumb, .seek:disabled::-moz-range-thumb { background: var(--ink-faint); }

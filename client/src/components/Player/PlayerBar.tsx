@@ -34,7 +34,7 @@ export function PlayerBar({ onOpenPiece }: PlayerBarProps) {
           value={Math.min(p.currentTime, hasDuration ? p.duration : p.currentTime)}
           onChange={(e) => p.seek(Number(e.target.value))}
           disabled={!hasDuration}
-          className="absolute top-0 inset-x-0 h-1.5 w-full appearance-none bg-card-2 cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary"
+          className="seek absolute top-0 inset-x-0 h-3 w-full appearance-none bg-transparent cursor-pointer"
           aria-label="Seek"
         />
 
@@ -48,34 +48,7 @@ export function PlayerBar({ onOpenPiece }: PlayerBarProps) {
               <IconButton icon="close" label="Close player" onClick={p.clear} size="sm" />
             </div>
 
-            <ol className="inset-list mb-4">
-              {p.queue.tracks.map((t, i) => (
-                <li
-                  key={`${t.fileId}-${i}`}
-                  className={cn('inset-row flex items-center gap-3 px-4 cursor-pointer hover:shadow-card', i === p.index && 'ring-2 ring-primary')}
-                  onClick={() => p.playAt(i)}
-                >
-                  <span className="w-6 text-right text-sm tabular-nums text-muted-foreground">{i + 1}</span>
-                  <div className="flex-1 min-w-0 py-2">
-                    <div className={cn('text-base truncate', i === p.index && 'font-semibold')}>{t.pieceTitle}</div>
-                    <div className="text-sm text-muted-foreground truncate">{t.title}</div>
-                  </div>
-                  {onOpenPiece && (
-                    <IconButton
-                      icon="library_music"
-                      label="Open song"
-                      size="sm"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onOpenPiece(t.pieceId);
-                      }}
-                    />
-                  )}
-                </li>
-              ))}
-            </ol>
-
-            <div className="flex flex-wrap items-center gap-x-5 gap-y-3 text-sm">
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-3 text-sm mb-4">
               <label className="flex items-center gap-2">
                 <span className="text-muted-foreground">Speed</span>
                 <select
@@ -105,6 +78,34 @@ export function PlayerBar({ onOpenPiece }: PlayerBarProps) {
                 Repeat {p.repeat === 'off' ? 'off' : p.repeat}
               </Button>
             </div>
+
+            <ol className="inset-list mb-1">
+              {p.queue.tracks.map((t, i) => (
+                <li
+                  key={`${t.fileId}-${i}`}
+                  className={cn('inset-row flex items-center gap-3 px-4 cursor-pointer hover:shadow-card', i === p.index && 'ring-2 ring-primary')}
+                  onClick={() => p.playAt(i)}
+                >
+                  <span className="w-6 text-right text-sm tabular-nums text-muted-foreground">{i + 1}</span>
+                  <div className="flex-1 min-w-0 py-2">
+                    <div className={cn('text-base truncate', i === p.index && 'font-semibold')}>{t.pieceTitle}</div>
+                    <div className="text-sm text-muted-foreground truncate">{t.title}</div>
+                  </div>
+                  {onOpenPiece && (
+                    <IconButton
+                      icon="library_music"
+                      label="Open song"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onOpenPiece(t.pieceId);
+                      }}
+                    />
+                  )}
+                </li>
+              ))}
+            </ol>
+
           </div>
         )}
 

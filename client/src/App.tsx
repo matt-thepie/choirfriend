@@ -226,17 +226,6 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
                           setMenuOpen(false);
                         }}
                       />
-                      {view === 'viewer' && (
-                        <MenuItem
-                          icon={<Icon name="auto_stories" className="text-xl" />}
-                          label="Read mode"
-                          active={readMode}
-                          onClick={() => {
-                            setReadMode((r) => !r);
-                            setMenuOpen(false);
-                          }}
-                        />
-                      )}
                       <div className="h-px bg-border my-1" />
                     </>
                   )}
@@ -347,6 +336,7 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
                 onPieceMutated={bumpPieceRefresh}
                 readMode={readMode}
                 onExitReadMode={() => setReadMode(false)}
+                onEnterReadMode={() => setReadMode(true)}
                 isAdmin={editing}
               />
             </div>
