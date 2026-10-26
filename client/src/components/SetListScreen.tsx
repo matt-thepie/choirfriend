@@ -145,9 +145,9 @@ export function SetListScreen({
           )}
         </div>
 
-        <div className="grid gap-6 md:grid-cols-[1fr_320px] items-start">
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-[minmax(0,1fr)_320px] items-start">
         {/* Practice list panel */}
-        <div className="card p-4 sm:p-6 space-y-4 md:order-2 md:sticky md:top-4">
+        <div className="card p-4 sm:p-6 space-y-4 min-w-0 md:order-2 md:sticky md:top-4">
           <div className="text-base font-semibold">Practice list</div>
           <label className="block text-sm">
             <span className="text-muted-foreground">Viewing content for</span>
@@ -181,7 +181,7 @@ export function SetListScreen({
           </button>
         </div>
 
-        <div className="card p-4 sm:p-6 md:order-1">
+        <div className="card p-4 sm:p-6 min-w-0 md:order-1">
 
         {list.songs.length === 0 ? (
           <p className="text-base text-muted-foreground text-center py-6">
