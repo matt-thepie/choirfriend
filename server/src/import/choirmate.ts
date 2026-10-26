@@ -168,6 +168,7 @@ async function main(): Promise<void> {
   // -- 2. pieces + files -----------------------------------------------------
   const skippedDocx: string[] = [];
   const missing: string[] = [];
+  const dirCache = new Map<string, Map<string, string>>();
   let pieceCount = 0, fileCount = 0, bytes = 0;
   let processed = 0;
 
@@ -277,7 +278,6 @@ async function main(): Promise<void> {
 
   // The manifest's folder/file casing came from a case-insensitive macOS disk
   // and does not always match what is on a Linux filesystem.
-  const dirCache = new Map<string, Map<string, string>>();
   function resolveCaseInsensitive(root: string, rel: string): string {
     let cur = root;
     for (const part of rel.split('/')) {
