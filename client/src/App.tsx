@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { PdfViewer } from '@/components/PdfViewer/index.ts';
 import { AudioPlayer } from '@/components/AudioPlayer/index.ts';
 import { Piano } from '@/components/Piano/index.ts';
-import { HomeScreen } from '@/components/HomeScreen.tsx';
+import { RepertoireScreen } from '@/components/RepertoireScreen.tsx';
 import { ImportScreen } from '@/components/ImportScreen.tsx';
 import { SignInScreen } from '@/components/SignInScreen.tsx';
 import { SetListsScreen } from '@/components/SetListsScreen.tsx';
@@ -24,6 +24,7 @@ interface MeResponse {
   displayName?: string;
   groups?: string[];
   isAdmin?: boolean;
+  canSeeScores?: boolean;
   sectionId?: number | null;
 }
 
@@ -37,7 +38,7 @@ interface MeResponse {
  *     before showing any choir data.
  *
  * Views (when signed in):
- *   - home — search across two lists: active repertoire + all other songs.
+ *   - home — the repertoire table (Set lists is the default tab).
  *   - piece — open piece: PdfViewer + AudioPlayer + (toggleable) Piano.
  *
  * Display modes (only meaningful in piece view):
@@ -90,7 +91,19 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
   const [pieceId, setPieceId] = useState<number | null>(null);
   /** null = not in set list area; 0 = virtual "All songs"; >0 = a stored list. */
   const [setListId, setSetListId] = useState<number | null>(null);
-  const [tab, setTab] = useState<'songs' | 'setlists'>('songs');
+  // ChoirMate lands members on Set lists; Repertoire is the other view.
+  const [tab, setTab] = useState<'songs' | 'setlists'>('setlists');
+  // Admins flip between the member layout (view mode) and the admin layout
+  // (edit mode). Members never see the toggle. Remembered for the session.
+  const [editMode, setEditMode] = useState<boolean>(() => {
+    try { return sessionStorage.getItem('choirfriend.editMode') === '1'; } catch { return false; }
+  });
+  function toggleEditMode(): void {
+    setEditMode((v) => {
+      try { sessionStorage.setItem('choirfriend.editMode', v ? '0' : '1'); } catch { /* ignore */ }
+      return !v;
+    });
+  }
   const [pianoOpen, setPianoOpen] = useState(false);
   const [readMode, setReadMode] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -98,6 +111,8 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
   const [partMenuOpen, setPartMenuOpen] = useState(false);
   const [mySectionId, setMySectionId] = useState<number | null>(me.sectionId ?? null);
   const isAdmin = me.isAdmin === true;
+  // Admin controls only render in edit mode — view mode is exactly what members get.
+  const editing = isAdmin && editMode;
   const currentPiece = pieces.find((p) => p.id === pieceId) ?? null;
 
   const [pieceRefreshTick, setPieceRefreshTick] = useState(0);
@@ -144,14 +159,14 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
               className="inline-flex items-center gap-1.5 font-medium hover:opacity-80 shrink-0"
               aria-label="Back"
             >
-              <BackIcon /> {setListId !== null ? 'Set list' : 'Songs'}
+              <BackIcon /> {setListId !== null ? 'Set list' : 'Repertoire'}
             </button>
           ) : (
             <>
               <span className="font-semibold shrink-0">choirfriend</span>
-              <nav className="ml-2 flex items-center gap-1 text-sm" aria-label="Main">
-                <TabButton active={tab === 'songs'} onClick={() => { setTab('songs'); setSetListId(null); }}>Songs</TabButton>
+              <nav className="ml-2 inline-flex items-center rounded-md border border-border p-0.5 text-sm" aria-label="Set lists and repertoire">
                 <TabButton active={tab === 'setlists'} onClick={() => { setTab('setlists'); setSetListId(null); }}>Set lists</TabButton>
+                <TabButton active={tab === 'songs'} onClick={() => { setTab('songs'); setSetListId(null); }}>Repertoire</TabButton>
               </nav>
             </>
           )}
@@ -160,7 +175,17 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
             <span className="font-semibold truncate min-w-0">{currentPiece.title}</span>
           )}
 
-          <div className="ml-auto relative shrink-0">
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={toggleEditMode}
+              className={`ml-auto shrink-0 h-9 px-3 rounded-md border text-xs font-medium ${editing ? 'border-amber-600 bg-amber-50 text-amber-800' : 'border-border hover:bg-accent'}`}
+              aria-pressed={editing}
+            >
+              {editing ? 'Switch to view mode' : 'Switch to edit mode'}
+            </button>
+          )}
+          <div className={`${isAdmin ? 'ml-2' : 'ml-auto'} relative shrink-0`}>
             <button
               type="button"
               onClick={() => { setMenuOpen((o) => !o); setPartMenuOpen(false); }}
@@ -237,19 +262,19 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
             }}
           />
         ) : view === 'home' ? (
-          <HomeScreen
+          <RepertoireScreen
             pieces={pieces}
             loading={piecesLoading}
-            isAdmin={isAdmin}
+            editing={editing}
             onOpenPiece={openPiece}
             onPieceMutated={refreshPieces}
-            onImport={isAdmin ? () => setImporting(true) : undefined}
+            onImport={editing ? () => setImporting(true) : undefined}
           />
         ) : view === 'setlists' ? (
           <SetListsScreen
             setLists={setLists}
             loading={setListsLoading}
-            isAdmin={isAdmin}
+            isAdmin={editing}
             onOpen={setSetListId}
             onMutated={refreshSetLists}
           />
@@ -260,7 +285,7 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
             pieces={pieces}
             sections={sections}
             mySectionId={mySectionId}
-            isAdmin={isAdmin}
+            isAdmin={editing}
             onBack={() => setSetListId(null)}
             onOpenPiece={openPiece}
             onMutated={refreshSetLists}
@@ -275,7 +300,7 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
                 onPieceMutated={bumpPieceRefresh}
                 readMode={readMode}
                 onExitReadMode={() => setReadMode(false)}
-                isAdmin={isAdmin}
+                isAdmin={editing}
               />
             </div>
             {pianoOpen && <Piano onClose={() => setPianoOpen(false)} />}

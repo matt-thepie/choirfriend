@@ -12,6 +12,8 @@ export interface SetListSummary {
   name: string;
   status: SetListStatus;
   sortOrder: number;
+  /** "This week's rehearsal" — shown first on the home screen. Only one at a time. */
+  pinned: boolean;
   songCount: number;
   createdAt: number;
   updatedAt: number;
@@ -100,6 +102,7 @@ export interface SetListPatch {
   name?: string;
   status?: SetListStatus;
   sortOrder?: number;
+  pinned?: boolean;
   pieceIds?: number[];
 }
 

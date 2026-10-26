@@ -40,6 +40,10 @@ export interface Config {
    *  against the user's groups (from sgmc-identity or whichever provider).
    *  Default suits SGMC; other choirs override with ADMIN_ROLES env var. */
   adminRoles: readonly string[];
+  /** Roles that may see editable scores (MuseScore / MusicXML) in addition to
+   *  adminRoles. Default covers the MD and section admins; override with
+   *  SCORE_ROLES. */
+  scoreRoles: readonly string[];
   b2: {
     keyId: string;
     applicationKey: string;
@@ -64,6 +68,7 @@ export function getConfig(): Config {
     sessionSecret: required('SESSION_SECRET'),
     clientOrigin: optional('CLIENT_ORIGIN', 'http://localhost:5173'),
     adminRoles: parseRoleList(optional('ADMIN_ROLES', 'committee,trustee,admin')),
+    scoreRoles: parseRoleList(optional('SCORE_ROLES', 'md,musical-director,music-director,section-admin,section-leader')),
     b2: {
       keyId: optional('B2_KEY_ID', ''),
       applicationKey: optional('B2_APPLICATION_KEY', ''),

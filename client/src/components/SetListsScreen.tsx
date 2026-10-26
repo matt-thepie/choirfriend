@@ -78,7 +78,12 @@ export function SetListsScreen({ setLists, loading, isAdmin, onOpen, onMutated }
           <ul className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             <Tile title="All songs" subtitle="Whole repertoire" onClick={() => onOpen(0)} />
             {active.map((s) => (
-              <Tile key={s.id} title={s.name} subtitle={`${s.songCount} song${s.songCount === 1 ? '' : 's'}`} onClick={() => onOpen(s.id)} />
+              <Tile
+                key={s.id}
+                title={s.name}
+                subtitle={`${s.songCount} song${s.songCount === 1 ? '' : 's'}${s.pinned ? ' · this week' : ''}`}
+                onClick={() => onOpen(s.id)}
+              />
             ))}
           </ul>
 

@@ -133,6 +133,7 @@ export function SetListScreen({
           <button type="button" onClick={onBack} className="text-sm text-muted-foreground hover:text-foreground">‹ Set lists</button>
           <h1 className="text-base font-semibold flex-1 truncate">
             {list.name}
+            {list.pinned && <span className="ml-2 text-xs font-normal uppercase tracking-wide text-amber-700">this week</span>}
             {list.status === 'archived' && <span className="ml-2 text-xs font-normal uppercase tracking-wide text-muted-foreground">archived</span>}
           </h1>
           {isAdmin && !isVirtual && (
@@ -231,6 +232,7 @@ interface SetListEditorProps {
 function SetListEditor({ setList, pieces, onSaved, onClose, onDeleted, onCopied }: SetListEditorProps) {
   const [name, setName] = useState(setList.name);
   const [status, setStatus] = useState(setList.status);
+  const [pinned, setPinned] = useState(setList.pinned);
   const [songs, setSongs] = useState<SetListSong[]>(setList.songs);
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
@@ -241,6 +243,7 @@ function SetListEditor({ setList, pieces, onSaved, onClose, onDeleted, onCopied 
   const dirty =
     name.trim() !== setList.name ||
     status !== setList.status ||
+    pinned !== setList.pinned ||
     songs.length !== setList.songs.length ||
     songs.some((s, i) => s.id !== setList.songs[i]?.id);
 
@@ -283,7 +286,7 @@ function SetListEditor({ setList, pieces, onSaved, onClose, onDeleted, onCopied 
   }
 
   const save = (): Promise<void> =>
-    run('save', () => patchSetList(setList.id, { name: name.trim(), status, pieceIds: songs.map((s) => s.id) }), (updated) => {
+    run('save', () => patchSetList(setList.id, { name: name.trim(), status, pinned, pieceIds: songs.map((s) => s.id) }), (updated) => {
       onSaved(updated);
       setSongs(updated.songs);
     });
@@ -321,6 +324,13 @@ function SetListEditor({ setList, pieces, onSaved, onClose, onDeleted, onCopied 
               <option value="active">Active</option>
               <option value="archived">Archived</option>
             </select>
+          </label>
+          <label className="text-xs flex items-center gap-2 sm:col-span-2 cursor-pointer select-none">
+            <input type="checkbox" checked={pinned} onChange={(e) => setPinned(e.target.checked)} />
+            <span>
+              <span className="font-medium">This week's rehearsal</span>
+              <span className="text-muted-foreground"> — show this list at the top of everyone's home screen. Pinning it unpins any other.</span>
+            </span>
           </label>
         </div>
 

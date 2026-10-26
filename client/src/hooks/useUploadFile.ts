@@ -12,7 +12,7 @@
  */
 
 import { useCallback, useState } from 'react';
-import type { PieceFile } from './usePiece.ts';
+import type { FileKind, PieceFile } from './usePiece.ts';
 
 export type UploadStatus =
   | { phase: 'idle' }
@@ -24,7 +24,7 @@ export type UploadStatus =
 
 export interface UseUploadFileResult {
   status: UploadStatus;
-  upload: (file: File, kind: 'pdf' | 'audio', label?: string) => Promise<PieceFile | null>;
+  upload: (file: File, kind: FileKind, label?: string) => Promise<PieceFile | null>;
 }
 
 interface SignResponse {
@@ -37,9 +37,9 @@ export function useUploadFile(pieceId: number | null): UseUploadFileResult {
   const [status, setStatus] = useState<UploadStatus>({ phase: 'idle' });
 
   const upload = useCallback(
-    async (file: File, kind: 'pdf' | 'audio', label?: string): Promise<PieceFile | null> => {
+    async (file: File, kind: FileKind, label?: string): Promise<PieceFile | null> => {
       if (pieceId === null) return null;
-      const mimeType = file.type || (kind === 'pdf' ? 'application/pdf' : 'application/octet-stream');
+      const mimeType = guessMime(file, kind);
 
       try {
         setStatus({ phase: 'signing', filename: file.name });
@@ -111,8 +111,8 @@ export function useUploadFile(pieceId: number | null): UseUploadFileResult {
  * complete-replace. The file keeps its id/label/kind so annotations stay
  * attached. Throws on failure; the caller manages its own busy/error UI.
  */
-export async function replaceFile(fileId: number, file: File, kind: 'pdf' | 'audio'): Promise<PieceFile> {
-  const mimeType = file.type || (kind === 'pdf' ? 'application/pdf' : 'application/octet-stream');
+export async function replaceFile(fileId: number, file: File, kind: FileKind): Promise<PieceFile> {
+  const mimeType = guessMime(file, kind);
 
   const signRes = await fetch(`/api/files/${fileId}/sign-replace`, {
     method: 'POST',
@@ -146,9 +146,36 @@ export async function replaceFile(fileId: number, file: File, kind: 'pdf' | 'aud
   return (await completeRes.json()) as PieceFile;
 }
 
-/** Convenience: pick the right `kind` from the File's MIME type. */
-export function inferKind(file: File): 'pdf' | 'audio' | null {
-  if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) return 'pdf';
+/** The browser leaves `type` empty for MuseScore/RTF/Markdown files; fill in
+ *  something the server's allowlist recognises. */
+function guessMime(file: File, kind: FileKind): string {
+  if (file.type) return file.type;
+  if (kind === 'pdf' || /\.pdf$/i.test(file.name)) return 'application/pdf';
+  if (/\.docx$/i.test(file.name)) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  if (/\.rtf$/i.test(file.name)) return 'application/rtf';
+  if (/\.txt$/i.test(file.name)) return 'text/plain';
+  if (/\.md$/i.test(file.name)) return 'text/markdown';
+  return 'application/octet-stream';
+}
+
+export const SCORE_EXT = /\.(mscz|mscx|musicxml|mxl)$/i;
+export const LYRICS_EXT = /\.(docx?|rtf|txt|md|odt)$/i;
+
+/** Accept string for the file picker, covering every kind an admin can add. */
+export const UPLOAD_ACCEPT =
+  'application/pdf,audio/*,.pdf,.mp3,.m4a,.aac,.ogg,.wav,.flac,.docx,.doc,.rtf,.txt,.md,.odt,.mscz,.mscx,.musicxml,.mxl';
+
+/**
+ * Best-guess kind from the picked file. A PDF is sheet music unless its name
+ * says it's a lyric sheet; the upload panel lets the admin flip that before
+ * sending.
+ */
+export function inferKind(file: File): FileKind | null {
+  if (SCORE_EXT.test(file.name)) return 'score';
+  if (LYRICS_EXT.test(file.name)) return 'lyrics';
+  if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) {
+    return /lyric|crib|words/i.test(file.name) ? 'lyrics' : 'pdf';
+  }
   if (file.type.startsWith('audio/') || /\.(mp3|m4a|aac|ogg|wav|flac)$/i.test(file.name)) return 'audio';
   return null;
 }

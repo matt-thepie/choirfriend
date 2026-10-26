@@ -50,6 +50,15 @@ export function isAdmin(user: { groups: string[] }): boolean {
   return adminRoles.some((r) => userGroups.has(r));
 }
 
+/** May this user see editable scores (kind='score')? Admins always can; so can
+ *  anyone holding a role in config.scoreRoles (the MD, section admins). */
+export function canSeeScores(user: { groups: string[] }): boolean {
+  if (isAdmin(user)) return true;
+  const { scoreRoles } = getConfig();
+  const userGroups = new Set(user.groups.map((g) => g.toLowerCase()));
+  return scoreRoles.some((r) => userGroups.has(r));
+}
+
 export async function resolveUser(req: FastifyRequest): Promise<AuthUser | null> {
   for (const provider of listProviders()) {
     const user = await provider.identifyUser(req);

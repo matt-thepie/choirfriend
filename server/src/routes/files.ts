@@ -19,8 +19,10 @@ import {
   deleteFileRow,
   getFileRowById,
   getPieceWithFiles,
+  isFileKind,
   replaceFileStorage,
   updateFile,
+  type FileKind,
 } from '../db/pieces.ts';
 import { requireAdmin } from '../auth/middleware.ts';
 import { guessSectionId, sectionExists } from '../db/sections.ts';
@@ -50,15 +52,41 @@ const ALLOWED_AUDIO_MIME = new Set([
   'audio/webm',
 ]);
 
-function mimeMatchesKind(kind: 'pdf' | 'audio', mimeType: string): boolean {
+/** Lyrics: "any reasonable text format". Browsers often report an empty or
+ *  generic type for .rtf/.md/.odt, so the extension is accepted as well. */
+const ALLOWED_LYRICS_MIME = new Set([
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
+  'application/msword', // .doc
+  'application/rtf',
+  'text/rtf',
+  'text/plain',
+  'text/markdown',
+  'application/vnd.oasis.opendocument.text', // .odt
+]);
+const LYRICS_EXT = /\.(pdf|docx?|rtf|txt|md|odt)$/i;
+/** Editable notation: MuseScore and MusicXML. MIME types for these are all
+ *  over the place (often application/octet-stream or a zip type), so the
+ *  extension is what we trust. */
+const SCORE_EXT = /\.(mscz|mscx|musicxml|mxl)$/i;
+
+function mimeMatchesKind(kind: FileKind, mimeType: string, filename: string): boolean {
   const m = mimeType.toLowerCase();
-  if (kind === 'pdf') return ALLOWED_PDF_MIME.has(m);
-  return ALLOWED_AUDIO_MIME.has(m);
+  switch (kind) {
+    case 'pdf':
+      return ALLOWED_PDF_MIME.has(m);
+    case 'audio':
+      return ALLOWED_AUDIO_MIME.has(m);
+    case 'lyrics':
+      return ALLOWED_LYRICS_MIME.has(m) || LYRICS_EXT.test(filename);
+    case 'score':
+      return SCORE_EXT.test(filename);
+  }
 }
 
 interface SignUploadBody {
   filename: string;
-  kind: 'pdf' | 'audio';
+  kind: FileKind;
   mimeType: string;
   sizeBytes?: number;
   /** Optional label for audio parts (e.g. "Tenor 1"). */
@@ -70,7 +98,7 @@ interface CompleteUploadBody {
   sectionId?: number | null;
   storageKey: string;
   filename: string;
-  kind: 'pdf' | 'audio';
+  kind: FileKind;
   mimeType: string;
   sizeBytes?: number;
   label?: string;
@@ -108,15 +136,15 @@ export const filesRoutes: FastifyPluginAsync = async (app) => {
       if (
         !body ||
         typeof body.filename !== 'string' ||
-        (body.kind !== 'pdf' && body.kind !== 'audio') ||
+        !isFileKind(body.kind) ||
         typeof body.mimeType !== 'string'
       ) {
         return reply.code(400).send({ error: 'invalid payload' });
       }
-      if (!mimeMatchesKind(body.kind, body.mimeType)) {
+      if (!mimeMatchesKind(body.kind, body.mimeType, body.filename)) {
         return reply.code(415).send({
           error: 'unsupported_media_type',
-          message: `${body.mimeType} is not allowed for kind=${body.kind}`,
+          message: `${body.mimeType} (${body.filename}) is not allowed for kind=${body.kind}`,
         });
       }
       if (body.sizeBytes !== undefined && (typeof body.sizeBytes !== 'number' || body.sizeBytes > MAX_FILE_BYTES)) {
@@ -153,12 +181,12 @@ export const filesRoutes: FastifyPluginAsync = async (app) => {
         !body ||
         typeof body.storageKey !== 'string' ||
         typeof body.filename !== 'string' ||
-        (body.kind !== 'pdf' && body.kind !== 'audio') ||
+        !isFileKind(body.kind) ||
         typeof body.mimeType !== 'string'
       ) {
         return reply.code(400).send({ error: 'invalid payload' });
       }
-      if (!mimeMatchesKind(body.kind, body.mimeType)) {
+      if (!mimeMatchesKind(body.kind, body.mimeType, body.filename)) {
         return reply.code(415).send({ error: 'unsupported_media_type' });
       }
 
@@ -194,14 +222,29 @@ export const filesRoutes: FastifyPluginAsync = async (app) => {
    * Rename a file's label (admin) — e.g. an imported track from "Tenor 1" to
    * "Tenor 1 (with piano)". Send { label: string } or { label: null } to clear.
    */
-  app.patch<{ Params: { id: string }; Body: { label?: string | null; sectionId?: number | null } }>(
+  app.patch<{ Params: { id: string }; Body: { label?: string | null; sectionId?: number | null; kind?: FileKind } }>(
     '/files/:id',
     { preHandler: requireAdmin },
     async (req, reply) => {
       const id = Number(req.params.id);
       if (!Number.isFinite(id)) return reply.code(400).send({ error: 'invalid file id' });
       const body = req.body ?? {};
-      const patch: { label?: string | null; sectionId?: number | null } = {};
+      const patch: { label?: string | null; sectionId?: number | null; kind?: FileKind } = {};
+      if ('kind' in body) {
+        // Re-filing is only allowed between the two document kinds — a PDF that
+        // was uploaded as sheet music but is really a lyric sheet, or vice
+        // versa. Audio and scores can't become something else.
+        const row = getFileRowById(id);
+        if (!row) return reply.code(404).send({ error: 'not found' });
+        const docKinds: FileKind[] = ['pdf', 'lyrics'];
+        if (!isFileKind(body.kind) || !docKinds.includes(body.kind) || !docKinds.includes(row.kind)) {
+          return reply.code(400).send({ error: 'kind can only change between pdf and lyrics' });
+        }
+        if (body.kind === 'pdf' && !ALLOWED_PDF_MIME.has((row.mime_type ?? '').toLowerCase()) && !/\.pdf$/i.test(row.filename)) {
+          return reply.code(400).send({ error: 'only a PDF can be filed as sheet music' });
+        }
+        patch.kind = body.kind;
+      }
       if ('label' in body) {
         const raw = body.label;
         if (raw !== null && typeof raw !== 'string') {
@@ -252,7 +295,7 @@ export const filesRoutes: FastifyPluginAsync = async (app) => {
       }
       // The replacement must be the same kind as the original — you can't turn
       // a score PDF into an audio track and keep its annotations.
-      if (!mimeMatchesKind(row.kind, body.mimeType)) {
+      if (!mimeMatchesKind(row.kind, body.mimeType, body.filename)) {
         return reply.code(415).send({
           error: 'unsupported_media_type',
           message: `${body.mimeType} is not allowed for kind=${row.kind}`,
@@ -289,7 +332,7 @@ export const filesRoutes: FastifyPluginAsync = async (app) => {
       ) {
         return reply.code(400).send({ error: 'invalid payload' });
       }
-      if (!mimeMatchesKind(row.kind, body.mimeType)) {
+      if (!mimeMatchesKind(row.kind, body.mimeType, body.filename)) {
         return reply.code(415).send({ error: 'unsupported_media_type' });
       }
       if (!body.storageKey.startsWith(`pieces/${row.piece_id}/files/`)) {

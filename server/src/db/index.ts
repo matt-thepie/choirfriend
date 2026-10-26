@@ -65,7 +65,12 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS files (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     piece_id INTEGER NOT NULL REFERENCES pieces(id) ON DELETE CASCADE,
-    kind TEXT NOT NULL CHECK(kind IN ('pdf', 'audio')),
+    -- 'pdf'    sheet music (always a PDF, rendered in the viewer)
+    -- 'audio'  learning tracks
+    -- 'lyrics' words / crib sheets in any text-ish format (pdf, docx, rtf, txt…)
+    -- 'score'  editable notation (MuseScore .mscz/.mscx, MusicXML) — restricted
+    --          to the MD / committee / section admins, see canSeeScores().
+    kind TEXT NOT NULL CHECK(kind IN ('pdf', 'audio', 'lyrics', 'score')),
     -- For audio: optional label like "Tenor 1" or "Full mix". For PDFs: usually NULL.
     label TEXT,
     -- 'b2' for Backblaze (key is relative to B2_KEY_PREFIX),
@@ -154,6 +159,46 @@ addColumnIfMissing('files', 'section_id INTEGER REFERENCES sections(id)');
 // The member's own voice part. Drives the default section filter. NULL until
 // they pick one from the menu.
 addColumnIfMissing('users', 'section_id INTEGER REFERENCES sections(id)');
+
+// A set list the MD has pinned as "this week's rehearsal". Shown first on the
+// home screen. At most one is meant to be pinned at a time (enforced in code).
+addColumnIfMissing('set_lists', 'pinned INTEGER NOT NULL DEFAULT 0');
+
+// files.kind gained 'lyrics' and 'score'. SQLite can't alter a CHECK
+// constraint, so a DB created before that change gets its files table rebuilt
+// once. Detected from the stored CREATE TABLE text.
+{
+  const ddl = (db.prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'files'`).get() as { sql: string }).sql;
+  if (!ddl.includes("'lyrics'")) {
+    db.exec('PRAGMA foreign_keys = OFF');
+    db.exec(`
+      BEGIN;
+      CREATE TABLE files_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        piece_id INTEGER NOT NULL REFERENCES pieces(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL CHECK(kind IN ('pdf', 'audio', 'lyrics', 'score')),
+        label TEXT,
+        storage TEXT NOT NULL CHECK(storage IN ('b2', 'local')),
+        storage_key TEXT NOT NULL,
+        filename TEXT NOT NULL,
+        size_bytes INTEGER,
+        mime_type TEXT,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+        created_by_user_id INTEGER REFERENCES users(id),
+        section_id INTEGER REFERENCES sections(id)
+      );
+      INSERT INTO files_new (id, piece_id, kind, label, storage, storage_key, filename, size_bytes, mime_type, sort_order, created_at, created_by_user_id, section_id)
+        SELECT id, piece_id, kind, label, storage, storage_key, filename, size_bytes, mime_type, sort_order, created_at, created_by_user_id, section_id FROM files;
+      DROP TABLE files;
+      ALTER TABLE files_new RENAME TO files;
+      CREATE INDEX IF NOT EXISTS idx_files_piece ON files(piece_id);
+      COMMIT;
+    `);
+    db.exec('PRAGMA foreign_keys = ON');
+    console.log('[db] rebuilt files table with lyrics/score kinds');
+  }
+}
 
 // --- User lookups -----------------------------------------------------------
 

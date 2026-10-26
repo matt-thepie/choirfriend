@@ -25,7 +25,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { db } from '../db/index.ts';
-import { createFile, createPiece, listPieces, updatePiece } from '../db/pieces.ts';
+import { createFile, createPiece, listPieces, updatePiece, type FileKind } from '../db/pieces.ts';
 import { listSections, seedSectionsIfEmpty } from '../db/sections.ts';
 import { createSetList, listSetLists } from '../db/setlists.ts';
 import { storeImportedFile, storageMode } from './storage.ts';
@@ -166,7 +166,6 @@ async function main(): Promise<void> {
   const existingByTitle = new Map(listPieces().map((p) => [normTitle(p.title), p.id]));
 
   // -- 2. pieces + files -----------------------------------------------------
-  const skippedDocx: string[] = [];
   const missing: string[] = [];
   const dirCache = new Map<string, Map<string, string>>();
   let pieceCount = 0, fileCount = 0, bytes = 0;
@@ -235,18 +234,18 @@ async function main(): Promise<void> {
     let sortOrder = 0;
     for (const { sm } of sheets) {
       const ext = path.extname(sm.file).toLowerCase();
-      if (ext === '.docx' || ext === '.doc') {
-        skippedDocx.push(sm.file);
-        continue;
-      }
-      if (ext !== '.pdf') {
-        console.log(`  skip non-pdf sheet: ${sm.file}`);
+      // ChoirMate lumps lyric sheets in with sheet music. Word documents are
+      // always lyrics/cribs; a PDF is lyrics when its name says so.
+      const isLyrics = ext === '.docx' || ext === '.doc' || ext === '.rtf' || ext === '.txt'
+        || /lyric|crib|words/i.test(`${sm.label ?? ''} ${path.basename(sm.file)}`);
+      if (ext !== '.pdf' && !isLyrics) {
+        console.log(`  skip unsupported sheet: ${sm.file}`);
         continue;
       }
       await importFile({
         cmId: sm.id,
         pieceId,
-        kind: 'pdf',
+        kind: isLyrics ? 'lyrics' : 'pdf',
         label: sm.label?.trim() || null,
         sectionId: null,
         relPath: sm.file,
@@ -297,7 +296,7 @@ async function main(): Promise<void> {
   async function importFile(opts: {
     cmId: string;
     pieceId: number;
-    kind: 'pdf' | 'audio';
+    kind: FileKind;
     label: string | null;
     sectionId: number | null;
     relPath: string;
@@ -377,10 +376,6 @@ async function main(): Promise<void> {
 
   // -- 4. report --------------------------------------------------------------
   console.log(`\n${dryRun ? 'would create' : 'created'}: ${pieceCount} pieces, ${fileCount} files, ${(bytes / 1024 / 1024).toFixed(0)}MB`);
-  if (skippedDocx.length) {
-    console.log(`\nskipped ${skippedDocx.length} .docx attachments (no slot for documents yet):`);
-    for (const f of skippedDocx) console.log(`  ${f}`);
-  }
   if (missing.length) {
     console.log(`\nMISSING ${missing.length} files:`);
     for (const f of missing) console.log(`  ${f}`);

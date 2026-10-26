@@ -1,6 +1,8 @@
 import { useRef, useState } from 'react';
 import { Button } from '@/components/ui/button.tsx';
-import { inferKind, useUploadFile, type UploadStatus } from '@/hooks/useUploadFile.ts';
+import { inferKind, UPLOAD_ACCEPT, useUploadFile, type UploadStatus } from '@/hooks/useUploadFile.ts';
+import { FILE_KIND_LABEL, isPdfFile, type FileKind } from '@/hooks/usePiece.ts';
+import { KindBadge } from './KindBadge.tsx';
 
 interface UploadButtonProps {
   pieceId: number;
@@ -24,63 +26,57 @@ function describeStatus(s: UploadStatus): string | null {
   }
 }
 
-/** An audio file waiting to be labelled before it's uploaded. */
-interface StagedAudio {
+/** A picked file waiting in the panel before it's uploaded. */
+interface Staged {
   file: File;
+  kind: FileKind;
   label: string;
 }
 
 /**
  * Compact upload control. Hidden `<input type=file>` triggered by a button.
  *
- * PDFs upload immediately on pick (no label needed). Audio files are staged in
- * a small panel first so the MD can name the voice part ("Tenor 1") as they
- * add it, rather than only renaming afterwards in the Files panel. The label
- * is optional — leaving it blank uploads an unlabelled track as before.
+ * Every picked file lands in a small staging panel first so the admin can
+ * check what it's being filed as and name it: audio gets a voice-part label,
+ * a PDF can be flipped between sheet music and lyrics, MuseScore files are
+ * flagged as scores (MD / committee only). Nothing uploads until "Upload".
  */
 export function UploadButton({ pieceId, onUploaded }: UploadButtonProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const { status, upload } = useUploadFile(pieceId);
-  const [staged, setStaged] = useState<StagedAudio[]>([]);
+  const [staged, setStaged] = useState<Staged[]>([]);
+  const [skipped, setSkipped] = useState<string[]>([]);
   const description = describeStatus(status);
   const busy = status.phase === 'signing' || status.phase === 'uploading' || status.phase === 'completing';
 
-  async function handleFiles(files: FileList | null): Promise<void> {
+  function handleFiles(files: FileList | null): void {
     if (inputRef.current) inputRef.current.value = '';
     if (!files) return;
-
-    const audios: StagedAudio[] = [];
+    const next: Staged[] = [];
+    const bad: string[] = [];
     for (const file of Array.from(files)) {
       const kind = inferKind(file);
-      if (!kind) {
-        console.warn('[upload] unsupported file kind, skipping:', file.name, file.type);
-        continue;
-      }
-      if (kind === 'audio') {
-        // Hold audio back for labelling.
-        audios.push({ file, label: '' });
-        continue;
-      }
-      // PDFs go straight up — no label to collect.
-      const result = await upload(file, 'pdf');
-      if (result) onUploaded();
+      if (!kind) bad.push(file.name);
+      else next.push({ file, kind, label: '' });
     }
-
-    if (audios.length > 0) setStaged((prev) => [...prev, ...audios]);
+    if (next.length > 0) setStaged((prev) => [...prev, ...next]);
+    setSkipped(bad);
   }
 
   async function uploadStaged(): Promise<void> {
     const items = staged;
     for (const item of items) {
-      const result = await upload(item.file, 'audio', item.label.trim() || undefined);
+      const result = await upload(item.file, item.kind, item.label.trim() || undefined);
       if (result) onUploaded();
     }
     setStaged([]);
   }
 
-  function updateLabel(index: number, label: string): void {
-    setStaged((prev) => prev.map((s, i) => (i === index ? { ...s, label } : s)));
+  function patch(index: number, p: Partial<Staged>): void {
+    setStaged((prev) => prev.map((s, i) => (i === index ? { ...s, ...p } : s)));
   }
+
+  const hasScore = staged.some((s) => s.kind === 'score');
 
   return (
     <div className="relative inline-flex items-center gap-2">
@@ -88,9 +84,9 @@ export function UploadButton({ pieceId, onUploaded }: UploadButtonProps) {
         ref={inputRef}
         type="file"
         multiple
-        accept="application/pdf,audio/*,.pdf,.mp3,.m4a,.aac,.ogg,.wav,.flac"
+        accept={UPLOAD_ACCEPT}
         className="hidden"
-        onChange={(e) => void handleFiles(e.target.files)}
+        onChange={(e) => handleFiles(e.target.files)}
       />
       <Button size="sm" variant="outline" onClick={() => inputRef.current?.click()} disabled={busy}>
         {busy ? 'Uploading…' : '+ Add file'}
@@ -109,42 +105,91 @@ export function UploadButton({ pieceId, onUploaded }: UploadButtonProps) {
         </span>
       )}
 
-      {staged.length > 0 && (
-        <div className="absolute left-0 top-full mt-1 z-30 w-80 bg-background border border-border rounded-md shadow-lg p-2 space-y-2">
-          <div className="text-xs font-medium">
-            Name {staged.length === 1 ? 'this track' : 'these tracks'} <span className="text-muted-foreground font-normal">(optional)</span>
-          </div>
-          <div className="space-y-1.5 max-h-64 overflow-auto">
-            {staged.map((item, i) => (
-              <div key={`${item.file.name}-${i}`} className="flex items-center gap-2">
-                <span className="text-[9px] uppercase font-semibold px-1 py-0.5 rounded shrink-0 bg-violet-100 text-violet-800">
-                  Audio
-                </span>
-                <div className="flex-1 min-w-0">
-                  <input
-                    type="text"
-                    autoFocus={i === 0}
-                    value={item.label}
-                    onChange={(e) => updateLabel(i, e.target.value)}
-                    placeholder="Voice part (e.g. Tenor 1)"
-                    disabled={busy}
-                    className="w-full text-xs h-7 px-1.5 rounded border border-border bg-background focus:outline-none focus:ring-1 focus:ring-primary"
-                  />
-                  <div className="text-[10px] text-muted-foreground truncate px-1.5" title={item.file.name}>
-                    {item.file.name}
-                  </div>
-                </div>
+      {(staged.length > 0 || skipped.length > 0) && (
+        <div className="absolute left-0 top-full mt-1 z-30 w-[22rem] max-w-[calc(100vw-2rem)] bg-background border border-border rounded-md shadow-lg p-2 space-y-2">
+          {skipped.length > 0 && (
+            <div className="text-[11px] text-destructive">
+              Not supported: {skipped.join(', ')}. Use PDF, audio, a lyrics document (docx, rtf, txt) or a MuseScore / MusicXML file.
+            </div>
+          )}
+          {staged.length > 0 && (
+            <>
+              <div className="text-xs font-medium">
+                Check {staged.length === 1 ? 'this file' : 'these files'}
               </div>
-            ))}
-          </div>
-          <div className="flex items-center justify-end gap-2">
-            <Button size="sm" variant="ghost" onClick={() => setStaged([])} disabled={busy}>
-              Cancel
-            </Button>
-            <Button size="sm" onClick={() => void uploadStaged()} disabled={busy}>
-              {busy ? 'Uploading…' : `Upload ${staged.length} track${staged.length === 1 ? '' : 's'}`}
-            </Button>
-          </div>
+              <div className="space-y-1.5 max-h-72 overflow-auto">
+                {staged.map((item, i) => {
+                  const pdf = isPdfFile({ mimeType: item.file.type, filename: item.file.name });
+                  return (
+                    <div key={`${item.file.name}-${i}`} className="flex items-start gap-2">
+                      {/* A PDF can be sheet music or lyrics; other kinds are fixed by their format. */}
+                      {pdf ? (
+                        <select
+                          value={item.kind}
+                          onChange={(e) => patch(i, { kind: e.target.value as FileKind })}
+                          aria-label="File this as"
+                          className="text-[11px] h-7 px-1 rounded border border-border bg-background shrink-0"
+                          disabled={busy}
+                        >
+                          <option value="pdf">Sheet music</option>
+                          <option value="lyrics">Lyrics</option>
+                        </select>
+                      ) : (
+                        <span className="mt-1.5"><KindBadge kind={item.kind} /></span>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <input
+                          type="text"
+                          autoFocus={i === 0}
+                          value={item.label}
+                          onChange={(e) => patch(i, { label: e.target.value })}
+                          placeholder={
+                            item.kind === 'audio'
+                              ? 'Voice part (e.g. Tenor 1)'
+                              : item.kind === 'lyrics'
+                              ? 'Label (e.g. T2 lyrics)'
+                              : 'Label (optional)'
+                          }
+                          disabled={busy}
+                          className="w-full text-xs h-7 px-1.5 rounded border border-border bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+                        />
+                        <div className="text-[10px] text-muted-foreground truncate px-1.5" title={item.file.name}>
+                          {item.file.name}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        aria-label={`Remove ${item.file.name}`}
+                        onClick={() => setStaged((prev) => prev.filter((_, j) => j !== i))}
+                        className="text-muted-foreground hover:text-destructive mt-1.5"
+                        disabled={busy}
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><path d="M6 6 18 18M18 6 6 18" /></svg>
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+              {hasScore && (
+                <p className="text-[11px] text-muted-foreground">
+                  {FILE_KIND_LABEL.score}s are only shown to the MD, committee and section admins.
+                </p>
+              )}
+              <div className="flex items-center justify-end gap-2">
+                <Button size="sm" variant="ghost" onClick={() => { setStaged([]); setSkipped([]); }} disabled={busy}>
+                  Cancel
+                </Button>
+                <Button size="sm" onClick={() => void uploadStaged()} disabled={busy}>
+                  {busy ? 'Uploading…' : `Upload ${staged.length} file${staged.length === 1 ? '' : 's'}`}
+                </Button>
+              </div>
+            </>
+          )}
+          {staged.length === 0 && (
+            <div className="flex justify-end">
+              <Button size="sm" variant="ghost" onClick={() => setSkipped([])}>OK</Button>
+            </div>
+          )}
         </div>
       )}
     </div>

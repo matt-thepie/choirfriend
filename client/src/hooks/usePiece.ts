@@ -5,10 +5,29 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
+/**
+ *  pdf    sheet music (rendered in the viewer)
+ *  audio  learning tracks
+ *  lyrics words / crib sheets — pdf, docx, rtf, txt… (a PDF opens in the viewer, the rest download)
+ *  score  editable notation (MuseScore, MusicXML) — only sent to MD / committee / section admins
+ */
+export type FileKind = 'pdf' | 'audio' | 'lyrics' | 'score';
+
+export const FILE_KIND_LABEL: Record<FileKind, string> = {
+  pdf: 'Sheet music',
+  audio: 'Audio',
+  lyrics: 'Lyrics',
+  score: 'Score',
+};
+
+export function isPdfFile(f: Pick<PieceFile, 'mimeType' | 'filename'>): boolean {
+  return f.mimeType === 'application/pdf' || /\.pdf$/i.test(f.filename);
+}
+
 export interface PieceFile {
   id: number;
   pieceId: number;
-  kind: 'pdf' | 'audio';
+  kind: FileKind;
   label: string | null;
   filename: string;
   sizeBytes: number | null;

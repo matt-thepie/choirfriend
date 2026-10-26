@@ -18,10 +18,17 @@ export interface PieceRow {
   updated_at: number;
 }
 
+/** See the files table comment in db/index.ts. */
+export type FileKind = 'pdf' | 'audio' | 'lyrics' | 'score';
+export const FILE_KINDS: readonly FileKind[] = ['pdf', 'audio', 'lyrics', 'score'];
+export function isFileKind(v: unknown): v is FileKind {
+  return typeof v === 'string' && (FILE_KINDS as readonly string[]).includes(v);
+}
+
 export interface FileRow {
   id: number;
   piece_id: number;
-  kind: 'pdf' | 'audio';
+  kind: FileKind;
   label: string | null;
   storage: 'b2' | 'local';
   storage_key: string;
@@ -56,7 +63,7 @@ export interface PieceDTO {
 export interface FileDTO {
   id: number;
   pieceId: number;
-  kind: 'pdf' | 'audio';
+  kind: FileKind;
   label: string | null;
   filename: string;
   sizeBytes: number | null;
@@ -243,7 +250,7 @@ export function updatePiece(id: number, input: UpdatePieceInput): PieceDTO | nul
 
 export interface CreateFileInput {
   pieceId: number;
-  kind: 'pdf' | 'audio';
+  kind: FileKind;
   label?: string | null;
   storage: 'b2' | 'local';
   storageKey: string;
@@ -289,15 +296,22 @@ export function deleteFileRow(id: number): boolean {
 export interface UpdateFileInput {
   label?: string | null;
   sectionId?: number | null;
+  /** Re-file a document: only pdf ↔ lyrics is meaningful (both are documents;
+   *  annotations stay valid). Routes enforce that; this just writes it. */
+  kind?: FileKind;
 }
 
-/** Patch a file's label and/or section. Only provided keys change. */
+/** Patch a file's label, section and/or kind. Only provided keys change. */
 export function updateFile(id: number, input: UpdateFileInput): FileDTO | null {
   const sets: string[] = [];
   const params: Array<string | number | null> = [];
   if (input.label !== undefined) {
     sets.push('label = ?');
     params.push(input.label);
+  }
+  if (input.kind !== undefined) {
+    sets.push('kind = ?');
+    params.push(input.kind);
   }
   if (input.sectionId !== undefined) {
     sets.push('section_id = ?');

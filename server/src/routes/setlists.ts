@@ -16,6 +16,7 @@ interface SetListBody {
   name?: string;
   status?: SetListStatus;
   sortOrder?: number;
+  pinned?: boolean;
   pieceIds?: number[];
 }
 
@@ -23,8 +24,9 @@ interface SetListBody {
  *  message or null. `requireName` is true for create. */
 function validate(body: SetListBody | undefined, requireName: boolean): string | null {
   if (!body || typeof body !== 'object') return 'body required';
-  const unknown = Object.keys(body).filter((k) => !['name', 'status', 'sortOrder', 'pieceIds'].includes(k));
+  const unknown = Object.keys(body).filter((k) => !['name', 'status', 'sortOrder', 'pinned', 'pieceIds'].includes(k));
   if (unknown.length) return `unknown fields: ${unknown.join(', ')}`;
+  if (body.pinned !== undefined && typeof body.pinned !== 'boolean') return 'pinned must be a boolean';
   if (body.name !== undefined && (typeof body.name !== 'string' || !body.name.trim())) return 'name must be a non-empty string';
   if (requireName && body.name === undefined) return 'name required';
   if (body.status !== undefined && body.status !== 'active' && body.status !== 'archived') return 'status must be active or archived';
@@ -77,6 +79,7 @@ export const setListsRoutes: FastifyPluginAsync = async (app) => {
         ...(b.name !== undefined && { name: b.name.trim() }),
         ...(b.status !== undefined && { status: b.status }),
         ...(b.sortOrder !== undefined && { sortOrder: b.sortOrder }),
+        ...(b.pinned !== undefined && { pinned: b.pinned }),
         ...(b.pieceIds !== undefined && { pieceIds: b.pieceIds }),
       });
       if (!sl) return reply.code(404).send({ error: 'not found' });

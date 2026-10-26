@@ -12,7 +12,8 @@ import {
   type MarkerAnnotation,
   type MarkerKind,
 } from '@/types/annotations.ts';
-import { usePiece, type PieceFile } from '@/hooks/usePiece.ts';
+import { FILE_KIND_LABEL, isPdfFile, usePiece, type FileKind, type PieceFile } from '@/hooks/usePiece.ts';
+import { KindBadge } from './KindBadge.tsx';
 import { useSections, type Section } from '@/hooks/useSections.ts';
 import { replaceFile } from '@/hooks/useUploadFile.ts';
 import { useAnnotations, type NewAnnotationInput } from '@/hooks/useAnnotations.ts';
@@ -73,9 +74,13 @@ export function PdfViewer({
 }: PdfViewerProps) {
   const { piece, loading: pieceLoading, error: pieceError, refresh: refreshPiece } = usePiece(pieceId, refreshTick);
 
-  // A piece can carry several PDFs — a score, a lyrics sheet, extra parts.
-  // Members pick which one to view; the first is the default.
-  const pdfFiles = useMemo(() => piece?.files.filter((f) => f.kind === 'pdf') ?? [], [piece]);
+  // A piece can carry several viewable PDFs — the score, extra parts, and any
+  // lyric sheet that happens to be a PDF. Members pick which one to view; the
+  // first sheet-music file is the default.
+  const pdfFiles = useMemo(
+    () => piece?.files.filter((f) => f.kind === 'pdf' || (f.kind === 'lyrics' && isPdfFile(f))) ?? [],
+    [piece],
+  );
   const [selectedPdfId, setSelectedPdfId] = useState<number | null>(null);
   const pdfFile = useMemo(
     () => pdfFiles.find((f) => f.id === selectedPdfId) ?? pdfFiles[0] ?? null,
@@ -434,6 +439,7 @@ export function PdfViewer({
       {pieceError && <span className="text-xs text-destructive">Piece error: {pieceError}</span>}
 
       <PdfSwitcher files={pdfFiles} selectedId={pdfFile?.id ?? null} onSelect={setSelectedPdfId} />
+      {piece && <DocumentsMenu files={piece.files} onView={setSelectedPdfId} />}
 
       {isAdmin && <UploadButton pieceId={pieceId} onUploaded={handleUploaded} />}
       {isAdmin && piece && (
@@ -827,9 +833,71 @@ function JumpToDropdown({ markers, open, onOpenChange, onJump }: JumpToDropdownP
   );
 }
 
+// --- Documents menu (everyone): sheet music, lyrics and scores to open / download ---
+
+const DOC_KINDS: FileKind[] = ['pdf', 'lyrics', 'score'];
+
+function DocumentsMenu({ files, onView }: { files: PieceFile[]; onView: (id: number) => void }) {
+  const [open, setOpen] = useState(false);
+  const docs = files.filter((f) => DOC_KINDS.includes(f.kind));
+  if (docs.length === 0) return null;
+  const groups = DOC_KINDS.map((k) => ({ kind: k, items: docs.filter((f) => f.kind === k) })).filter((g) => g.items.length > 0);
+  return (
+    <div className="relative">
+      <Button size="sm" variant="outline" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+        Documents ({docs.length}) ▾
+      </Button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} aria-hidden />
+          <div className="absolute left-0 top-full mt-1 w-80 max-h-96 overflow-auto bg-background border border-border rounded-md shadow-lg z-30 p-1">
+            {groups.map((g) => (
+              <div key={g.kind} className="py-1">
+                <div className="px-2 pb-1 text-[10px] uppercase tracking-wide text-muted-foreground">{FILE_KIND_LABEL[g.kind]}</div>
+                {g.items.map((f) => {
+                  const viewable = isPdfFile(f);
+                  return (
+                    <div key={f.id} className="flex items-center gap-2 px-2 py-1 rounded hover:bg-accent/40">
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs truncate" title={f.filename}>{f.label?.trim() || f.filename}</div>
+                        <div className="text-[10px] text-muted-foreground truncate">
+                          {f.label?.trim() ? f.filename : ''}
+                          {f.createdByName ? `${f.label?.trim() ? ' · ' : ''}${f.createdByName}` : ''}
+                        </div>
+                      </div>
+                      {viewable && (
+                        <button
+                          type="button"
+                          onClick={() => { onView(f.id); setOpen(false); }}
+                          className="text-[10px] px-1.5 py-0.5 rounded border border-border hover:bg-accent shrink-0"
+                        >
+                          View
+                        </button>
+                      )}
+                      <a
+                        href={f.url}
+                        download={f.filename}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[10px] px-1.5 py-0.5 rounded border border-border hover:bg-accent shrink-0"
+                      >
+                        Download
+                      </a>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // --- Files panel: rename labels, set voice part, delete, see who uploaded ---
 
-type FilePatch = { label?: string | null; sectionId?: number | null };
+type FilePatch = { label?: string | null; sectionId?: number | null; kind?: FileKind };
 
 interface FilesDropdownProps {
   files: PieceFile[];
@@ -850,9 +918,18 @@ function FilesDropdown({ files, open, onOpenChange, onPatch, onDelete, onReplace
       </Button>
       {open && files.length > 0 && (
         <div className="absolute left-0 top-full mt-1 w-80 max-h-96 overflow-auto bg-background border border-border rounded-md shadow-lg z-30 p-1">
-          {files.map((f) => (
-            <FileRow key={f.id} file={f} sections={sections} onPatch={onPatch} onDelete={onDelete} onReplaced={onReplaced} />
-          ))}
+          {(['pdf', 'lyrics', 'audio', 'score'] as FileKind[]).map((kind) => {
+            const group = files.filter((f) => f.kind === kind);
+            if (group.length === 0) return null;
+            return (
+              <div key={kind} className="py-1">
+                <div className="px-1.5 pb-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">{FILE_KIND_LABEL[kind]}</div>
+                {group.map((f) => (
+                  <FileRow key={f.id} file={f} sections={sections} onPatch={onPatch} onDelete={onDelete} onReplaced={onReplaced} />
+                ))}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -861,9 +938,11 @@ function FilesDropdown({ files, open, onOpenChange, onPatch, onDelete, onReplace
 
 /** Accept string for the replace picker, scoped to the file's kind so you can't
  *  swap a PDF for audio (which would orphan its annotations). */
-const ACCEPT_BY_KIND: Record<'pdf' | 'audio', string> = {
+const ACCEPT_BY_KIND: Record<FileKind, string> = {
   pdf: 'application/pdf,.pdf',
   audio: 'audio/*,.mp3,.m4a,.aac,.ogg,.wav,.flac',
+  lyrics: 'application/pdf,.pdf,.docx,.doc,.rtf,.txt,.md,.odt',
+  score: '.mscz,.mscx,.musicxml,.mxl',
 };
 
 function FileRow({
@@ -908,14 +987,21 @@ function FileRow({
 
   return (
     <div className="flex items-center gap-2 px-1.5 py-1.5 rounded hover:bg-accent/40">
-      <span
-        className={cn(
-          'text-[9px] uppercase font-semibold px-1 py-0.5 rounded shrink-0',
-          file.kind === 'pdf' ? 'bg-sky-100 text-sky-800' : 'bg-violet-100 text-violet-800',
-        )}
-      >
-        {file.kind === 'pdf' ? 'PDF' : 'Audio'}
-      </span>
+      {/* A PDF can be re-filed between sheet music and lyrics; other kinds are fixed. */}
+      {(file.kind === 'pdf' || file.kind === 'lyrics') && isPdfFile(file) ? (
+        <select
+          value={file.kind}
+          onChange={(e) => onPatch(file.id, { kind: e.target.value as FileKind })}
+          aria-label="Filed as"
+          title="Sheet music or lyrics?"
+          className="text-[10px] h-6 px-1 rounded border border-border bg-background shrink-0"
+        >
+          <option value="pdf">Sheet music</option>
+          <option value="lyrics">Lyrics</option>
+        </select>
+      ) : (
+        <KindBadge kind={file.kind} />
+      )}
       <div className="flex-1 min-w-0">
         <input
           type="text"
@@ -961,7 +1047,7 @@ function FileRow({
       />
       <button
         type="button"
-        title={`Replace this ${file.kind === 'pdf' ? 'PDF' : 'track'} (keeps annotations)`}
+        title={`Replace this ${file.kind === 'audio' ? 'track' : 'file'} (keeps annotations)`}
         aria-label="Replace file"
         disabled={replacing}
         onClick={() => replaceInputRef.current?.click()}

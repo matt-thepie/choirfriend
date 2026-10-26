@@ -14,6 +14,7 @@ interface SetListRow {
   name: string;
   status: SetListStatus;
   sort_order: number;
+  pinned: number;
   created_at: number;
   updated_at: number;
 }
@@ -23,6 +24,8 @@ export interface SetListSummaryDTO {
   name: string;
   status: SetListStatus;
   sortOrder: number;
+  /** "This week's rehearsal" — shown first on the home screen. */
+  pinned: boolean;
   songCount: number;
   createdAt: number;
   updatedAt: number;
@@ -48,6 +51,7 @@ function toSummary(r: SetListRow & { song_count: number }): SetListSummaryDTO {
     name: r.name,
     status: r.status,
     sortOrder: r.sort_order,
+    pinned: r.pinned === 1,
     songCount: r.song_count,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -58,7 +62,7 @@ const SUMMARY_SELECT = `
   SELECT s.*, (SELECT COUNT(*) FROM set_list_items i WHERE i.set_list_id = s.id) AS song_count
   FROM set_lists s
 `;
-const listStmt = db.prepare(`${SUMMARY_SELECT} ORDER BY s.status, s.sort_order, s.name COLLATE NOCASE, s.id`);
+const listStmt = db.prepare(`${SUMMARY_SELECT} ORDER BY s.status, s.pinned DESC, s.sort_order, s.name COLLATE NOCASE, s.id`);
 const getStmt = db.prepare(`${SUMMARY_SELECT} WHERE s.id = ?`);
 const itemsStmt = db.prepare(`
   SELECT i.position, p.id, p.title, p.composer, p.arranger
@@ -71,6 +75,7 @@ const deleteItemsStmt = db.prepare(`DELETE FROM set_list_items WHERE set_list_id
 const insertItemStmt = db.prepare(`INSERT OR IGNORE INTO set_list_items (set_list_id, piece_id, position) VALUES (?, ?, ?)`);
 const touchStmt = db.prepare(`UPDATE set_lists SET updated_at = unixepoch() WHERE id = ?`);
 const deleteStmt = db.prepare(`DELETE FROM set_lists WHERE id = ?`);
+const unpinAllStmt = db.prepare(`UPDATE set_lists SET pinned = 0 WHERE pinned = 1`);
 const pieceExistsStmt = db.prepare(`SELECT 1 FROM pieces WHERE id = ?`);
 
 /** Thrown when a pieceIds list references a piece that doesn't exist. Routes
@@ -126,6 +131,7 @@ export function getAllSongsSetList(): SetListDTO {
     name: 'All songs',
     status: 'active',
     sortOrder: -1,
+    pinned: false,
     songCount: songs.length,
     createdAt: 0,
     updatedAt: 0,
@@ -170,6 +176,8 @@ export interface UpdateSetListInput {
   name?: string;
   status?: SetListStatus;
   sortOrder?: number;
+  /** Pin as "this week". Pinning one list unpins any other. */
+  pinned?: boolean;
   /** Full ordered list of piece ids; replaces the current contents. */
   pieceIds?: number[];
 }
@@ -183,6 +191,10 @@ export function updateSetList(id: number, input: UpdateSetListInput): SetListDTO
     sets.push('name = ?');
     params.push(input.name);
   }
+  if (input.pinned !== undefined) {
+    sets.push('pinned = ?');
+    params.push(input.pinned ? 1 : 0);
+  }
   if (input.status !== undefined) {
     sets.push('status = ?');
     params.push(input.status);
@@ -193,6 +205,7 @@ export function updateSetList(id: number, input: UpdateSetListInput): SetListDTO
   }
   db.exec('BEGIN');
   try {
+    if (input.pinned) unpinAllStmt.run();
     if (sets.length > 0) {
       db.prepare(`UPDATE set_lists SET ${sets.join(', ')} WHERE id = ?`).run(...params, id);
     }
