@@ -7,7 +7,26 @@ import { KindBadge } from './KindBadge.tsx';
 interface UploadButtonProps {
   pieceId: number;
   onUploaded: () => void;
+  /** Fix the kind (e.g. an "Add audio" button under a section block). Files
+   *  of another kind are refused instead of re-filed. */
+  kind?: FileKind;
+  /** Pre-assign a voice part — the ChoirMate gesture: press Add audio under
+   *  Bass, pick a file, done. Only meaningful with kind='audio'. */
+  sectionId?: number | null;
+  /** Button text. Defaults to "+ Add file". */
+  label?: string;
+  /** Picker accept string; defaults to everything we take, or the kind's formats. */
+  accept?: string;
+  size?: 'sm' | 'md';
+  variant?: 'outline' | 'default' | 'ghost';
 }
+
+const ACCEPT_FOR_KIND: Record<FileKind, string> = {
+  pdf: 'application/pdf,.pdf',
+  audio: 'audio/*,.mp3,.m4a,.aac,.ogg,.wav,.flac',
+  lyrics: 'application/pdf,.pdf,.docx,.doc,.rtf,.txt,.md,.odt',
+  score: '.mscz,.mscx,.musicxml,.mxl',
+};
 
 function describeStatus(s: UploadStatus): string | null {
   switch (s.phase) {
@@ -41,7 +60,16 @@ interface Staged {
  * a PDF can be flipped between sheet music and lyrics, MuseScore files are
  * flagged as scores (MD / committee only). Nothing uploads until "Upload".
  */
-export function UploadButton({ pieceId, onUploaded }: UploadButtonProps) {
+export function UploadButton({
+  pieceId,
+  onUploaded,
+  kind: fixedKind,
+  sectionId = null,
+  label: buttonLabel = '+ Add file',
+  accept,
+  size = 'sm',
+  variant = 'outline',
+}: UploadButtonProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const { status, upload } = useUploadFile(pieceId);
   const [staged, setStaged] = useState<Staged[]>([]);
@@ -55,7 +83,13 @@ export function UploadButton({ pieceId, onUploaded }: UploadButtonProps) {
     const next: Staged[] = [];
     const bad: string[] = [];
     for (const file of Array.from(files)) {
-      const kind = inferKind(file);
+      let kind = inferKind(file);
+      if (fixedKind) {
+        // A lyric-named PDF dropped on "Add sheet music" is still a PDF; honour
+        // the button. Anything that isn't the button's format is refused.
+        const pdfOk = (fixedKind === 'pdf' || fixedKind === 'lyrics') && (kind === 'pdf' || kind === 'lyrics');
+        kind = pdfOk || kind === fixedKind ? fixedKind : null;
+      }
       if (!kind) bad.push(file.name);
       else next.push({ file, kind, label: '' });
     }
@@ -66,7 +100,9 @@ export function UploadButton({ pieceId, onUploaded }: UploadButtonProps) {
   async function uploadStaged(): Promise<void> {
     const items = staged;
     for (const item of items) {
-      const result = await upload(item.file, item.kind, item.label.trim() || undefined);
+      const result = await upload(item.file, item.kind, item.label.trim() || undefined, {
+        sectionId: item.kind === 'audio' ? sectionId : undefined,
+      });
       if (result) onUploaded();
     }
     setStaged([]);
@@ -84,12 +120,12 @@ export function UploadButton({ pieceId, onUploaded }: UploadButtonProps) {
         ref={inputRef}
         type="file"
         multiple
-        accept={UPLOAD_ACCEPT}
+        accept={accept ?? (fixedKind ? ACCEPT_FOR_KIND[fixedKind] : UPLOAD_ACCEPT)}
         className="hidden"
         onChange={(e) => handleFiles(e.target.files)}
       />
-      <Button size="sm" variant="outline" onClick={() => inputRef.current?.click()} disabled={busy}>
-        {busy ? 'Uploading…' : '+ Add file'}
+      <Button size={size} variant={variant} onClick={() => inputRef.current?.click()} disabled={busy}>
+        {busy ? 'Uploading…' : buttonLabel}
       </Button>
       {description && (
         <span
@@ -123,7 +159,7 @@ export function UploadButton({ pieceId, onUploaded }: UploadButtonProps) {
                   return (
                     <div key={`${item.file.name}-${i}`} className="flex items-start gap-2">
                       {/* A PDF can be sheet music or lyrics; other kinds are fixed by their format. */}
-                      {pdf ? (
+                      {pdf && !fixedKind ? (
                         <select
                           value={item.kind}
                           onChange={(e) => patch(i, { kind: e.target.value as FileKind })}
@@ -145,7 +181,7 @@ export function UploadButton({ pieceId, onUploaded }: UploadButtonProps) {
                           onChange={(e) => patch(i, { label: e.target.value })}
                           placeholder={
                             item.kind === 'audio'
-                              ? 'Voice part (e.g. Tenor 1)'
+                              ? (sectionId !== null ? 'Track name (optional)' : 'Voice part (e.g. Tenor 1)')
                               : item.kind === 'lyrics'
                               ? 'Label (e.g. T2 lyrics)'
                               : 'Label (optional)'

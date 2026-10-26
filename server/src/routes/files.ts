@@ -103,6 +103,8 @@ interface CompleteUploadBody {
   sizeBytes?: number;
   label?: string;
   sortOrder?: number;
+  /** Measured in the browser for audio. */
+  durationMs?: number | null;
 }
 
 /** Max file size we'll accept a sign for. Large enough for ~25min audio
@@ -211,6 +213,7 @@ export const filesRoutes: FastifyPluginAsync = async (app) => {
         mimeType: body.mimeType,
         sizeBytes: body.sizeBytes ?? null,
         sortOrder: body.sortOrder ?? 0,
+        durationMs: body.kind === 'audio' && Number.isFinite(body.durationMs) && (body.durationMs as number) > 0 ? Math.round(body.durationMs as number) : null,
         // requireAdmin guarantees req.user is set.
         createdByUserId: req.user!.internalId,
       });
@@ -222,14 +225,21 @@ export const filesRoutes: FastifyPluginAsync = async (app) => {
    * Rename a file's label (admin) — e.g. an imported track from "Tenor 1" to
    * "Tenor 1 (with piano)". Send { label: string } or { label: null } to clear.
    */
-  app.patch<{ Params: { id: string }; Body: { label?: string | null; sectionId?: number | null; kind?: FileKind } }>(
+  app.patch<{ Params: { id: string }; Body: { label?: string | null; sectionId?: number | null; kind?: FileKind; durationMs?: number | null } }>(
     '/files/:id',
     { preHandler: requireAdmin },
     async (req, reply) => {
       const id = Number(req.params.id);
       if (!Number.isFinite(id)) return reply.code(400).send({ error: 'invalid file id' });
       const body = req.body ?? {};
-      const patch: { label?: string | null; sectionId?: number | null; kind?: FileKind } = {};
+      const patch: { label?: string | null; sectionId?: number | null; kind?: FileKind; durationMs?: number | null } = {};
+      if ('durationMs' in body) {
+        const d = body.durationMs;
+        if (d !== null && (typeof d !== 'number' || !Number.isFinite(d) || d <= 0)) {
+          return reply.code(400).send({ error: 'durationMs must be a positive number or null' });
+        }
+        patch.durationMs = d === null ? null : Math.round(d);
+      }
       if ('kind' in body) {
         // Re-filing is only allowed between the two document kinds — a PDF that
         // was uploaded as sheet music but is really a lyric sheet, or vice

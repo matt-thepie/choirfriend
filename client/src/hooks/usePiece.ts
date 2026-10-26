@@ -40,6 +40,36 @@ export interface PieceFile {
   createdByName: string | null;
   /** Voice part (audio only). Null = not part-specific, e.g. a full mix. */
   sectionId: number | null;
+  /** Track length in ms (audio). Null = unknown. */
+  durationMs: number | null;
+}
+
+export interface Remark {
+  sectionId: number;
+  text: string;
+  updatedByName: string | null;
+  updatedAt: number;
+}
+
+export type LinkType = 'spotify' | 'youtube' | 'appleMusic' | 'other';
+export const LINK_TYPE_LABEL: Record<LinkType, string> = {
+  spotify: 'Spotify',
+  youtube: 'YouTube',
+  appleMusic: 'Apple Music',
+  other: 'Link',
+};
+
+export interface PieceLink {
+  id: number;
+  type: LinkType;
+  url: string;
+  label: string | null;
+}
+
+export interface MemberPieceState {
+  /** 1 sad, 2 neutral, 3 happy; null = not rated. */
+  confidence: 1 | 2 | 3 | null;
+  notes: string | null;
 }
 
 export interface Piece {
@@ -49,8 +79,53 @@ export interface Piece {
   arranger: string | null;
   notes: string | null;
   files: PieceFile[];
+  remarks: Remark[];
+  links: PieceLink[];
+  /** The signed-in member's own rating and private notes. */
+  me: MemberPieceState;
   createdAt: number;
   updatedAt: number;
+}
+
+export async function saveMemberPieceState(pieceId: number, patch: Partial<MemberPieceState>): Promise<MemberPieceState> {
+  const res = await fetch(`/api/pieces/${pieceId}/me`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return (await res.json()) as MemberPieceState;
+}
+
+export async function saveRemark(pieceId: number, sectionId: number, text: string): Promise<Remark[]> {
+  const res = await fetch(`/api/pieces/${pieceId}/remarks/${sectionId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ text }),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return (await res.json()) as Remark[];
+}
+
+export async function addPieceLink(pieceId: number, input: { url: string; type?: LinkType; label?: string }): Promise<PieceLink> {
+  const res = await fetch(`/api/pieces/${pieceId}/links`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? `HTTP ${res.status}`);
+  }
+  return (await res.json()) as PieceLink;
+}
+
+export async function deletePieceLink(pieceId: number, linkId: number): Promise<void> {
+  const res = await fetch(`/api/pieces/${pieceId}/links/${linkId}`, { method: 'DELETE', credentials: 'include' });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
 }
 
 export interface UsePieceResult {

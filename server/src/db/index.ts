@@ -160,6 +160,44 @@ addColumnIfMissing('files', 'section_id INTEGER REFERENCES sections(id)');
 // they pick one from the menu.
 addColumnIfMissing('users', 'section_id INTEGER REFERENCES sections(id)');
 
+// Track length, shown under the play button on audio rows. Imported from
+// ChoirMate's metadata; measured in the browser for new uploads. NULL = unknown.
+addColumnIfMissing('files', 'duration_ms INTEGER');
+
+db.exec(`
+  -- Per-section notes from the MD / section leader ("Remarks for tenors 2").
+  CREATE TABLE IF NOT EXISTS piece_remarks (
+    piece_id INTEGER NOT NULL REFERENCES pieces(id) ON DELETE CASCADE,
+    section_id INTEGER NOT NULL REFERENCES sections(id) ON DELETE CASCADE,
+    text TEXT NOT NULL,
+    updated_by_user_id INTEGER REFERENCES users(id),
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY (piece_id, section_id)
+  );
+
+  -- External links (Spotify / YouTube / Apple Music / other) on a song.
+  CREATE TABLE IF NOT EXISTS piece_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    piece_id INTEGER NOT NULL REFERENCES pieces(id) ON DELETE CASCADE,
+    type TEXT NOT NULL CHECK(type IN ('spotify', 'youtube', 'appleMusic', 'other')),
+    url TEXT NOT NULL,
+    label TEXT,
+    sort_order INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX IF NOT EXISTS idx_piece_links_piece ON piece_links(piece_id);
+
+  -- What one member thinks of one song: the three-face confidence rating
+  -- (1 sad, 2 neutral, 3 happy; NULL unrated) and their private notes.
+  CREATE TABLE IF NOT EXISTS member_piece_state (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    piece_id INTEGER NOT NULL REFERENCES pieces(id) ON DELETE CASCADE,
+    confidence INTEGER CHECK(confidence IN (1, 2, 3)),
+    notes TEXT,
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY (user_id, piece_id)
+  );
+`);
+
 // A set list the MD has pinned as "this week's rehearsal". Shown first on the
 // home screen. At most one is meant to be pinned at a time (enforced in code).
 addColumnIfMissing('set_lists', 'pinned INTEGER NOT NULL DEFAULT 0');

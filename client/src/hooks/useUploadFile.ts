@@ -22,9 +22,37 @@ export type UploadStatus =
   | { phase: 'done'; filename: string }
   | { phase: 'error'; filename: string; message: string };
 
+export interface UploadOptions {
+  /** Pre-assign a voice part (audio). Omit to let the server guess from the label/filename. */
+  sectionId?: number | null;
+}
+
 export interface UseUploadFileResult {
   status: UploadStatus;
-  upload: (file: File, kind: FileKind, label?: string) => Promise<PieceFile | null>;
+  upload: (file: File, kind: FileKind, label?: string, opts?: UploadOptions) => Promise<PieceFile | null>;
+}
+
+/** Track length via a throwaway <audio>; null if the browser can't decode it in time. */
+function measureDurationMs(file: File): Promise<number | null> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const a = new Audio();
+    const done = (v: number | null) => {
+      URL.revokeObjectURL(url);
+      resolve(v);
+    };
+    const timer = setTimeout(() => done(null), 8000);
+    a.preload = 'metadata';
+    a.onloadedmetadata = () => {
+      clearTimeout(timer);
+      done(Number.isFinite(a.duration) && a.duration > 0 ? Math.round(a.duration * 1000) : null);
+    };
+    a.onerror = () => {
+      clearTimeout(timer);
+      done(null);
+    };
+    a.src = url;
+  });
 }
 
 interface SignResponse {
@@ -37,9 +65,10 @@ export function useUploadFile(pieceId: number | null): UseUploadFileResult {
   const [status, setStatus] = useState<UploadStatus>({ phase: 'idle' });
 
   const upload = useCallback(
-    async (file: File, kind: FileKind, label?: string): Promise<PieceFile | null> => {
+    async (file: File, kind: FileKind, label?: string, opts: UploadOptions = {}): Promise<PieceFile | null> => {
       if (pieceId === null) return null;
       const mimeType = guessMime(file, kind);
+      const durationMs = kind === 'audio' ? await measureDurationMs(file) : null;
 
       try {
         setStatus({ phase: 'signing', filename: file.name });
@@ -82,6 +111,8 @@ export function useUploadFile(pieceId: number | null): UseUploadFileResult {
             mimeType,
             sizeBytes: file.size,
             label: label ?? undefined,
+            sectionId: opts.sectionId,
+            durationMs,
           }),
         });
         if (!completeRes.ok) {

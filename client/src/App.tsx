@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { PdfViewer } from '@/components/PdfViewer/index.ts';
-import { AudioPlayer } from '@/components/AudioPlayer/index.ts';
 import { Piano } from '@/components/Piano/index.ts';
 import { RepertoireScreen } from '@/components/RepertoireScreen.tsx';
 import { ImportScreen } from '@/components/ImportScreen.tsx';
 import { SignInScreen } from '@/components/SignInScreen.tsx';
 import { SetListsScreen } from '@/components/SetListsScreen.tsx';
 import { SetListScreen } from '@/components/SetListScreen.tsx';
+import { SongScreen } from '@/components/SongScreen.tsx';
 import { PlayerBar } from '@/components/Player/PlayerBar.tsx';
 import { PlayerProvider } from '@/player/PlayerContext.tsx';
 import { usePieces } from '@/hooks/usePieces.ts';
@@ -89,6 +89,8 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
   const { sections } = useSections();
   const { setLists, loading: setListsLoading, refresh: refreshSetLists } = useSetLists();
   const [pieceId, setPieceId] = useState<number | null>(null);
+  /** A PDF open in the annotating viewer (null = the song page). */
+  const [viewerFileId, setViewerFileId] = useState<number | null>(null);
   /** null = not in set list area; 0 = virtual "All songs"; >0 = a stored list. */
   const [setListId, setSetListId] = useState<number | null>(null);
   // ChoirMate lands members on Set lists; Repertoire is the other view.
@@ -123,6 +125,7 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
 
   function goHome(): void {
     setPieceId(null);
+    setViewerFileId(null);
     setReadMode(false);
     setImporting(false);
     if (tab === 'songs') setSetListId(null);
@@ -130,6 +133,12 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
 
   function openPiece(id: number): void {
     setPieceId(id);
+    setViewerFileId(null);
+    setReadMode(false);
+  }
+
+  function closeViewer(): void {
+    setViewerFileId(null);
     setReadMode(false);
   }
 
@@ -144,15 +153,25 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
     }
   }
 
-  const view: 'home' | 'setlists' | 'setlist' | 'piece' =
-    pieceId !== null ? 'piece' : tab === 'setlists' ? (setListId === null ? 'setlists' : 'setlist') : 'home';
+  const view: 'home' | 'setlists' | 'setlist' | 'piece' | 'viewer' =
+    pieceId !== null ? (viewerFileId !== null ? 'viewer' : 'piece') : tab === 'setlists' ? (setListId === null ? 'setlists' : 'setlist') : 'home';
+  const currentSetList = setListId !== null && setListId > 0 ? setLists.find((s) => s.id === setListId) ?? null : null;
   const mySection = sections.find((s) => s.id === mySectionId) ?? null;
 
   return (
     <div className="h-dvh flex flex-col">
       {!readMode && (
         <header className="px-3 py-2 border-b border-border flex items-center gap-2 text-sm shrink-0">
-          {view === 'piece' ? (
+          {view === 'viewer' ? (
+            <button
+              type="button"
+              onClick={closeViewer}
+              className="inline-flex items-center gap-1.5 font-medium hover:opacity-80 shrink-0"
+              aria-label="Back to song"
+            >
+              <BackIcon /> Song
+            </button>
+          ) : view === 'piece' ? (
             <button
               type="button"
               onClick={goHome}
@@ -171,7 +190,7 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
             </>
           )}
 
-          {view === 'piece' && currentPiece && (
+          {(view === 'piece' || view === 'viewer') && currentPiece && (
             <span className="font-semibold truncate min-w-0">{currentPiece.title}</span>
           )}
 
@@ -199,7 +218,7 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
               <>
                 <div className="fixed inset-0 z-20" onClick={() => setMenuOpen(false)} aria-hidden />
                 <div className="absolute right-0 top-full mt-1 w-60 bg-background border border-border rounded-md shadow-lg z-30 p-1">
-                  {view === 'piece' && (
+                  {(view === 'piece' || view === 'viewer') && (
                     <>
                       <MenuItem
                         icon={<PianoIcon />}
@@ -210,15 +229,17 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
                           setMenuOpen(false);
                         }}
                       />
-                      <MenuItem
-                        icon={<ReadIcon />}
-                        label="Read mode"
-                        active={readMode}
-                        onClick={() => {
-                          setReadMode((r) => !r);
-                          setMenuOpen(false);
-                        }}
-                      />
+                      {view === 'viewer' && (
+                        <MenuItem
+                          icon={<ReadIcon />}
+                          label="Read mode"
+                          active={readMode}
+                          onClick={() => {
+                            setReadMode((r) => !r);
+                            setMenuOpen(false);
+                          }}
+                        />
+                      )}
                       <div className="h-px bg-border my-1" />
                     </>
                   )}
@@ -291,11 +312,32 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
             onMutated={refreshSetLists}
             onOpenSetList={setSetListId}
           />
+        ) : view === 'piece' ? (
+          <>
+            <div className="flex-1 min-h-0">
+              <SongScreen
+                pieceId={pieceId!}
+                refreshTick={pieceRefreshTick}
+                sections={sections}
+                mySectionId={mySectionId}
+                editing={editing}
+                fromSetList={currentSetList ? { id: currentSetList.id, name: currentSetList.name } : setListId === 0 ? { id: 0, name: 'All songs' } : null}
+                onGoSetLists={() => { setPieceId(null); setTab('setlists'); setSetListId(null); }}
+                onGoRepertoire={() => { setPieceId(null); setTab('songs'); setSetListId(null); }}
+                onGoSetList={(id) => { setPieceId(null); setTab('setlists'); setSetListId(id); }}
+                onOpenViewer={setViewerFileId}
+                onPieceMutated={bumpPieceRefresh}
+              />
+            </div>
+            {pianoOpen && <Piano onClose={() => setPianoOpen(false)} />}
+          </>
         ) : (
           <>
             <div className="flex-1 min-h-0">
               <PdfViewer
+                key={viewerFileId!}
                 pieceId={pieceId!}
+                initialFileId={viewerFileId}
                 refreshTick={pieceRefreshTick}
                 onPieceMutated={bumpPieceRefresh}
                 readMode={readMode}
@@ -304,7 +346,6 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
               />
             </div>
             {pianoOpen && <Piano onClose={() => setPianoOpen(false)} />}
-            <AudioPlayer pieceId={pieceId} refreshTick={pieceRefreshTick} mySectionId={mySectionId} />
           </>
         )}
       </main>

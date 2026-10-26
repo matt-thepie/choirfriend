@@ -37,6 +37,8 @@ interface PdfViewerProps {
   /** Whether the current user holds an admin role. Gates the upload and
    *  delete UI so we don't show buttons that 403 on click. */
   isAdmin?: boolean;
+  /** Which PDF to open first (from a sheet-music row). Defaults to the first. */
+  initialFileId?: number | null;
 }
 
 /** Marker kinds that benefit from a free-text label. */
@@ -71,6 +73,7 @@ export function PdfViewer({
   readMode = false,
   onExitReadMode,
   isAdmin = false,
+  initialFileId = null,
 }: PdfViewerProps) {
   const { piece, loading: pieceLoading, error: pieceError, refresh: refreshPiece } = usePiece(pieceId, refreshTick);
 
@@ -81,7 +84,7 @@ export function PdfViewer({
     () => piece?.files.filter((f) => f.kind === 'pdf' || (f.kind === 'lyrics' && isPdfFile(f))) ?? [],
     [piece],
   );
-  const [selectedPdfId, setSelectedPdfId] = useState<number | null>(null);
+  const [selectedPdfId, setSelectedPdfId] = useState<number | null>(initialFileId);
   const pdfFile = useMemo(
     () => pdfFiles.find((f) => f.id === selectedPdfId) ?? pdfFiles[0] ?? null,
     [pdfFiles, selectedPdfId],

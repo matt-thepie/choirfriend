@@ -39,6 +39,7 @@ export interface FileRow {
   created_at: number;
   created_by_user_id: number | null;
   section_id: number | null;
+  duration_ms: number | null;
 }
 
 /** A FileRow joined to the uploader's display name. The list/get queries
@@ -79,6 +80,8 @@ export interface FileDTO {
   createdByName: string | null;
   /** Voice part this track is for (audio only). Null = not part-specific. */
   sectionId: number | null;
+  /** Track length in milliseconds (audio only). Null = unknown. */
+  durationMs: number | null;
 }
 
 export interface PieceWithFiles extends PieceDTO {
@@ -125,6 +128,7 @@ function toFileDTO(row: FileRow | FileRowWithCreator): FileDTO {
     createdByUserId: row.created_by_user_id,
     createdByName: 'created_by_name' in row ? row.created_by_name : null,
     sectionId: row.section_id ?? null,
+    durationMs: row.duration_ms ?? null,
   };
 }
 
@@ -148,8 +152,8 @@ const insertPieceStmt = db.prepare(`
   RETURNING *
 `);
 const insertFileStmt = db.prepare(`
-  INSERT INTO files (piece_id, kind, label, storage, storage_key, filename, size_bytes, mime_type, sort_order, created_by_user_id, section_id)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  INSERT INTO files (piece_id, kind, label, storage, storage_key, filename, size_bytes, mime_type, sort_order, created_by_user_id, section_id, duration_ms)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   RETURNING *
 `);
 const countPiecesStmt = db.prepare(`SELECT COUNT(*) AS n FROM pieces`);
@@ -262,6 +266,7 @@ export interface CreateFileInput {
   createdByUserId?: number | null;
   /** Voice part (audio only). */
   sectionId?: number | null;
+  durationMs?: number | null;
 }
 
 export function createFile(input: CreateFileInput): FileDTO {
@@ -277,6 +282,7 @@ export function createFile(input: CreateFileInput): FileDTO {
     input.sortOrder ?? 0,
     input.createdByUserId ?? null,
     input.sectionId ?? null,
+    input.durationMs ?? null,
   ) as FileRow;
   touchPieceStmt.run(input.pieceId);
   return toFileDTO(row);
@@ -299,9 +305,10 @@ export interface UpdateFileInput {
   /** Re-file a document: only pdf ↔ lyrics is meaningful (both are documents;
    *  annotations stay valid). Routes enforce that; this just writes it. */
   kind?: FileKind;
+  durationMs?: number | null;
 }
 
-/** Patch a file's label, section and/or kind. Only provided keys change. */
+/** Patch a file's label, section, kind and/or duration. Only provided keys change. */
 export function updateFile(id: number, input: UpdateFileInput): FileDTO | null {
   const sets: string[] = [];
   const params: Array<string | number | null> = [];
@@ -312,6 +319,10 @@ export function updateFile(id: number, input: UpdateFileInput): FileDTO | null {
   if (input.kind !== undefined) {
     sets.push('kind = ?');
     params.push(input.kind);
+  }
+  if (input.durationMs !== undefined) {
+    sets.push('duration_ms = ?');
+    params.push(input.durationMs);
   }
   if (input.sectionId !== undefined) {
     sets.push('section_id = ?');
