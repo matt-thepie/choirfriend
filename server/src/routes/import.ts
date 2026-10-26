@@ -18,6 +18,7 @@
  */
 
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
+import { guessSectionId } from '../db/sections.ts';
 import { requireAdmin } from '../auth/middleware.ts';
 import { createFile, createPiece, getPieceWithFiles, updatePiece } from '../db/pieces.ts';
 import {
@@ -198,6 +199,7 @@ export const importRoutes: FastifyPluginAsync = async (app) => {
       pieceId,
       kind,
       label: fields.label?.trim() || null,
+      sectionId: kind === 'audio' ? guessSectionId(fields.label) ?? guessSectionId(filename) : null,
       storage: stored.storage,
       storageKey: stored.storageKey,
       filename,

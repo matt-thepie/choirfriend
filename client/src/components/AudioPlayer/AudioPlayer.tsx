@@ -1,161 +1,85 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { Button } from '@/components/ui/button.tsx';
 import { cn } from '@/lib/utils.ts';
-import { usePiece } from '@/hooks/usePiece.ts';
-import { formatTime, useAudioPlayer } from '@/hooks/useAudioPlayer.ts';
+import { usePiece, type Piece, type PieceFile } from '@/hooks/usePiece.ts';
+import { useSections } from '@/hooks/useSections.ts';
+import { usePlayer, type Queue, type QueueTrack } from '@/player/PlayerContext.tsx';
 
 interface AudioPlayerProps {
   pieceId: number | null;
-  /** Triggers a refetch — keeps audio player in sync with upload events
-   *  fired by the PDF viewer. */
+  /** Triggers a refetch — keeps the strip in sync with upload events fired
+   *  by the PDF viewer. */
   refreshTick?: number;
+  /** The signed-in member's own voice part; its tracks are listed first. */
+  mySectionId?: number | null;
+}
+
+/** Build a queue track from a file and its piece. */
+export function toQueueTrack(piece: Pick<Piece, 'id' | 'title' | 'composer'>, f: PieceFile): QueueTrack {
+  return {
+    fileId: f.id,
+    url: f.url,
+    title: f.label?.trim() || f.filename,
+    subtitle: piece.composer ? `${piece.title} · ${piece.composer}` : piece.title,
+    pieceId: piece.id,
+    pieceTitle: piece.title,
+    sectionId: f.sectionId,
+  };
 }
 
 /**
- * Sticky bottom panel for the current piece's audio tracks. Renders nothing
- * when there's no audio attached, so a piece with only sheet music is
- * unaffected.
- *
- * Includes a track picker (defaults to the first audio file), play/pause +
- * scrub, mm:ss time display, tempo slowdown that preserves pitch
- * (audio.preservesPitch = true), and a loop A/B for drilling on bars.
+ * Track strip for the open piece. Lists learning tracks grouped by voice
+ * part (your own part first, then the others, then untagged full mixes);
+ * tapping one queues the whole piece and starts on that track. Playback
+ * itself is handled by the app-wide player bar below this strip.
  */
-export function AudioPlayer({ pieceId, refreshTick = 0 }: AudioPlayerProps) {
+export function AudioPlayer({ pieceId, refreshTick = 0, mySectionId = null }: AudioPlayerProps) {
   const { piece } = usePiece(pieceId, refreshTick);
+  const { sections, byId } = useSections();
+  const player = usePlayer();
+
   const audioFiles = useMemo(() => piece?.files.filter((f) => f.kind === 'audio') ?? [], [piece]);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
 
-  // Auto-pick the first track when piece changes / tracks first appear.
-  const effectiveId = selectedId ?? audioFiles[0]?.id ?? null;
-  const current = audioFiles.find((f) => f.id === effectiveId) ?? null;
+  // Order: my section, then sections in choir order, then untagged.
+  const ordered = useMemo(() => {
+    const rank = new Map<number | null, number>();
+    sections.forEach((s, i) => rank.set(s.id, i + 1));
+    if (mySectionId !== null) rank.set(mySectionId, 0);
+    rank.set(null, sections.length + 1);
+    return [...audioFiles].sort(
+      (a, b) => (rank.get(a.sectionId) ?? 99) - (rank.get(b.sectionId) ?? 99) || a.sortOrder - b.sortOrder || a.id - b.id,
+    );
+  }, [audioFiles, sections, mySectionId]);
 
-  const player = useAudioPlayer(current?.url ?? null);
+  if (!piece || ordered.length === 0) return null;
 
-  if (audioFiles.length === 0) return null;
-
-  const ratePct = Math.round(player.rate * 100);
+  const queue: Queue = { name: piece.title, tracks: ordered.map((f) => toQueueTrack(piece, f)) };
+  const playingId = player.current?.fileId ?? null;
 
   return (
-    <div className="border-t border-border bg-background/95 backdrop-blur px-4 py-2">
-      <audio ref={player.audioRef} src={current?.url ?? undefined} preload="metadata" crossOrigin="anonymous" />
-
-      <div className="flex flex-wrap items-center gap-3 text-xs">
-        {/* Track picker */}
-        <select
-          value={effectiveId ?? ''}
-          onChange={(e) => setSelectedId(Number(e.target.value))}
-          className="h-8 px-2 rounded-md border border-border bg-background text-sm min-w-44"
-        >
-          {audioFiles.map((f) => (
-            <option key={f.id} value={f.id}>
-              {f.label?.trim() || f.filename}
-            </option>
-          ))}
-        </select>
-
-        {/* Transport */}
-        <button
-          type="button"
-          onClick={player.toggle}
-          aria-label={player.isPlaying ? 'Pause' : 'Play'}
-          className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-primary text-primary-foreground hover:opacity-90"
-        >
-          {player.isPlaying ? <PauseIcon /> : <PlayIcon />}
-        </button>
-
-        {/* Scrubber */}
-        <div className="flex items-center gap-2 flex-1 min-w-48">
-          <span className="tabular-nums text-muted-foreground w-10 text-right">
-            {formatTime(player.currentTime)}
-          </span>
-          <input
-            type="range"
-            min={0}
-            max={Number.isFinite(player.duration) ? player.duration : 1}
-            step={0.1}
-            value={player.currentTime}
-            onChange={(e) => player.seek(Number(e.target.value))}
-            disabled={!Number.isFinite(player.duration)}
-            className="flex-1 accent-primary"
-          />
-          <span className="tabular-nums text-muted-foreground w-10">{formatTime(player.duration)}</span>
-        </div>
-
-        {/* Tempo */}
-        <div className="flex items-center gap-2">
-          <label className="text-muted-foreground select-none">Speed</label>
-          <input
-            type="range"
-            min={0.5}
-            max={1.25}
-            step={0.05}
-            value={player.rate}
-            onChange={(e) => player.setRate(Number(e.target.value))}
-            className="w-24 accent-primary"
-          />
-          <span className="tabular-nums w-10 text-right">{ratePct}%</span>
+    <div className="border-t border-border bg-muted/30 px-3 py-2 flex items-center gap-2 overflow-x-auto">
+      <span className="text-xs text-muted-foreground shrink-0">Tracks</span>
+      {ordered.map((f, i) => {
+        const sec = f.sectionId !== null ? byId.get(f.sectionId) : null;
+        const active = playingId === f.id;
+        return (
           <Button
+            key={f.id}
             size="sm"
-            variant="ghost"
-            onClick={() => player.setRate(1.0)}
-            disabled={player.rate === 1}
-            className="h-6 px-2"
+            variant={active ? 'default' : 'outline'}
+            className={cn('h-8 px-2.5 text-xs shrink-0 gap-1.5', active && player.isPlaying && 'animate-pulse')}
+            onClick={() => (active ? player.toggle() : player.playQueue(queue, i))}
+            title={f.filename}
           >
-            reset
+            {sec && (
+              <span className={cn('text-[9px] uppercase font-semibold px-1 rounded', active ? 'bg-primary-foreground/20' : 'bg-violet-100 text-violet-800')}>
+                {sec.badge}
+              </span>
+            )}
+            <span className="max-w-40 truncate">{f.label?.trim() || f.filename}</span>
           </Button>
-        </div>
-
-        {/* A–B practice loop: set two points, playback repeats between them. */}
-        <div className="flex items-center gap-1">
-          <span className="text-muted-foreground select-none mr-1" title="Repeat a passage: set a start (A) and end (B), and playback loops between them.">
-            Loop
-          </span>
-          <Button
-            size="sm"
-            variant={player.loop.start !== null ? 'default' : 'outline'}
-            onClick={player.setLoopStart}
-            title="Set the loop START (A) at the current position"
-            className="h-7"
-          >
-            {player.loop.start !== null ? `A ${formatTime(player.loop.start)}` : 'Set A'}
-          </Button>
-          <Button
-            size="sm"
-            variant={player.loop.end !== null ? 'default' : 'outline'}
-            onClick={player.setLoopEnd}
-            title="Set the loop END (B) at the current position — playback then repeats A→B"
-            className="h-7"
-          >
-            {player.loop.end !== null ? `B ${formatTime(player.loop.end)}` : 'Set B'}
-          </Button>
-          {(player.loop.start !== null || player.loop.end !== null) && (
-            <Button size="sm" variant="ghost" onClick={player.clearLoop} className="h-7 px-2">
-              clear
-            </Button>
-          )}
-        </div>
-      </div>
-
-      {player.error && (
-        <div className={cn('mt-1 text-xs text-destructive')}>Audio: {player.error}</div>
-      )}
+        );
+      })}
     </div>
-  );
-}
-
-function PlayIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-      <path d="M8 5v14l11-7z" />
-    </svg>
-  );
-}
-
-function PauseIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-      <rect x="6" y="5" width="4" height="14" rx="1" />
-      <rect x="14" y="5" width="4" height="14" rx="1" />
-    </svg>
   );
 }

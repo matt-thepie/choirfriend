@@ -104,6 +104,35 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_annotations_lookup ON annotations(piece_id, file_id, page, layer);
   CREATE INDEX IF NOT EXISTS idx_annotations_user ON annotations(user_id);
+
+  -- Voice parts. Choir-wide list; audio files and members point at one.
+  -- Seeded with SGMC's parts on first boot; admins can edit via /api/sections.
+  CREATE TABLE IF NOT EXISTS sections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    -- Full name shown in dropdowns, e.g. "Tenor 1".
+    label TEXT NOT NULL,
+    -- Short badge, e.g. "T1".
+    badge TEXT NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0
+  );
+
+  -- Set lists: an ordered selection of pieces (rehearsal running order, a
+  -- concert programme). "All songs" is virtual and never stored.
+  CREATE TABLE IF NOT EXISTS set_lists (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'archived')),
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+  );
+  CREATE TABLE IF NOT EXISTS set_list_items (
+    set_list_id INTEGER NOT NULL REFERENCES set_lists(id) ON DELETE CASCADE,
+    piece_id INTEGER NOT NULL REFERENCES pieces(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    PRIMARY KEY (set_list_id, piece_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_set_list_items_list ON set_list_items(set_list_id, position);
 `);
 
 // Additive migrations for tables that may have existed before a column was added.
@@ -116,6 +145,29 @@ addColumnIfMissing('pieces', 'is_current INTEGER NOT NULL DEFAULT 1');
 // No ON DELETE behaviour (SQLite can't add FK constraints via ALTER anyway):
 // if a user is removed we keep the orphaned id rather than nulling history.
 addColumnIfMissing('files', 'created_by_user_id INTEGER REFERENCES users(id)');
+
+// Voice part an audio file belongs to. NULL for PDFs and for tracks that
+// aren't part-specific (full mix, piano-only). Set lists use this to pick one
+// track per song for a given section.
+addColumnIfMissing('files', 'section_id INTEGER REFERENCES sections(id)');
+
+// The member's own voice part. Drives the default section filter. NULL until
+// they pick one from the menu.
+addColumnIfMissing('users', 'section_id INTEGER REFERENCES sections(id)');
+
+// --- User lookups -----------------------------------------------------------
+
+const getUserSectionStmt = db.prepare(`SELECT section_id FROM users WHERE email = ?`);
+const setUserSectionStmt = db.prepare(`UPDATE users SET section_id = ? WHERE id = ?`);
+
+export function getUserSectionIdByEmail(email: string): number | null {
+  const row = getUserSectionStmt.get(email) as { section_id: number | null } | undefined;
+  return row?.section_id ?? null;
+}
+
+export function setUserSectionId(userId: number, sectionId: number | null): void {
+  setUserSectionStmt.run(sectionId, userId);
+}
 
 // --- User upsert (used by auth middleware) --------------------------------
 

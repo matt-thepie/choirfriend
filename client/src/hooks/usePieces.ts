@@ -9,6 +9,8 @@ export interface PieceSummary {
   isCurrent: boolean;
   createdAt: number;
   updatedAt: number;
+  pdfCount: number;
+  audioCount: number;
 }
 
 export interface UsePiecesResult {

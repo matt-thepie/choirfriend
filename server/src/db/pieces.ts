@@ -31,6 +31,7 @@ export interface FileRow {
   sort_order: number;
   created_at: number;
   created_by_user_id: number | null;
+  section_id: number | null;
 }
 
 /** A FileRow joined to the uploader's display name. The list/get queries
@@ -69,6 +70,8 @@ export interface FileDTO {
   createdByUserId: number | null;
   /** Uploader's display name, joined from users. Null if unknown. */
   createdByName: string | null;
+  /** Voice part this track is for (audio only). Null = not part-specific. */
+  sectionId: number | null;
 }
 
 export interface PieceWithFiles extends PieceDTO {
@@ -114,11 +117,15 @@ function toFileDTO(row: FileRow | FileRowWithCreator): FileDTO {
     createdAt: row.created_at,
     createdByUserId: row.created_by_user_id,
     createdByName: 'created_by_name' in row ? row.created_by_name : null,
+    sectionId: row.section_id ?? null,
   };
 }
 
 const listPiecesStmt = db.prepare(`
-  SELECT * FROM pieces ORDER BY title COLLATE NOCASE, id
+  SELECT p.*,
+    (SELECT COUNT(*) FROM files f WHERE f.piece_id = p.id AND f.kind = 'pdf') AS pdf_count,
+    (SELECT COUNT(*) FROM files f WHERE f.piece_id = p.id AND f.kind = 'audio') AS audio_count
+  FROM pieces p ORDER BY p.title COLLATE NOCASE, p.id
 `);
 const getPieceStmt = db.prepare(`SELECT * FROM pieces WHERE id = ?`);
 const listFilesForPieceStmt = db.prepare(`
@@ -134,8 +141,8 @@ const insertPieceStmt = db.prepare(`
   RETURNING *
 `);
 const insertFileStmt = db.prepare(`
-  INSERT INTO files (piece_id, kind, label, storage, storage_key, filename, size_bytes, mime_type, sort_order, created_by_user_id)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  INSERT INTO files (piece_id, kind, label, storage, storage_key, filename, size_bytes, mime_type, sort_order, created_by_user_id, section_id)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   RETURNING *
 `);
 const countPiecesStmt = db.prepare(`SELECT COUNT(*) AS n FROM pieces`);
@@ -143,8 +150,17 @@ const getFileByIdStmt = db.prepare(`SELECT * FROM files WHERE id = ?`);
 const deleteFileStmt = db.prepare(`DELETE FROM files WHERE id = ?`);
 const touchPieceStmt = db.prepare(`UPDATE pieces SET updated_at = unixepoch() WHERE id = ?`);
 
-export function listPieces(): PieceDTO[] {
-  return (listPiecesStmt.all() as PieceRow[]).map(toPieceDTO);
+export interface PieceSummaryDTO extends PieceDTO {
+  pdfCount: number;
+  audioCount: number;
+}
+
+export function listPieces(): PieceSummaryDTO[] {
+  return (listPiecesStmt.all() as Array<PieceRow & { pdf_count: number; audio_count: number }>).map((r) => ({
+    ...toPieceDTO(r),
+    pdfCount: r.pdf_count,
+    audioCount: r.audio_count,
+  }));
 }
 
 export function getPieceWithFiles(id: number): PieceWithFiles | null {
@@ -237,6 +253,8 @@ export interface CreateFileInput {
   sortOrder?: number;
   /** Internal id of the uploader (req.user.internalId). Null for system inserts. */
   createdByUserId?: number | null;
+  /** Voice part (audio only). */
+  sectionId?: number | null;
 }
 
 export function createFile(input: CreateFileInput): FileDTO {
@@ -251,6 +269,7 @@ export function createFile(input: CreateFileInput): FileDTO {
     input.mimeType ?? null,
     input.sortOrder ?? 0,
     input.createdByUserId ?? null,
+    input.sectionId ?? null,
   ) as FileRow;
   touchPieceStmt.run(input.pieceId);
   return toFileDTO(row);
@@ -267,12 +286,37 @@ export function deleteFileRow(id: number): boolean {
   return (info.changes as number) > 0;
 }
 
-const updateFileLabelStmt = db.prepare(`UPDATE files SET label = ? WHERE id = ? RETURNING *`);
+export interface UpdateFileInput {
+  label?: string | null;
+  sectionId?: number | null;
+}
 
-/** Set (or clear, with null) a file's label, e.g. renaming a track to "Tenor 1". */
-export function updateFileLabel(id: number, label: string | null): FileDTO | null {
-  const row = updateFileLabelStmt.get(label, id) as FileRow | undefined;
+/** Patch a file's label and/or section. Only provided keys change. */
+export function updateFile(id: number, input: UpdateFileInput): FileDTO | null {
+  const sets: string[] = [];
+  const params: Array<string | number | null> = [];
+  if (input.label !== undefined) {
+    sets.push('label = ?');
+    params.push(input.label);
+  }
+  if (input.sectionId !== undefined) {
+    sets.push('section_id = ?');
+    params.push(input.sectionId);
+  }
+  if (sets.length === 0) {
+    const row = getFileByIdStmt.get(id) as FileRow | undefined;
+    return row ? toFileDTO(row) : null;
+  }
+  params.push(id);
+  const row = db.prepare(`UPDATE files SET ${sets.join(', ')} WHERE id = ? RETURNING *`).get(...params) as
+    | FileRow
+    | undefined;
   return row ? toFileDTO(row) : null;
+}
+
+/** Back-compat alias. */
+export function updateFileLabel(id: number, label: string | null): FileDTO | null {
+  return updateFile(id, { label });
 }
 
 const replaceFileStorageStmt = db.prepare(`

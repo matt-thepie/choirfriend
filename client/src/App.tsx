@@ -5,7 +5,13 @@ import { Piano } from '@/components/Piano/index.ts';
 import { HomeScreen } from '@/components/HomeScreen.tsx';
 import { ImportScreen } from '@/components/ImportScreen.tsx';
 import { SignInScreen } from '@/components/SignInScreen.tsx';
+import { SetListsScreen } from '@/components/SetListsScreen.tsx';
+import { SetListScreen } from '@/components/SetListScreen.tsx';
+import { PlayerBar } from '@/components/Player/PlayerBar.tsx';
+import { PlayerProvider } from '@/player/PlayerContext.tsx';
 import { usePieces } from '@/hooks/usePieces.ts';
+import { useSections, saveMySection } from '@/hooks/useSections.ts';
+import { useSetLists } from '@/hooks/useSetLists.ts';
 
 interface HealthResponse {
   status: string;
@@ -18,6 +24,7 @@ interface MeResponse {
   displayName?: string;
   groups?: string[];
   isAdmin?: boolean;
+  sectionId?: number | null;
 }
 
 /**
@@ -69,16 +76,27 @@ export function App() {
     return <SignInScreen />;
   }
 
-  return <SignedInApp me={me} health={health} />;
+  return (
+    <PlayerProvider>
+      <SignedInApp me={me} health={health} />
+    </PlayerProvider>
+  );
 }
 
 function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | null }) {
   const { pieces, loading: piecesLoading, refresh: refreshPieces } = usePieces();
+  const { sections } = useSections();
+  const { setLists, loading: setListsLoading, refresh: refreshSetLists } = useSetLists();
   const [pieceId, setPieceId] = useState<number | null>(null);
+  /** null = not in set list area; 0 = virtual "All songs"; >0 = a stored list. */
+  const [setListId, setSetListId] = useState<number | null>(null);
+  const [tab, setTab] = useState<'songs' | 'setlists'>('songs');
   const [pianoOpen, setPianoOpen] = useState(false);
   const [readMode, setReadMode] = useState(false);
   const [importing, setImporting] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [partMenuOpen, setPartMenuOpen] = useState(false);
+  const [mySectionId, setMySectionId] = useState<number | null>(me.sectionId ?? null);
   const isAdmin = me.isAdmin === true;
   const currentPiece = pieces.find((p) => p.id === pieceId) ?? null;
 
@@ -92,9 +110,28 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
     setPieceId(null);
     setReadMode(false);
     setImporting(false);
+    if (tab === 'songs') setSetListId(null);
   }
 
-  const view: 'home' | 'piece' = pieceId === null ? 'home' : 'piece';
+  function openPiece(id: number): void {
+    setPieceId(id);
+    setReadMode(false);
+  }
+
+  async function chooseSection(id: number | null): Promise<void> {
+    setMySectionId(id);
+    setPartMenuOpen(false);
+    setMenuOpen(false);
+    try {
+      await saveMySection(id);
+    } catch {
+      /* best effort — the local choice still applies for this session */
+    }
+  }
+
+  const view: 'home' | 'setlists' | 'setlist' | 'piece' =
+    pieceId !== null ? 'piece' : tab === 'setlists' ? (setListId === null ? 'setlists' : 'setlist') : 'home';
+  const mySection = sections.find((s) => s.id === mySectionId) ?? null;
 
   return (
     <div className="h-dvh flex flex-col">
@@ -105,12 +142,18 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
               type="button"
               onClick={goHome}
               className="inline-flex items-center gap-1.5 font-medium hover:opacity-80 shrink-0"
-              aria-label="Back to song list"
+              aria-label="Back"
             >
-              <BackIcon /> Songs
+              <BackIcon /> {setListId !== null ? 'Set list' : 'Songs'}
             </button>
           ) : (
-            <span className="font-semibold">choirfriend</span>
+            <>
+              <span className="font-semibold shrink-0">choirfriend</span>
+              <nav className="ml-2 flex items-center gap-1 text-sm" aria-label="Main">
+                <TabButton active={tab === 'songs'} onClick={() => { setTab('songs'); setSetListId(null); }}>Songs</TabButton>
+                <TabButton active={tab === 'setlists'} onClick={() => { setTab('setlists'); setSetListId(null); }}>Set lists</TabButton>
+              </nav>
+            </>
           )}
 
           {view === 'piece' && currentPiece && (
@@ -120,7 +163,7 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
           <div className="ml-auto relative shrink-0">
             <button
               type="button"
-              onClick={() => setMenuOpen((o) => !o)}
+              onClick={() => { setMenuOpen((o) => !o); setPartMenuOpen(false); }}
               aria-label="Menu"
               aria-expanded={menuOpen}
               className="inline-flex items-center justify-center w-9 h-9 rounded-md border border-border hover:bg-accent"
@@ -130,7 +173,7 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
             {menuOpen && (
               <>
                 <div className="fixed inset-0 z-20" onClick={() => setMenuOpen(false)} aria-hidden />
-                <div className="absolute right-0 top-full mt-1 w-56 bg-background border border-border rounded-md shadow-lg z-30 p-1">
+                <div className="absolute right-0 top-full mt-1 w-60 bg-background border border-border rounded-md shadow-lg z-30 p-1">
                   {view === 'piece' && (
                     <>
                       <MenuItem
@@ -154,6 +197,22 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
                       <div className="h-px bg-border my-1" />
                     </>
                   )}
+
+                  <MenuItem
+                    icon={<PartIcon />}
+                    label={mySection ? `My part: ${mySection.label}` : 'My part: not set'}
+                    onClick={() => setPartMenuOpen((o) => !o)}
+                  />
+                  {partMenuOpen && (
+                    <div className="ml-6 mb-1 border-l border-border pl-1">
+                      {sections.map((s) => (
+                        <MenuItem key={s.id} icon={<span className="text-[10px] font-bold w-4 text-center">{s.badge}</span>} label={s.label} active={s.id === mySectionId} onClick={() => void chooseSection(s.id)} />
+                      ))}
+                      <MenuItem icon={<span className="w-4" />} label="Not set" active={mySectionId === null} onClick={() => void chooseSection(null)} />
+                    </div>
+                  )}
+                  <div className="h-px bg-border my-1" />
+
                   <div className="px-3 py-1.5 text-xs text-muted-foreground">
                     Signed in as {me.displayName ?? me.email}
                     {isAdmin && <span className="ml-1 uppercase tracking-wide font-semibold text-amber-700">admin</span>}
@@ -182,9 +241,30 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
             pieces={pieces}
             loading={piecesLoading}
             isAdmin={isAdmin}
-            onOpenPiece={setPieceId}
+            onOpenPiece={openPiece}
             onPieceMutated={refreshPieces}
             onImport={isAdmin ? () => setImporting(true) : undefined}
+          />
+        ) : view === 'setlists' ? (
+          <SetListsScreen
+            setLists={setLists}
+            loading={setListsLoading}
+            isAdmin={isAdmin}
+            onOpen={setSetListId}
+            onMutated={refreshSetLists}
+          />
+        ) : view === 'setlist' ? (
+          <SetListScreen
+            key={setListId!}
+            setListId={setListId!}
+            pieces={pieces}
+            sections={sections}
+            mySectionId={mySectionId}
+            isAdmin={isAdmin}
+            onBack={() => setSetListId(null)}
+            onOpenPiece={openPiece}
+            onMutated={refreshSetLists}
+            onOpenSetList={setSetListId}
           />
         ) : (
           <>
@@ -199,11 +279,35 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
               />
             </div>
             {pianoOpen && <Piano onClose={() => setPianoOpen(false)} />}
-            <AudioPlayer pieceId={pieceId} refreshTick={pieceRefreshTick} />
+            <AudioPlayer pieceId={pieceId} refreshTick={pieceRefreshTick} mySectionId={mySectionId} />
           </>
         )}
       </main>
+
+      {!readMode && <PlayerBar onOpenPiece={openPiece} />}
     </div>
+  );
+}
+
+function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-current={active ? 'page' : undefined}
+      className={`px-2.5 py-1 rounded-md ${active ? 'bg-accent font-medium' : 'text-muted-foreground hover:text-foreground'}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function PartIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+      <circle cx="12" cy="8" r="4" />
+      <path d="M4 21a8 8 0 0 1 16 0" />
+    </svg>
   );
 }
 

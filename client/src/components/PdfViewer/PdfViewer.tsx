@@ -13,6 +13,7 @@ import {
   type MarkerKind,
 } from '@/types/annotations.ts';
 import { usePiece, type PieceFile } from '@/hooks/usePiece.ts';
+import { useSections, type Section } from '@/hooks/useSections.ts';
 import { replaceFile } from '@/hooks/useUploadFile.ts';
 import { useAnnotations, type NewAnnotationInput } from '@/hooks/useAnnotations.ts';
 import { PdfPage } from './PdfPage.tsx';
@@ -372,12 +373,12 @@ export function PdfViewer({
     return null;
   }
 
-  async function renameFile(id: number, label: string | null): Promise<void> {
+  async function patchFile(id: number, patch: FilePatch): Promise<void> {
     const res = await fetch(`/api/files/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ label }),
+      body: JSON.stringify(patch),
     });
     if (res.ok) {
       refreshPiece();
@@ -415,7 +416,7 @@ export function PdfViewer({
           files={piece.files}
           open={filesOpen}
           onOpenChange={setFilesOpen}
-          onRename={renameFile}
+          onPatch={patchFile}
           onDelete={deleteFile}
           onReplaced={handleUploaded}
         />
@@ -791,19 +792,22 @@ function JumpToDropdown({ markers, open, onOpenChange, onJump }: JumpToDropdownP
   );
 }
 
-// --- Files panel: rename labels, delete, see who uploaded ------------------
+// --- Files panel: rename labels, set voice part, delete, see who uploaded ---
+
+type FilePatch = { label?: string | null; sectionId?: number | null };
 
 interface FilesDropdownProps {
   files: PieceFile[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onRename: (id: number, label: string | null) => void;
+  onPatch: (id: number, patch: FilePatch) => void;
   onDelete: (id: number) => void;
   /** Called after a file's bytes are replaced in place — refresh the piece. */
   onReplaced: () => void;
 }
 
-function FilesDropdown({ files, open, onOpenChange, onRename, onDelete, onReplaced }: FilesDropdownProps) {
+function FilesDropdown({ files, open, onOpenChange, onPatch, onDelete, onReplaced }: FilesDropdownProps) {
+  const { sections } = useSections();
   return (
     <div className="relative">
       <Button size="sm" variant="outline" onClick={() => onOpenChange(!open)} disabled={files.length === 0}>
@@ -812,7 +816,7 @@ function FilesDropdown({ files, open, onOpenChange, onRename, onDelete, onReplac
       {open && files.length > 0 && (
         <div className="absolute left-0 top-full mt-1 w-80 max-h-96 overflow-auto bg-background border border-border rounded-md shadow-lg z-30 p-1">
           {files.map((f) => (
-            <FileRow key={f.id} file={f} onRename={onRename} onDelete={onDelete} onReplaced={onReplaced} />
+            <FileRow key={f.id} file={f} sections={sections} onPatch={onPatch} onDelete={onDelete} onReplaced={onReplaced} />
           ))}
         </div>
       )}
@@ -829,12 +833,14 @@ const ACCEPT_BY_KIND: Record<'pdf' | 'audio', string> = {
 
 function FileRow({
   file,
-  onRename,
+  sections,
+  onPatch,
   onDelete,
   onReplaced,
 }: {
   file: PieceFile;
-  onRename: (id: number, label: string | null) => void;
+  sections: Section[];
+  onPatch: (id: number, patch: FilePatch) => void;
   onDelete: (id: number) => void;
   onReplaced: () => void;
 }) {
@@ -847,7 +853,7 @@ function FileRow({
 
   function save(): void {
     const next = label.trim() || null;
-    if (next !== (file.label ?? null)) onRename(file.id, next);
+    if (next !== (file.label ?? null)) onPatch(file.id, { label: next });
   }
 
   async function handleReplacePicked(picked: File | undefined): Promise<void> {
@@ -884,9 +890,23 @@ function FileRow({
           onKeyDown={(e) => {
             if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
           }}
-          placeholder={file.kind === 'audio' ? 'Voice part (e.g. Tenor 1)' : 'Label (optional)'}
+          placeholder={file.kind === 'audio' ? 'Track name (e.g. Full mix, Tenor 1 emphasised)' : 'Label (optional)'}
           className="w-full text-xs h-7 px-1.5 rounded border border-transparent hover:border-border focus:border-border focus:outline-none bg-transparent"
         />
+        {file.kind === 'audio' && (
+          <select
+            value={file.sectionId ?? ''}
+            onChange={(e) => onPatch(file.id, { sectionId: e.target.value === '' ? null : Number(e.target.value) })}
+            aria-label="Voice part for this track"
+            title="Which part this track is for — used when playing a set list for a section"
+            className="mt-0.5 ml-1 text-[11px] h-6 px-1 rounded border border-border bg-background"
+          >
+            <option value="">Any / full mix</option>
+            {sections.map((sec) => (
+              <option key={sec.id} value={sec.id}>{sec.label}</option>
+            ))}
+          </select>
+        )}
         <div className="text-[10px] text-muted-foreground truncate px-1.5" title={file.filename}>
           {replacing ? 'Replacing…' : replaceError ? <span className="text-destructive">{replaceError}</span> : (
             <>

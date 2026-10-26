@@ -20,9 +20,10 @@ import {
   getFileRowById,
   getPieceWithFiles,
   replaceFileStorage,
-  updateFileLabel,
+  updateFile,
 } from '../db/pieces.ts';
 import { requireAdmin } from '../auth/middleware.ts';
+import { guessSectionId, sectionExists } from '../db/sections.ts';
 import { deleteObject, isB2Configured, presignPut } from '../storage/b2.ts';
 import { deleteLocalFile, readableStoredName } from '../import/storage.ts';
 
@@ -65,6 +66,8 @@ interface SignUploadBody {
 }
 
 interface CompleteUploadBody {
+  /** Voice part for audio. Omit to let the server guess from label/filename. */
+  sectionId?: number | null;
   storageKey: string;
   filename: string;
   kind: 'pdf' | 'audio';
@@ -168,6 +171,12 @@ export const filesRoutes: FastifyPluginAsync = async (app) => {
         pieceId,
         kind: body.kind,
         label: body.label ?? null,
+        sectionId:
+          body.kind === 'audio'
+            ? (Number.isInteger(body.sectionId) && sectionExists(body.sectionId as number)
+                ? (body.sectionId as number)
+                : guessSectionId(body.label) ?? guessSectionId(body.filename))
+            : null,
         storage: 'b2',
         storageKey: body.storageKey,
         filename: body.filename,
@@ -185,18 +194,29 @@ export const filesRoutes: FastifyPluginAsync = async (app) => {
    * Rename a file's label (admin) — e.g. an imported track from "Tenor 1" to
    * "Tenor 1 (with piano)". Send { label: string } or { label: null } to clear.
    */
-  app.patch<{ Params: { id: string }; Body: { label?: string | null } }>(
+  app.patch<{ Params: { id: string }; Body: { label?: string | null; sectionId?: number | null } }>(
     '/files/:id',
     { preHandler: requireAdmin },
     async (req, reply) => {
       const id = Number(req.params.id);
       if (!Number.isFinite(id)) return reply.code(400).send({ error: 'invalid file id' });
-      const raw = req.body?.label;
-      if (raw !== undefined && raw !== null && typeof raw !== 'string') {
-        return reply.code(400).send({ error: 'label must be a string or null' });
+      const body = req.body ?? {};
+      const patch: { label?: string | null; sectionId?: number | null } = {};
+      if ('label' in body) {
+        const raw = body.label;
+        if (raw !== null && typeof raw !== 'string') {
+          return reply.code(400).send({ error: 'label must be a string or null' });
+        }
+        patch.label = typeof raw === 'string' ? raw.trim() || null : null;
       }
-      const label = typeof raw === 'string' ? raw.trim() || null : null;
-      const updated = updateFileLabel(id, label);
+      if ('sectionId' in body) {
+        const sid = body.sectionId;
+        if (sid !== null && (!Number.isInteger(sid) || !sectionExists(sid as number))) {
+          return reply.code(400).send({ error: 'unknown section' });
+        }
+        patch.sectionId = sid as number | null;
+      }
+      const updated = updateFile(id, patch);
       if (!updated) return reply.code(404).send({ error: 'not found' });
       return updated;
     },

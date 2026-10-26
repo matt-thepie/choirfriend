@@ -19,6 +19,8 @@ export interface PieceFile {
   createdByUserId: number | null;
   /** Uploader's display name, or null for seeded/legacy files. */
   createdByName: string | null;
+  /** Voice part (audio only). Null = not part-specific, e.g. a full mix. */
+  sectionId: number | null;
 }
 
 export interface Piece {
