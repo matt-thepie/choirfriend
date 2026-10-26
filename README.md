@@ -21,7 +21,7 @@ A self-hosted, open-source web app for choirs. It does what Choirmate does — s
 | Storage | Backblaze B2 behind a custom domain | Cheap, direct browser uploads via presigned URLs |
 | Auth | Pluggable providers | sgmc-identity ships built in; generic OIDC is stubbed for other deployments |
 | PDF rendering | PDF.js | Mature, free |
-| Audio | Web Audio API + Tone.js | Tempo slowdown without pitch shift; Tone.js for the piano |
+| Audio | Web Audio API | Tempo slowdown without pitch shift; the piano plays [Salamander Grand Piano](https://archive.org/details/SalamanderGrandPianoV3) samples (Alexander Holm, CC BY 3.0, mp3 set from [tonejs/audio](https://github.com/Tonejs/audio)), self-hosted in `client/public/piano/` |
 
 The original app was scaffolded against the SGMC choir's existing identity service. The auth layer is designed so other choirs can plug in Google, Microsoft, Keycloak, magic links, etc. without touching choirfriend itself.
 
@@ -173,8 +173,8 @@ Built:
 - PDF viewer with pen annotations and navigation markers on private and shared layers; read/perform mode; fit-to-width on phones.
 - Set lists: picture tiles, create / rename / drag reorder / archive / copy / delete / Order, one list pinned as "this week"; **Practice list** panel ("Viewing content for" + section) queues one track per song; the virtual **All songs** list.
 - Persistent mini player (72px card, seek bar, 48px play) with speed 0.5–1.5x, A-B loop, repeat and Media Session for lock-screen controls.
-- Design system: SGMC claret field, white cards, Inter, Material Symbols, 16px base, 44px tap targets, dark mode via `prefers-color-scheme`; installable PWA (manifest + icons, no offline caching yet).
-- Piano widget; bulk importer (Claude reads title/composer off PDFs); ChoirMate migration importer and backfill tools.
+- Design system: deep teal field (the logo's palette), white cards, Inter, Material Symbols, 16px base, 44px tap targets, dark mode via `prefers-color-scheme`; installable PWA (manifest + icons, no offline caching yet).
+- Piano widget (sampled grand piano, 2–5 octaves depending on screen width); bulk importer (Claude reads title/composer off PDFs); ChoirMate migration importer and backfill tools.
 - Admin gate on all write routes (members of any `ADMIN_ROLES` group).
 
 Not built (from the ChoirMate brief):

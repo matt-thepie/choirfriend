@@ -1,11 +1,12 @@
 /**
- * Bare Web Audio piano. Triangle-wave oscillators with an attack/release
- * envelope per active note. Polyphonic — multiple keys can be held at once.
+ * Web Audio piano. Plays Salamander Grand Piano samples (Alexander Holm,
+ * CC BY 3.0; the mp3 set from tonejs/audio) self-hosted under
+ * /piano/*.mp3 at minor-third spacing, pitch-shifted to the nearest
+ * sampled note. Polyphonic — multiple keys can be held at once.
  *
- * Deliberately no Tone.js / SoundFont / sample library: the purpose is
- * notebashing (let a chorister hear pitch when they're lost in a part),
- * not realistic timbre. A 3-line oscillator gets there with zero kB of
- * dependency.
+ * Samples are fetched lazily the first time the piano is used (~2 MB in
+ * total). Until a note's sample has decoded, a triangle-wave oscillator
+ * stands in so the first key press still makes a sound.
  *
  * AudioContext is lazy-instantiated on first user gesture so we don't
  * trip the browser's autoplay restrictions.
@@ -19,13 +20,58 @@ export function midiToFreq(midi: number): number {
 }
 
 interface Voice {
-  osc: OscillatorNode;
+  osc: OscillatorNode | AudioBufferSourceNode;
   gain: GainNode;
 }
 
 const ATTACK_S = 0.008;
 const RELEASE_S = 0.25;
 const PEAK_GAIN = 0.22;
+const SAMPLE_GAIN = 0.9;
+const SAMPLE_RELEASE_S = 0.4;
+
+/** Sampled notes: A, C, D# and F# of each octave, as MIDI numbers → file stem. */
+const SAMPLE_NOTES: { midi: number; name: string }[] = [];
+for (let octave = 0; octave <= 8; octave++) {
+  for (const [pc, stem] of [[0, 'C'], [3, 'Ds'], [6, 'Fs'], [9, 'A']] as const) {
+    const midi = (octave + 1) * 12 + pc;
+    if (midi < 21 || midi > 108) continue; // A0..C8
+    SAMPLE_NOTES.push({ midi, name: `${stem}${octave}` });
+  }
+}
+
+const bufferCache = new Map<string, Promise<AudioBuffer>>();
+
+function loadSample(ctx: AudioContext, name: string): Promise<AudioBuffer> {
+  let p = bufferCache.get(name);
+  if (!p) {
+    p = fetch(`/piano/${name}.mp3`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`piano sample ${name}: ${r.status}`);
+        return r.arrayBuffer();
+      })
+      .then((ab) => ctx.decodeAudioData(ab));
+    p.catch(() => bufferCache.delete(name));
+    bufferCache.set(name, p);
+  }
+  return p;
+}
+
+/** Already-decoded buffer for a sample, or null if still loading. */
+const decoded = new Map<string, AudioBuffer>();
+
+function nearestSample(midi: number): { midi: number; name: string } {
+  let best = SAMPLE_NOTES[0];
+  for (const s of SAMPLE_NOTES) if (Math.abs(s.midi - midi) < Math.abs(best.midi - midi)) best = s;
+  return best;
+}
+
+/** Kick off loading every sample; resolves when all are decoded. */
+function preloadAll(ctx: AudioContext): void {
+  for (const s of SAMPLE_NOTES) {
+    void loadSample(ctx, s.name).then((buf) => decoded.set(s.name, buf)).catch(() => undefined);
+  }
+}
 
 export interface UsePianoResult {
   noteOn: (midi: number) => void;
@@ -56,6 +102,7 @@ export function usePiano(): UsePianoResult {
       master.connect(ctx.destination);
       ctxRef.current = ctx;
       masterRef.current = master;
+      preloadAll(ctx);
     }
     if (ctxRef.current.state === 'suspended') {
       void ctxRef.current.resume().then(() => setReady(true));
@@ -78,18 +125,28 @@ export function usePiano(): UsePianoResult {
       voicesRef.current.delete(midi);
     }
 
-    const osc = ctx.createOscillator();
     const gain = ctx.createGain();
-    osc.type = 'triangle';
-    osc.frequency.value = midiToFreq(midi);
-
-    osc.connect(gain);
     gain.connect(master);
-
     const now = ctx.currentTime;
-    gain.gain.setValueAtTime(0, now);
-    gain.gain.linearRampToValueAtTime(PEAK_GAIN, now + ATTACK_S);
-
+    const sample = nearestSample(midi);
+    const buf = decoded.get(sample.name);
+    let osc: OscillatorNode | AudioBufferSourceNode;
+    if (buf) {
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.playbackRate.value = Math.pow(2, (midi - sample.midi) / 12);
+      gain.gain.setValueAtTime(SAMPLE_GAIN, now);
+      osc = src;
+    } else {
+      // Sample not decoded yet: triangle stand-in with a short attack.
+      const o = ctx.createOscillator();
+      o.type = 'triangle';
+      o.frequency.value = midiToFreq(midi);
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(PEAK_GAIN, now + ATTACK_S);
+      osc = o;
+    }
+    osc.connect(gain);
     osc.start(now);
 
     voicesRef.current.set(midi, { osc, gain });
@@ -135,6 +192,7 @@ function releaseVoice(voice: Voice, ctx: AudioContext): void {
   const currentGain = voice.gain.gain.value;
   voice.gain.gain.cancelScheduledValues(now);
   voice.gain.gain.setValueAtTime(currentGain, now);
-  voice.gain.gain.exponentialRampToValueAtTime(0.0001, now + RELEASE_S);
-  voice.osc.stop(now + RELEASE_S + 0.01);
+  const release = voice.osc instanceof OscillatorNode ? RELEASE_S : SAMPLE_RELEASE_S;
+  voice.gain.gain.exponentialRampToValueAtTime(0.0001, now + release);
+  voice.osc.stop(now + release + 0.01);
 }

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button.tsx';
 import { cn } from '@/lib/utils.ts';
 import { usePiano } from '@/hooks/usePiano.ts';
@@ -32,9 +32,11 @@ interface PianoProps {
   onClose?: () => void;
 }
 
-const OCTAVE_RANGE_LOW = 2; // MIDI octave 2 → starts at C2 (very low)
-const OCTAVE_RANGE_HIGH = 7; // starts at C7
+const OCTAVE_RANGE_LOW = 1; // lowest visible octave starts at C1
+const OCTAVE_RANGE_HIGH = 8; // keyboard never extends past C8
 const DEFAULT_BOTTOM_OCTAVE = 4; // C4 (middle C is C4 → MIDI 60)
+const MIN_OCTAVES = 2;
+const MAX_OCTAVES = 5;
 
 /** Width of a white key in px. Black keys are 60% of this. */
 const WHITE_WIDTH = 36;
@@ -44,8 +46,27 @@ const BLACK_HEIGHT = Math.round(WHITE_HEIGHT * 0.62);
 
 export function Piano({ onClose }: PianoProps) {
   const { noteOn, noteOff, activeNotes, ready } = usePiano();
-  // Bottom MIDI note of the lowest visible octave. Two octaves shown at once.
+  // Bottom MIDI note of the lowest visible octave.
   const [bottomOctave, setBottomOctave] = useState(DEFAULT_BOTTOM_OCTAVE);
+  // How many octaves fit: as many as the container is wide for, 2 on a
+  // phone, up to 5 on a desktop. Centred on middle C when there is room.
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [octaves, setOctaves] = useState(MIN_OCTAVES);
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const measure = () => {
+      const fit = Math.floor(el.clientWidth / (7 * WHITE_WIDTH));
+      const n = Math.max(MIN_OCTAVES, Math.min(MAX_OCTAVES, fit));
+      setOctaves(n);
+      // Keep middle C in view: bottom octave shifts down as more octaves fit.
+      setBottomOctave((b) => (b === DEFAULT_BOTTOM_OCTAVE || b === DEFAULT_BOTTOM_OCTAVE - Math.floor((n - 2) / 2) ? DEFAULT_BOTTOM_OCTAVE - Math.floor((n - 2) / 2) : Math.min(b, OCTAVE_RANGE_HIGH - n)));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   // Track which pointer is holding which note so a lifted pointer always
   // releases the note it started on, even if it slid to a different key.
@@ -66,8 +87,8 @@ export function Piano({ onClose }: PianoProps) {
   const whiteKeys: number[] = [];
   const blackKeys: { midi: number; leftWhiteIndex: number }[] = [];
 
-  // Build two octaves' worth of keys.
-  for (let octaveOffset = 0; octaveOffset < 2; octaveOffset++) {
+  // Build the visible octaves' worth of keys.
+  for (let octaveOffset = 0; octaveOffset < octaves; octaveOffset++) {
     const octaveStart = startMidi + octaveOffset * 12;
     let whiteIndexInOctave = 0;
     for (let semitone = 0; semitone < 12; semitone++) {
@@ -102,7 +123,7 @@ export function Piano({ onClose }: PianoProps) {
     <div className="border-t border-border bg-background/95 backdrop-blur px-4 py-2 select-none">
       <div className="flex items-center gap-3 mb-2">
         <span className="text-sm font-semibold">Piano</span>
-        <span className="text-xs text-muted-foreground">A4 = 440 · click or touch keys</span>
+        <span className="text-xs text-muted-foreground hidden md:inline whitespace-nowrap">A4 = 440 · click or touch keys</span>
         <div className="ml-auto flex items-center gap-2">
           <Button
             size="sm"
@@ -113,19 +134,19 @@ export function Piano({ onClose }: PianoProps) {
           >
             ◀ Octave
           </Button>
-          <span className="text-xs tabular-nums w-16 text-center">
-            C{bottomOctave} – B{bottomOctave + 1}
+          <span className="text-xs tabular-nums w-16 text-center whitespace-nowrap">
+            C{bottomOctave} – B{bottomOctave + octaves - 1}
           </span>
           <Button
             size="sm"
             variant="outline"
-            onClick={() => setBottomOctave((o) => Math.min(OCTAVE_RANGE_HIGH - 1, o + 1))}
-            disabled={bottomOctave + 1 >= OCTAVE_RANGE_HIGH}
+            onClick={() => setBottomOctave((o) => Math.min(OCTAVE_RANGE_HIGH - octaves, o + 1))}
+            disabled={bottomOctave + octaves >= OCTAVE_RANGE_HIGH}
             aria-label="Shift up one octave"
           >
             Octave ▶
           </Button>
-          {!ready && <span className="text-xs text-muted-foreground">tap any key to enable audio</span>}
+          {!ready && <span className="text-xs text-muted-foreground hidden md:inline whitespace-nowrap">tap any key to enable audio</span>}
           {onClose && (
             <Button size="sm" variant="ghost" onClick={onClose} aria-label="Close piano">
               ✕
@@ -134,7 +155,7 @@ export function Piano({ onClose }: PianoProps) {
         </div>
       </div>
 
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto" ref={wrapRef}>
         <div
           className="relative inline-block"
           style={{ width: totalWidth, height: WHITE_HEIGHT, touchAction: 'none' }}
