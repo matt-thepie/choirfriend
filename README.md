@@ -139,6 +139,19 @@ The Fastify server serves `client/dist/` as static assets in production. nginx f
 - **Offline support:** service worker + IndexedDB caching of opened pieces is on the roadmap, not built yet.
 - **Mobile:** the UI must be tablet/phone-first since most choristers use those at rehearsals.
 
+## ChoirMate migration
+
+`server/src/import/choirmate.ts` loads a ChoirMate scrape (a `manifest.json`
+plus the files it references) into the database and B2:
+
+    cd server && node --env-file=../.env src/import/choirmate.ts ~/sgmc-export [--dry-run] [--limit N]
+
+It is resumable (progress in `<export>/.choirfriend-import.json`). Songs with
+the same title (ignoring case/punctuation) are merged; ChoirMate's free-text
+artist goes into `composer`; songs on the "Rehearsal" set list become current
+repertoire and the rest are archived; `.docx` attachments are skipped and
+listed at the end.
+
 ## Status
 
 Working and deployed at `music.sgmc.org.uk` (SGMC members only, via sgmc-identity).
