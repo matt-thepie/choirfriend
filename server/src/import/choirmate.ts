@@ -275,6 +275,25 @@ async function main(): Promise<void> {
     }
   }
 
+  // The manifest's folder/file casing came from a case-insensitive macOS disk
+  // and does not always match what is on a Linux filesystem.
+  const dirCache = new Map<string, Map<string, string>>();
+  function resolveCaseInsensitive(root: string, rel: string): string {
+    let cur = root;
+    for (const part of rel.split('/')) {
+      const direct = path.join(cur, part);
+      if (fs.existsSync(direct)) { cur = direct; continue; }
+      let names = dirCache.get(cur);
+      if (!names) {
+        names = new Map();
+        try { for (const n of fs.readdirSync(cur)) names.set(n.toLowerCase(), n); } catch { /* fall through */ }
+        dirCache.set(cur, names);
+      }
+      cur = path.join(cur, names.get(part.toLowerCase()) ?? part);
+    }
+    return cur;
+  }
+
   async function importFile(opts: {
     cmId: string;
     pieceId: number;
@@ -289,7 +308,7 @@ async function main(): Promise<void> {
       console.log(`  = ${opts.kind} ${path.basename(opts.relPath)} (already imported as #${progress.files[opts.cmId]})`);
       return;
     }
-    const abs = path.join(dir!, opts.relPath);
+    const abs = resolveCaseInsensitive(dir!, opts.relPath);
     let stat: fs.Stats;
     try {
       stat = await fsp.stat(abs);
