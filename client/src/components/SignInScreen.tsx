@@ -29,7 +29,9 @@ export function SignInScreen() {
     <div className="h-screen flex items-center justify-center bg-muted/20 p-6">
       <div className="w-full max-w-sm rounded-lg border border-border bg-background p-6 space-y-4 shadow-sm">
         <header className="space-y-1">
-          <h1 className="text-2xl font-semibold tracking-tight">choirfriend</h1>
+          <img src="/brand/choirfriend-logo.svg" alt="choirfriend — Solent Gay Men's Chorus" className="h-14 dark:hidden" />
+          <img src="/brand/choirfriend-logo-white.svg" alt="choirfriend — Solent Gay Men's Chorus" className="h-14 hidden dark:block" />
+          <h1 className="sr-only">choirfriend</h1>
           <p className="text-sm text-muted-foreground">
             Sign in to view your choir's repertoire, learning tracks, and the piano.
           </p>

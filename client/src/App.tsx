@@ -163,7 +163,7 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
             </button>
           ) : (
             <>
-              <span className="font-semibold shrink-0">choirfriend</span>
+              <span className="inline-flex items-center gap-2 shrink-0"><img src="/brand/choirfriend-icon.svg" alt="" width="24" height="24" className="rounded-md" /><img src="/brand/choirfriend-wordmark.svg" alt="choirfriend" className="h-5 hidden sm:dark:hidden sm:block" /></span>
               <nav className="ml-2 inline-flex items-center rounded-md border border-border p-0.5 text-sm" aria-label="Set lists and repertoire">
                 <TabButton active={tab === 'setlists'} onClick={() => { setTab('setlists'); setSetListId(null); }}>Set lists</TabButton>
                 <TabButton active={tab === 'songs'} onClick={() => { setTab('songs'); setSetListId(null); }}>Repertoire</TabButton>
