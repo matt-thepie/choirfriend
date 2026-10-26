@@ -153,8 +153,19 @@ Built:
 - File upload / replace / delete via presigned B2 URLs, with voice-part labels on tracks.
 - Bulk importer: Claude reads title/composer off PDF first pages and matches audio files to pieces by filename; a human confirms.
 - Admin gate on all write routes (members of any `ADMIN_ROLES` group).
+- Choir sections (Tenor 1, Tenor 2, Baritone, Bass, Musician): audio tracks and members are tagged with a voice part; members pick "My part" from the menu.
+- Set lists: admin CRUD with drag reorder, archive and copy; a virtual "All songs" list; "Practise this set list" queues one track per song for the chosen part.
+- Persistent queue player (bottom bar + expanded mini player): prev/next, speed, A-B loop, repeat, Media Session so lock-screen controls work.
 
-Not built:
+Not built (from the ChoirMate brief):
+
+- Personal practice lists, per-member confidence rating and private notes, section remarks, member-side uploads.
+- Links (Spotify/YouTube) and lyrics on a song.
+- Repertoire / set list exports (CSV, PDF), duplicate detection and merge.
+- Track Mixer (per-part volume mixing).
+- ChoirMate migration import.
+
+Not built (other):
 
 - Offline support (service worker + IndexedDB).
 - Generic OIDC auth provider (stub only; sgmc-identity is the one real provider).
