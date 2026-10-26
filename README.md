@@ -141,4 +141,21 @@ The Fastify server serves `client/dist/` as static assets in production. nginx f
 
 ## Status
 
-Skeleton scaffold. Auth wired to sgmc-identity. PDF viewer, annotations, learning tracks, and the piano are not implemented yet — they're up next.
+Working and deployed at `music.sgmc.org.uk` (SGMC members only, via sgmc-identity).
+
+Built:
+
+- Home screen: active repertoire vs. all other songs, search, admin controls to move pieces between lists and create new ones.
+- PDF viewer with pen annotations and navigation markers (segno, coda, D.S., D.C., voltas, repeats, bar numbers) on two layers: private per user and shared choir-wide.
+- Read/perform mode: minimal chrome, page-turn navigation.
+- Learning-track audio player with pitch-preserving tempo slowdown and an A/B loop.
+- Piano widget for notebashing.
+- File upload / replace / delete via presigned B2 URLs, with voice-part labels on tracks.
+- Bulk importer: Claude reads title/composer off PDF first pages and matches audio files to pieces by filename; a human confirms.
+- Admin gate on all write routes (members of any `ADMIN_ROLES` group).
+
+Not built:
+
+- Offline support (service worker + IndexedDB).
+- Generic OIDC auth provider (stub only; sgmc-identity is the one real provider).
+- Any of Choirmate's non-music features (members, messages, polls, events, documents). Out of scope unless a choir asks for them.
