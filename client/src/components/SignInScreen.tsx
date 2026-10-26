@@ -26,8 +26,8 @@ export function SignInScreen() {
   }, []);
 
   return (
-    <div className="h-screen flex items-center justify-center bg-muted/20 p-6">
-      <div className="w-full max-w-sm rounded-lg border border-border bg-background p-6 space-y-4 shadow-sm">
+    <div className="h-screen flex items-center justify-center p-6">
+      <div className="w-full max-w-sm card p-6 space-y-4">
         <header className="space-y-1">
           <img src="/brand/choirfriend-logo.svg" alt="choirfriend — Solent Gay Men's Chorus" className="h-14 dark:hidden" />
           <img src="/brand/choirfriend-logo-white.svg" alt="choirfriend — Solent Gay Men's Chorus" className="h-14 hidden dark:block" />

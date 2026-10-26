@@ -144,7 +144,7 @@ export function UploadButton({
       {(staged.length > 0 || skipped.length > 0) && (
         <div className="absolute left-0 top-full mt-1 z-30 w-[22rem] max-w-[calc(100vw-2rem)] bg-background border border-border rounded-md shadow-lg p-2 space-y-2">
           {skipped.length > 0 && (
-            <div className="text-[11px] text-destructive">
+            <div className="text-xs text-destructive">
               Not supported: {skipped.join(', ')}. Use PDF, audio, a lyrics document (docx, rtf, txt) or a MuseScore / MusicXML file.
             </div>
           )}
@@ -164,7 +164,7 @@ export function UploadButton({
                           value={item.kind}
                           onChange={(e) => patch(i, { kind: e.target.value as FileKind })}
                           aria-label="File this as"
-                          className="text-[11px] h-7 px-1 rounded border border-border bg-background shrink-0"
+                          className="text-xs h-7 px-1 rounded border border-border bg-background shrink-0"
                           disabled={busy}
                         >
                           <option value="pdf">Sheet music</option>
@@ -189,7 +189,7 @@ export function UploadButton({
                           disabled={busy}
                           className="w-full text-xs h-7 px-1.5 rounded border border-border bg-background focus:outline-none focus:ring-1 focus:ring-primary"
                         />
-                        <div className="text-[10px] text-muted-foreground truncate px-1.5" title={item.file.name}>
+                        <div className="text-xs text-muted-foreground truncate px-1.5" title={item.file.name}>
                           {item.file.name}
                         </div>
                       </div>
@@ -207,7 +207,7 @@ export function UploadButton({
                 })}
               </div>
               {hasScore && (
-                <p className="text-[11px] text-muted-foreground">
+                <p className="text-xs text-muted-foreground">
                   {FILE_KIND_LABEL.score}s are only shown to the MD, committee and section admins.
                 </p>
               )}

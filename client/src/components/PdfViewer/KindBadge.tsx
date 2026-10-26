@@ -12,7 +12,7 @@ const STYLE: Record<FileKind, { text: string; cls: string }> = {
 export function KindBadge({ kind, className }: { kind: FileKind; className?: string }) {
   const s = STYLE[kind];
   return (
-    <span className={cn('text-[9px] uppercase font-semibold px-1 py-0.5 rounded shrink-0', s.cls, className)}>
+    <span className={cn('text-xs uppercase font-semibold px-1 py-0.5 rounded shrink-0', s.cls, className)}>
       {s.text}
     </span>
   );

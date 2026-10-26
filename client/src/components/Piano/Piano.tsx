@@ -165,7 +165,7 @@ export function Piano({ onClose }: PianoProps) {
                 onPointerLeave={(e) => endNote(e.pointerId)}
               >
                 {isC && (
-                  <span className="absolute bottom-1 left-0 right-0 text-center text-[10px] text-muted-foreground pointer-events-none">
+                  <span className="absolute bottom-1 left-0 right-0 text-center text-xs text-muted-foreground pointer-events-none">
                     {noteName(midi)}
                   </span>
                 )}

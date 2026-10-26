@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Button } from '@/components/ui/button.tsx';
+import { Button, Icon } from '@/components/ui/button.tsx';
 import { cn } from '@/lib/utils.ts';
 import type { PieceSummary } from '@/hooks/usePieces.ts';
 import type { Section } from '@/hooks/useSections.ts';
@@ -127,35 +127,34 @@ export function SetListScreen({
   }
 
   return (
-    <div className="h-full overflow-auto bg-muted/20">
-      <div className="max-w-3xl mx-auto px-4 py-6 space-y-5">
+    <div className="h-full overflow-auto">
+      <div className="max-w-(--max) mx-auto px-4 sm:px-6 py-5 space-y-5">
+        <nav aria-label="Breadcrumb" className="text-sm text-on-field-muted flex items-center gap-1">
+          <button type="button" onClick={onBack} className="hover:text-on-field">Set lists</button>
+          <span aria-hidden>›</span>
+          <span className="text-on-field">{list.name}</span>
+        </nav>
         <div className="flex items-center gap-3">
-          <button type="button" onClick={onBack} className="text-sm text-muted-foreground hover:text-foreground">‹ Set lists</button>
-          <h1 className="text-base font-semibold flex-1 truncate">
+          <h1 className="text-2xl md:text-4xl font-semibold text-on-field flex-1 truncate">
             {list.name}
-            {list.pinned && <span className="ml-2 text-xs font-normal uppercase tracking-wide text-amber-700">this week</span>}
-            {list.status === 'archived' && <span className="ml-2 text-xs font-normal uppercase tracking-wide text-muted-foreground">archived</span>}
+            {list.pinned && <span className="ml-3 text-sm font-medium uppercase tracking-wide text-on-field-muted align-middle">this week</span>}
+            {list.status === 'archived' && <span className="ml-3 text-sm font-medium uppercase tracking-wide text-on-field-muted align-middle">archived</span>}
           </h1>
           {isAdmin && !isVirtual && (
-            <Button size="sm" variant="outline" onClick={() => setEditing(true)}>Edit</Button>
+            <Button variant="outline" onClick={() => setEditing(true)}>Edit set list</Button>
           )}
         </div>
 
-        {/* Practice panel */}
-        <div className="rounded-md border border-border bg-background p-4 flex flex-wrap items-center gap-3">
-          <div className="flex-1 min-w-48">
-            <div className="text-sm font-medium">Practise this set list</div>
-            <div className="text-xs text-muted-foreground">
-              One track per song for your part, in running order.
-              {songsWithoutAudio > 0 && ` ${songsWithoutAudio} song${songsWithoutAudio === 1 ? ' has' : 's have'} no audio and will be skipped.`}
-            </div>
-          </div>
-          <label className="text-xs flex items-center gap-1.5">
-            Part
+        <div className="grid gap-6 md:grid-cols-[1fr_320px] items-start">
+        {/* Practice list panel */}
+        <div className="card p-4 sm:p-6 space-y-4 md:order-2 md:sticky md:top-4">
+          <div className="text-base font-semibold">Practice list</div>
+          <label className="block text-sm">
+            <span className="text-muted-foreground">Viewing content for</span>
             <select
               value={sectionId ?? ''}
               onChange={(e) => setSectionId(e.target.value === '' ? null : Number(e.target.value))}
-              className="h-9 px-2 rounded-md border border-border bg-background text-sm"
+              className="mt-1 w-full h-11 px-3 rounded-md border border-border bg-background text-base"
             >
               <option value="">Any / full mix</option>
               {sections.map((s) => (
@@ -163,33 +162,45 @@ export function SetListScreen({
               ))}
             </select>
           </label>
-          <Button
-            size="md"
+          <button
+            type="button"
             disabled={!queue || queue.tracks.length === 0}
             onClick={() => (isThisQueuePlaying ? player.toggle() : queue && player.playQueue(queue, 0))}
+            className="w-full inset-row flex items-center gap-4 px-4 py-3 hover:shadow-card disabled:opacity-50 text-left"
           >
-            {isThisQueuePlaying ? '❚❚ Pause' : `▶ Play ${queue?.tracks.length ?? 0} track${queue?.tracks.length === 1 ? '' : 's'}`}
-          </Button>
+            <span className="w-16 h-16 rounded-full bg-primary text-primary-foreground inline-flex items-center justify-center shrink-0 shadow-card">
+              <Icon name={isThisQueuePlaying ? 'pause' : 'play_arrow'} filled className="text-4xl" />
+            </span>
+            <span className="min-w-0">
+              <span className="block text-base font-semibold">{isThisQueuePlaying ? 'Pause' : 'Play'}</span>
+              <span className="block text-sm text-muted-foreground">
+                {queue?.tracks.length ?? 0} track{queue?.tracks.length === 1 ? '' : 's'}, one per song
+                {songsWithoutAudio > 0 && `; ${songsWithoutAudio} without audio skipped`}
+              </span>
+            </span>
+          </button>
         </div>
 
+        <div className="card p-4 sm:p-6 md:order-1">
+
         {list.songs.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            {isAdmin ? 'No songs yet. Use Edit to add some.' : 'No songs in this set list yet.'}
+          <p className="text-base text-muted-foreground text-center py-6">
+            {isAdmin ? 'No songs yet. Use Edit set list to add some.' : 'No songs in this set list yet.'}
           </p>
         ) : (
-          <ol className="divide-y divide-border rounded-md border border-border bg-background overflow-hidden">
+          <ol className="inset-list">
             {list.songs.map((song, i) => {
               const track = queue ? pickTrackForSection(song.audio, sectionId) : null;
               const qIndex = queue && track ? queue.tracks.findIndex((t) => t.fileId === track.id) : -1;
               const playing = player.current?.pieceId === song.id && player.queue?.name === queue?.name;
               return (
-                <li key={song.id} className={cn('flex items-center gap-3 px-3 py-2.5', playing && 'bg-accent/50')}>
-                  <span className="w-6 h-6 rounded-full bg-muted text-xs flex items-center justify-center tabular-nums shrink-0">{i + 1}</span>
-                  <button type="button" onClick={() => onOpenPiece(song.id)} className="flex-1 min-w-0 text-left hover:underline">
-                    <div className="text-sm font-medium truncate">{song.title}</div>
+                <li key={song.id} className={cn('inset-row flex items-center gap-3 px-3', playing && 'ring-2 ring-primary')}>
+                  <span className="w-8 h-8 rounded-full bg-primary/10 text-accent-foreground text-sm font-semibold flex items-center justify-center tabular-nums shrink-0">{i + 1}</span>
+                  <button type="button" onClick={() => onOpenPiece(song.id)} className="flex-1 min-w-0 text-left py-2">
+                    <div className="text-base font-medium truncate">{song.title}</div>
                     {(song.composer || song.arranger) && (
-                      <div className="text-xs text-muted-foreground truncate">
-                        {[song.composer, song.arranger ? `arr. ${song.arranger}` : null].filter(Boolean).join(' · ')}
+                      <div className="text-sm text-muted-foreground truncate">
+                        {[song.composer, song.arranger].filter(Boolean).join(' / ')}
                       </div>
                     )}
                   </button>
@@ -199,18 +210,21 @@ export function SetListScreen({
                       aria-label={`Play ${song.title}`}
                       title={track.label?.trim() || track.filename}
                       onClick={() => queue && qIndex >= 0 && player.playQueue(queue, qIndex)}
-                      className="inline-flex items-center justify-center w-8 h-8 rounded-full border border-border hover:bg-accent shrink-0"
+                      className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-primary text-primary-foreground hover:bg-primary-hover shrink-0"
                     >
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden><path d="M8 5v14l11-7z" /></svg>
+                      <Icon name="play_arrow" filled />
                     </button>
                   ) : (
-                    <span className="text-[10px] text-muted-foreground shrink-0">no audio</span>
+                    <span className="text-xs text-muted-foreground shrink-0">no audio</span>
                   )}
+                  <Icon name="chevron_right" className="text-muted-foreground" />
                 </li>
               );
             })}
           </ol>
         )}
+        </div>
+        </div>
       </div>
     </div>
   );
@@ -233,6 +247,7 @@ function SetListEditor({ setList, pieces, onSaved, onClose, onDeleted, onCopied 
   const [name, setName] = useState(setList.name);
   const [status, setStatus] = useState(setList.status);
   const [pinned, setPinned] = useState(setList.pinned);
+  const [order, setOrder] = useState(String(setList.sortOrder));
   const [songs, setSongs] = useState<SetListSong[]>(setList.songs);
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
@@ -244,6 +259,7 @@ function SetListEditor({ setList, pieces, onSaved, onClose, onDeleted, onCopied 
     name.trim() !== setList.name ||
     status !== setList.status ||
     pinned !== setList.pinned ||
+    Number(order) !== setList.sortOrder ||
     songs.length !== setList.songs.length ||
     songs.some((s, i) => s.id !== setList.songs[i]?.id);
 
@@ -286,17 +302,17 @@ function SetListEditor({ setList, pieces, onSaved, onClose, onDeleted, onCopied 
   }
 
   const save = (): Promise<void> =>
-    run('save', () => patchSetList(setList.id, { name: name.trim(), status, pinned, pieceIds: songs.map((s) => s.id) }), (updated) => {
+    run('save', () => patchSetList(setList.id, { name: name.trim(), status, pinned, sortOrder: Number.isInteger(Number(order)) ? Number(order) : setList.sortOrder, pieceIds: songs.map((s) => s.id) }), (updated) => {
       onSaved(updated);
       setSongs(updated.songs);
     });
 
   return (
-    <div className="h-full overflow-auto bg-muted/20">
-      <div className="max-w-3xl mx-auto px-4 py-6 space-y-5">
+    <div className="h-full overflow-auto">
+      <div className="max-w-(--max) mx-auto px-4 sm:px-6 py-5 space-y-5">
         <div className="flex items-center gap-3">
-          <button type="button" onClick={onClose} className="text-sm text-muted-foreground hover:text-foreground">‹ Done</button>
-          <h1 className="text-base font-semibold flex-1 truncate">Edit set list</h1>
+          <button type="button" onClick={onClose} className="text-sm text-on-field-muted hover:text-on-field">‹ Done</button>
+          <h1 className="text-2xl font-semibold text-on-field flex-1 truncate">Edit set list</h1>
           <Button size="sm" onClick={() => void save()} disabled={!dirty || !name.trim() || busy !== null}>
             {busy === 'save' ? 'Saving…' : 'Save'}
           </Button>
@@ -304,7 +320,7 @@ function SetListEditor({ setList, pieces, onSaved, onClose, onDeleted, onCopied 
 
         {error && <p className="text-xs text-destructive">{error}</p>}
 
-        <div className="rounded-md border border-border bg-background p-4 grid gap-3 sm:grid-cols-[1fr_auto]">
+        <div className="card p-4 sm:p-6 grid gap-3 sm:grid-cols-[1fr_auto_auto]">
           <label className="text-xs space-y-1">
             <span className="text-muted-foreground">Name</span>
             <input
@@ -325,7 +341,16 @@ function SetListEditor({ setList, pieces, onSaved, onClose, onDeleted, onCopied 
               <option value="archived">Archived</option>
             </select>
           </label>
-          <label className="text-xs flex items-center gap-2 sm:col-span-2 cursor-pointer select-none">
+          <label className="text-xs space-y-1">
+            <span className="text-muted-foreground">Order</span>
+            <input
+              type="number"
+              value={order}
+              onChange={(e) => setOrder(e.target.value)}
+              className="w-24 h-9 px-2 rounded-md border border-border bg-background text-sm"
+            />
+          </label>
+          <label className="text-xs flex items-center gap-2 sm:col-span-3 cursor-pointer select-none">
             <input type="checkbox" checked={pinned} onChange={(e) => setPinned(e.target.checked)} />
             <span>
               <span className="font-medium">This week's rehearsal</span>
@@ -334,12 +359,12 @@ function SetListEditor({ setList, pieces, onSaved, onClose, onDeleted, onCopied 
           </label>
         </div>
 
-        <section className="space-y-2">
-          <h2 className="text-sm font-semibold">Songs <span className="text-muted-foreground font-normal">({songs.length})</span></h2>
+        <section className="card p-4 sm:p-6 space-y-3">
+          <h2 className="text-base font-semibold">Songs <span className="text-muted-foreground font-normal">({songs.length})</span></h2>
           {songs.length === 0 ? (
             <p className="text-sm text-muted-foreground">Nothing yet. Search below to add songs.</p>
           ) : (
-            <ol className="divide-y divide-border rounded-md border border-border bg-background overflow-hidden">
+            <ol className="inset-list">
               {songs.map((song, i) => (
                 <li
                   key={song.id}
@@ -379,7 +404,7 @@ function SetListEditor({ setList, pieces, onSaved, onClose, onDeleted, onCopied 
           <div className="relative">
             <input
               type="search"
-              placeholder="Search songs to add…"
+              placeholder="Search or add songs"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               className="w-full h-10 px-3 rounded-md border border-border bg-background text-sm"
@@ -391,7 +416,7 @@ function SetListEditor({ setList, pieces, onSaved, onClose, onDeleted, onCopied 
                     <button type="button" onClick={() => add(p)} className="w-full text-left px-3 py-2 text-sm hover:bg-accent/60 flex items-center gap-2">
                       <span className="flex-1 truncate">{p.title}</span>
                       {p.composer && <span className="text-xs text-muted-foreground truncate">{p.composer}</span>}
-                      <span className="text-[10px] text-muted-foreground">{p.audioCount} audio</span>
+                      <span className="text-xs text-muted-foreground">{p.audioCount} audio</span>
                     </button>
                   </li>
                 ))}
@@ -403,21 +428,22 @@ function SetListEditor({ setList, pieces, onSaved, onClose, onDeleted, onCopied 
           </div>
         </section>
 
-        <section className="rounded-md border border-border bg-background p-4 flex flex-wrap items-center gap-2">
+        <section className="card p-4 sm:p-6 flex flex-wrap items-center gap-2">
           <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => void run('copy', () => copySetList(setList.id), onCopied)}>
-            {busy === 'copy' ? 'Copying…' : 'Copy set list'}
+            <Icon name="content_copy" className="text-xl" />
+            {busy === 'copy' ? 'Copying…' : 'Copy'}
           </Button>
           <div className="flex-1" />
           {confirmDelete ? (
             <>
               <span className="text-xs text-muted-foreground">Delete “{setList.name}”?</span>
-              <Button size="sm" className="bg-destructive text-white hover:bg-destructive/90" disabled={busy !== null} onClick={() => void run('delete', () => deleteSetList(setList.id), onDeleted)}>
+              <Button size="sm" variant="danger" disabled={busy !== null} onClick={() => void run('delete', () => deleteSetList(setList.id), onDeleted)}>
                 {busy === 'delete' ? 'Deleting…' : 'Delete'}
               </Button>
               <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(false)}>Cancel</Button>
             </>
           ) : (
-            <Button size="sm" variant="ghost" className="text-destructive" onClick={() => setConfirmDelete(true)}>Delete set list</Button>
+            <Button size="sm" variant="danger" onClick={() => setConfirmDelete(true)}>Delete set list</Button>
           )}
         </section>
       </div>

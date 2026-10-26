@@ -618,7 +618,7 @@ export function PdfViewer({
           className="text-xs h-8 px-2 rounded-md border border-border bg-background w-40 ml-1"
         />
       )}
-      <span className="text-[11px] text-muted-foreground ml-auto self-center">Tap the score to place</span>
+      <span className="text-xs text-muted-foreground ml-auto self-center">Tap the score to place</span>
     </div>
   );
 
@@ -635,7 +635,7 @@ export function PdfViewer({
       </header>
 
       <div ref={stageRef} className="flex-1 relative min-h-0">
-        <div ref={scrollContainerRef} className="absolute inset-0 overflow-auto bg-muted/40">
+        <div ref={scrollContainerRef} className="absolute inset-0 overflow-auto bg-stage">
           <div
             ref={contentRef}
             className={cn(
@@ -825,7 +825,7 @@ function JumpToDropdown({ markers, open, onOpenChange, onJump }: JumpToDropdownP
               {m.label && m.markerKind !== 'bar' && m.markerKind !== 'custom' && (
                 <span className="ml-2 text-muted-foreground">{m.label}</span>
               )}
-              <span className={cn('ml-2 text-[10px] uppercase', m.layer === 'shared' ? 'text-amber-700' : 'text-blue-700')}>
+              <span className={cn('ml-2 text-xs uppercase', m.layer === 'shared' ? 'text-amber-700' : 'text-blue-700')}>
                 {m.layer}
               </span>
             </button>
@@ -856,14 +856,14 @@ function DocumentsMenu({ files, onView }: { files: PieceFile[]; onView: (id: num
           <div className="absolute left-0 top-full mt-1 w-80 max-h-96 overflow-auto bg-background border border-border rounded-md shadow-lg z-30 p-1">
             {groups.map((g) => (
               <div key={g.kind} className="py-1">
-                <div className="px-2 pb-1 text-[10px] uppercase tracking-wide text-muted-foreground">{FILE_KIND_LABEL[g.kind]}</div>
+                <div className="px-2 pb-1 text-xs uppercase tracking-wide text-muted-foreground">{FILE_KIND_LABEL[g.kind]}</div>
                 {g.items.map((f) => {
                   const viewable = isPdfFile(f);
                   return (
                     <div key={f.id} className="flex items-center gap-2 px-2 py-1 rounded hover:bg-accent/40">
                       <div className="flex-1 min-w-0">
                         <div className="text-xs truncate" title={f.filename}>{f.label?.trim() || f.filename}</div>
-                        <div className="text-[10px] text-muted-foreground truncate">
+                        <div className="text-xs text-muted-foreground truncate">
                           {f.label?.trim() ? f.filename : ''}
                           {f.createdByName ? `${f.label?.trim() ? ' · ' : ''}${f.createdByName}` : ''}
                         </div>
@@ -872,7 +872,7 @@ function DocumentsMenu({ files, onView }: { files: PieceFile[]; onView: (id: num
                         <button
                           type="button"
                           onClick={() => { onView(f.id); setOpen(false); }}
-                          className="text-[10px] px-1.5 py-0.5 rounded border border-border hover:bg-accent shrink-0"
+                          className="text-xs px-1.5 py-0.5 rounded border border-border hover:bg-accent shrink-0"
                         >
                           View
                         </button>
@@ -882,7 +882,7 @@ function DocumentsMenu({ files, onView }: { files: PieceFile[]; onView: (id: num
                         download={f.filename}
                         target="_blank"
                         rel="noreferrer"
-                        className="text-[10px] px-1.5 py-0.5 rounded border border-border hover:bg-accent shrink-0"
+                        className="text-xs px-1.5 py-0.5 rounded border border-border hover:bg-accent shrink-0"
                       >
                         Download
                       </a>
@@ -926,7 +926,7 @@ function FilesDropdown({ files, open, onOpenChange, onPatch, onDelete, onReplace
             if (group.length === 0) return null;
             return (
               <div key={kind} className="py-1">
-                <div className="px-1.5 pb-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">{FILE_KIND_LABEL[kind]}</div>
+                <div className="px-1.5 pb-0.5 text-xs uppercase tracking-wide text-muted-foreground">{FILE_KIND_LABEL[kind]}</div>
                 {group.map((f) => (
                   <FileRow key={f.id} file={f} sections={sections} onPatch={onPatch} onDelete={onDelete} onReplaced={onReplaced} />
                 ))}
@@ -997,7 +997,7 @@ function FileRow({
           onChange={(e) => onPatch(file.id, { kind: e.target.value as FileKind })}
           aria-label="Filed as"
           title="Sheet music or lyrics?"
-          className="text-[10px] h-6 px-1 rounded border border-border bg-background shrink-0"
+          className="text-xs h-6 px-1 rounded border border-border bg-background shrink-0"
         >
           <option value="pdf">Sheet music</option>
           <option value="lyrics">Lyrics</option>
@@ -1023,7 +1023,7 @@ function FileRow({
             onChange={(e) => onPatch(file.id, { sectionId: e.target.value === '' ? null : Number(e.target.value) })}
             aria-label="Voice part for this track"
             title="Which part this track is for — used when playing a set list for a section"
-            className="mt-0.5 ml-1 text-[11px] h-6 px-1 rounded border border-border bg-background"
+            className="mt-0.5 ml-1 text-xs h-6 px-1 rounded border border-border bg-background"
           >
             <option value="">Any / full mix</option>
             {sections.map((sec) => (
@@ -1031,7 +1031,7 @@ function FileRow({
             ))}
           </select>
         )}
-        <div className="text-[10px] text-muted-foreground truncate px-1.5" title={file.filename}>
+        <div className="text-xs text-muted-foreground truncate px-1.5" title={file.filename}>
           {replacing ? 'Replacing…' : replaceError ? <span className="text-destructive">{replaceError}</span> : (
             <>
               {file.filename}
@@ -1054,17 +1054,17 @@ function FileRow({
         aria-label="Replace file"
         disabled={replacing}
         onClick={() => replaceInputRef.current?.click()}
-        className="text-[10px] px-1.5 py-0.5 rounded border border-border text-muted-foreground hover:bg-accent shrink-0 disabled:opacity-50"
+        className="text-xs px-1.5 py-0.5 rounded border border-border text-muted-foreground hover:bg-accent shrink-0 disabled:opacity-50"
       >
         Replace
       </button>
 
       {confirming ? (
         <div className="flex items-center gap-1 shrink-0">
-          <button type="button" onClick={() => onDelete(file.id)} className="text-[10px] px-1.5 py-0.5 rounded bg-destructive text-white">
+          <button type="button" onClick={() => onDelete(file.id)} className="text-xs px-1.5 py-0.5 rounded bg-destructive text-white">
             Delete
           </button>
-          <button type="button" onClick={() => setConfirming(false)} className="text-[10px] px-1 text-muted-foreground">
+          <button type="button" onClick={() => setConfirming(false)} className="text-xs px-1 text-muted-foreground">
             cancel
           </button>
         </div>

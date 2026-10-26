@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Button } from '@/components/ui/button.tsx';
+import { Button, Icon } from '@/components/ui/button.tsx';
 import { cn } from '@/lib/utils.ts';
 import { createPiece, type PieceSummary } from '@/hooks/usePieces.ts';
 
@@ -101,27 +101,28 @@ export function RepertoireScreen({ pieces, loading, editing, onOpenPiece, onPiec
   }
 
   return (
-    <div className="h-full overflow-auto bg-muted/20">
-      <div className="max-w-4xl mx-auto px-4 py-6 space-y-4">
+    <div className="h-full overflow-auto">
+      <div className="max-w-(--max) mx-auto px-4 sm:px-6 py-5 space-y-5">
+        <h1 className="text-2xl md:text-4xl font-semibold text-on-field">Repertoire</h1>
         <section className="flex flex-wrap items-end gap-3">
           <div className="flex-1 min-w-48">
-            <label htmlFor="repertoire-search" className="block text-xs text-muted-foreground mb-1">Search for song</label>
+            <label htmlFor="repertoire-search" className="block text-sm text-on-field-muted mb-1">Search for song</label>
             <input
               id="repertoire-search"
               type="search"
               placeholder="Title or artist…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              className="w-full h-10 px-3 rounded-md border border-border bg-background text-sm"
+              className="w-full h-12 px-4 rounded-full border border-border bg-background text-base shadow-card"
             />
           </div>
-          <label className="text-xs text-muted-foreground">
+          <label className="text-sm text-on-field-muted">
             <span className="block mb-1">Sort songs</span>
             <span className="flex items-center gap-1">
               <select
                 value={sortKey}
                 onChange={(e) => setSortKey(e.target.value as SortKey)}
-                className="h-10 px-2 rounded-md border border-border bg-background text-sm text-foreground"
+                className="h-12 px-3 rounded-md border border-border bg-background text-base text-foreground"
               >
                 <option value="title">Title</option>
                 <option value="artist">Artist/Arranger</option>
@@ -132,22 +133,22 @@ export function RepertoireScreen({ pieces, loading, editing, onOpenPiece, onPiec
                 onClick={() => setDesc((d) => !d)}
                 aria-label={desc ? 'Sorted descending' : 'Sorted ascending'}
                 title={desc ? 'Descending' : 'Ascending'}
-                className="h-10 w-10 rounded-md border border-border bg-background text-foreground hover:bg-accent"
+                className="h-12 w-12 rounded-md border border-border bg-background text-foreground hover:bg-accent"
               >
                 {desc ? '↓' : '↑'}
               </button>
             </span>
           </label>
           {editing && !creating && (
-            <Button size="md" variant="outline" onClick={() => setCreating(true)}>+ Add new song</Button>
+            <Button onClick={() => setCreating(true)}><Icon name="add" className="text-xl" /> Add new song</Button>
           )}
           {editing && !creating && onImport && (
-            <Button size="md" variant="outline" onClick={onImport}>Import files</Button>
+            <Button variant="outline" onClick={onImport}>Import files</Button>
           )}
         </section>
 
         {creating && editing && (
-          <form onSubmit={handleCreate} className="rounded-md border border-border bg-background p-3 flex flex-wrap items-center gap-2">
+          <form onSubmit={handleCreate} className="card p-4 flex flex-wrap items-center gap-2">
             <input
               type="text"
               required
@@ -174,25 +175,25 @@ export function RepertoireScreen({ pieces, loading, editing, onOpenPiece, onPiec
           </form>
         )}
 
-        {loading && pieces.length === 0 && <p className="text-sm text-muted-foreground">Loading songs…</p>}
+        {loading && pieces.length === 0 && <div className="card p-6 space-y-3 animate-pulse" aria-hidden>{[0,1,2,3,4].map((i) => <div key={i} className="h-10 rounded-md bg-card-2" />)}</div>}
         {!loading && pieces.length === 0 && (
           <p className="text-sm text-muted-foreground">
             {editing ? <>No songs yet. Use <strong>Add new song</strong> to add one.</> : 'No songs yet.'}
           </p>
         )}
         {q && sorted.length === 0 && pieces.length > 0 && (
-          <p className="text-sm text-muted-foreground">No songs match “{query.trim()}”.</p>
+          <p className="text-base text-on-field-muted">No songs match “{query.trim()}”.</p>
         )}
 
         {sorted.length > 0 && (
           <div className="flex gap-3">
-            <div className="flex-1 min-w-0 rounded-md border border-border bg-background overflow-hidden">
+            <div className="flex-1 min-w-0 card overflow-hidden">
               <table className="w-full text-sm">
-                <thead className="text-xs text-muted-foreground">
+                <thead className="text-sm font-semibold text-muted-foreground">
                   <tr className="border-b border-border">
-                    <th scope="col" className="text-left font-medium px-4 py-2">Title</th>
-                    <th scope="col" className="text-left font-medium px-4 py-2 hidden sm:table-cell">Artist/Arranger</th>
-                    <th scope="col" className="text-right font-medium px-4 py-2 whitespace-nowrap">Sheet music</th>
+                    <th scope="col" className="text-left font-semibold px-4 py-3">Title</th>
+                    <th scope="col" className="text-left font-semibold px-4 py-3 hidden sm:table-cell">Artist/Arranger</th>
+                    <th scope="col" className="text-right font-semibold px-4 py-3 whitespace-nowrap">Sheet music</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -203,17 +204,17 @@ export function RepertoireScreen({ pieces, loading, editing, onOpenPiece, onPiec
                       <RowGroup key={p.id} letter={newLetter ? letter : null}>
                         <tr
                           onClick={() => onOpenPiece(p.id)}
-                          className="border-t border-border hover:bg-accent/40 cursor-pointer h-12"
+                          className="border-t border-border hover:bg-accent/60 cursor-pointer h-14 transition-colors"
                         >
                           <td className="px-4 py-2">
-                            <div className="font-medium">{p.title}</div>
+                            <div className="font-medium text-accent-foreground">{p.title}</div>
                             <div className="text-xs text-muted-foreground sm:hidden">{artistArranger(p)}</div>
                           </td>
                           <td className="px-4 py-2 text-muted-foreground hidden sm:table-cell">{artistArranger(p) || '–'}</td>
                           <td className="px-4 py-2 text-right tabular-nums whitespace-nowrap">
                             {p.pdfCount > 0 ? (
-                              <span className="inline-flex items-center gap-1 text-emerald-700">
-                                <CheckIcon /> ({p.pdfCount})
+                              <span className="inline-flex items-center gap-1 text-accent-foreground">
+                                <Icon name="check_box" className="text-xl" /> ({p.pdfCount})
                               </span>
                             ) : (
                               <span className="text-muted-foreground">–</span>
@@ -225,20 +226,20 @@ export function RepertoireScreen({ pieces, loading, editing, onOpenPiece, onPiec
                   })}
                 </tbody>
               </table>
-              <div className="px-4 py-2 text-xs text-muted-foreground border-t border-border">
+              <div className="px-4 py-3 text-sm text-muted-foreground border-t border-border">
                 {sorted.length} {sorted.length === 1 ? 'Song' : 'Songs'}
                 {q && sorted.length !== pieces.length ? ` of ${pieces.length}` : ''}
               </div>
             </div>
 
             {grouped && letters.length > 3 && (
-              <nav aria-label="Jump to letter" className="hidden sm:flex flex-col items-center gap-0.5 sticky top-0 self-start text-[11px] leading-none">
+              <nav aria-label="Jump to letter" className="hidden sm:flex flex-col items-center gap-0.5 sticky top-0 self-start text-xs leading-none">
                 {letters.map((l) => (
                   <button
                     key={l}
                     type="button"
                     onClick={() => jumpTo(l)}
-                    className="w-6 h-5 rounded text-muted-foreground hover:text-foreground hover:bg-accent"
+                    className="w-7 h-6 rounded text-on-field-muted hover:text-on-field hover:bg-white/10"
                   >
                     {l}
                   </button>
@@ -258,8 +259,8 @@ function RowGroup({ letter, children }: { letter: string | null; children: React
   return (
     <>
       {letter && (
-        <tr id={`letter-${letter}`} className="bg-muted/40 scroll-mt-2">
-          <th scope="rowgroup" colSpan={3} className={cn('text-left text-xs font-semibold px-4 py-1 text-muted-foreground')}>{letter}</th>
+        <tr id={`letter-${letter}`} className="bg-card-2 scroll-mt-2">
+          <th scope="rowgroup" colSpan={3} className={cn('text-left text-sm font-semibold px-4 py-1.5 text-muted-foreground')}>{letter}</th>
         </tr>
       )}
       {children}
@@ -267,10 +268,3 @@ function RowGroup({ letter, children }: { letter: string | null; children: React
   );
 }
 
-function CheckIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden>
-      <path d="M4 12.5 9.5 18 20 6.5" />
-    </svg>
-  );
-}

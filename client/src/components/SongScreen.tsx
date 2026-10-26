@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Button } from '@/components/ui/button.tsx';
+import { Button, Icon } from '@/components/ui/button.tsx';
 import { cn } from '@/lib/utils.ts';
 import {
   addPieceLink,
@@ -91,33 +91,33 @@ export function SongScreen({
   if (!piece) return <div className="p-6 text-sm text-muted-foreground">{loading ? 'Loading…' : ''}</div>;
 
   const crumbs = (
-    <nav aria-label="Breadcrumb" className="text-xs text-muted-foreground flex items-center gap-1 flex-wrap">
-      <button type="button" onClick={onGoSetLists} className="hover:text-foreground">Set lists</button>
+    <nav aria-label="Breadcrumb" className="text-sm text-on-field-muted flex items-center gap-1 flex-wrap">
+      <button type="button" onClick={onGoSetLists} className="hover:text-on-field">Set lists</button>
       <span aria-hidden>›</span>
       {fromSetList ? (
-        <button type="button" onClick={() => onGoSetList(fromSetList.id)} className="hover:text-foreground">{fromSetList.name}</button>
+        <button type="button" onClick={() => onGoSetList(fromSetList.id)} className="hover:text-on-field">{fromSetList.name}</button>
       ) : (
-        <button type="button" onClick={onGoRepertoire} className="hover:text-foreground">Repertoire</button>
+        <button type="button" onClick={onGoRepertoire} className="hover:text-on-field">Repertoire</button>
       )}
       <span aria-hidden>›</span>
-      <span className="text-foreground">{piece.title}</span>
+      <span className="text-on-field">{piece.title}</span>
     </nav>
   );
 
   return (
-    <div className="h-full overflow-auto bg-muted/20">
-      <div className="max-w-3xl mx-auto px-4 py-5 space-y-5">
+    <div className="h-full overflow-auto">
+      <div className="max-w-(--max) mx-auto px-4 sm:px-6 py-5 space-y-5">
         {crumbs}
 
         <header className="flex items-start gap-3">
           <div className="flex-1 min-w-0">
-            <h1 className="text-xl font-semibold leading-tight">{piece.title}</h1>
-            {artistArranger(piece) && <p className="text-sm text-muted-foreground">{artistArranger(piece)}</p>}
+            <h1 className="text-2xl md:text-4xl font-semibold leading-tight text-on-field">{piece.title}</h1>
+            {artistArranger(piece) && <p className="text-base text-on-field-muted">{artistArranger(piece)}</p>}
           </div>
         </header>
 
-        {editing && <SongSettings piece={piece} onSaved={mutated} />}
-
+        <div className={cn('grid gap-6 items-start', editing && 'lg:grid-cols-[1.4fr_0.9fr]')}>
+        <div className="card p-4 sm:p-6 space-y-6 min-w-0 overflow-hidden">
         <div className="flex flex-wrap items-center gap-2">
           <Button size="sm" variant={panel === 'remarks' ? 'default' : 'outline'} onClick={() => setPanel(panel === 'remarks' ? null : 'remarks')}>
             Remarks{piece.remarks.length > 0 && <span className="ml-1 text-xs opacity-70">({piece.remarks.length})</span>}
@@ -135,7 +135,7 @@ export function SongScreen({
               value={sectionId ?? ''}
               onChange={(e) => setSectionId(e.target.value === '' ? null : Number(e.target.value))}
               aria-label="Section"
-              className="ml-auto h-9 px-2 rounded-md border border-border bg-background text-sm"
+              className="ml-auto h-10 px-3 rounded-md border border-border bg-background text-base"
             >
               <option value="">Any / full mix</option>
               {sections.map((s) => (
@@ -218,10 +218,11 @@ export function SongScreen({
               )}
               piece={piece}
               sections={sections}
+              mySection={mySectionId}
               editing={false}
               onMutated={mutated}
               menu={
-                <label className="text-xs text-muted-foreground flex items-center gap-1.5 cursor-pointer select-none">
+                <label className="text-sm text-muted-foreground flex items-center gap-1.5 cursor-pointer select-none">
                   <input type="checkbox" checked={onlyMine} onChange={(e) => setOnlyMine(e.target.checked)} />
                   Show only audio files added by me
                 </label>
@@ -231,8 +232,14 @@ export function SongScreen({
           </>
         )}
 
-        <ConfidencePanel piece={piece} />
-        <PrivateNotes piece={piece} />
+        </div>
+
+        <div className="space-y-6">
+          {editing && <SongSettings piece={piece} onSaved={mutated} />}
+          <ConfidencePanel piece={piece} />
+          <PrivateNotes piece={piece} />
+        </div>
+        </div>
       </div>
     </div>
   );
@@ -264,13 +271,13 @@ function DocumentList({
   return (
     <section className="space-y-2">
       <div className="flex items-end gap-2">
-        <h2 className="text-sm font-semibold">{title}</h2>
-        {subtitle && <span className="text-[11px] text-muted-foreground">{subtitle}</span>}
+        <h2 className="text-lg font-semibold">{title}</h2>
+        {subtitle && <span className="text-xs text-muted-foreground">{subtitle}</span>}
       </div>
       {files.length === 0 ? (
         empty && <p className="text-sm text-muted-foreground">{empty}</p>
       ) : (
-        <ul className="divide-y divide-border rounded-md border border-border bg-background overflow-hidden">
+        <ul className="inset-list">
           {files.map((f) => (
             <DocumentRow key={f.id} file={f} editing={editing} onOpenViewer={onOpenViewer} onMutated={onMutated} />
           ))}
@@ -295,17 +302,15 @@ function DocumentRow({
   const viewable = isPdfFile(file);
   const name = file.label?.trim() || file.filename;
   return (
-    <li className="flex items-center gap-3 px-3 min-h-12 py-2">
-      <span className="text-muted-foreground shrink-0" aria-hidden>
-        {file.kind === 'audio' ? null : <MusicIcon />}
-      </span>
+    <li className="inset-row flex items-center gap-3 px-4 py-2 hover:shadow-card hover:-translate-y-px">
+      <Icon name={file.kind === 'score' ? 'piano' : file.kind === 'lyrics' ? 'lyrics' : 'music_note'} className="text-muted-foreground shrink-0" />
       {viewable ? (
         <button type="button" onClick={() => onOpenViewer(file.id)} className="flex-1 min-w-0 text-left hover:underline">
-          <div className="text-sm truncate">{name}</div>
+          <div className="text-base font-medium truncate">{name}</div>
         </button>
       ) : (
         <a href={file.url} target="_blank" rel="noreferrer" className="flex-1 min-w-0 text-left hover:underline">
-          <div className="text-sm truncate">{name}</div>
+          <div className="text-base font-medium truncate">{name}</div>
         </a>
       )}
       {viewable && (
@@ -315,9 +320,9 @@ function DocumentRow({
           rel="noreferrer"
           aria-label="Print"
           title="Print (opens in a new tab)"
-          className="inline-flex items-center justify-center w-9 h-9 rounded-md hover:bg-accent text-muted-foreground shrink-0"
+          className="inline-flex items-center justify-center w-11 h-11 rounded-md hover:bg-accent hover:text-accent-foreground text-muted-foreground shrink-0"
         >
-          <PrintIcon />
+          <Icon name="print" />
         </a>
       )}
       <RowMenu file={file} editing={editing} onMutated={onMutated} />
@@ -334,6 +339,7 @@ function AudioBlock({
   files,
   piece,
   sections,
+  mySection = null,
   editing,
   onMutated,
   addButton,
@@ -344,6 +350,7 @@ function AudioBlock({
   files: PieceFile[];
   piece: Piece;
   sections: Section[];
+  mySection?: number | null;
   editing: boolean;
   onMutated: () => void;
   addButton?: React.ReactNode;
@@ -357,51 +364,44 @@ function AudioBlock({
 
   return (
     <section className="space-y-2">
-      <div className="flex items-center gap-3">
-        <h2 className="text-sm font-semibold flex-1">{heading}</h2>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <h2 className="text-lg font-semibold flex-1 min-w-0">{heading}</h2>
         {menu}
       </div>
       {files.length === 0 ? (
         (empty || editing) && <p className="text-sm text-muted-foreground">{empty ?? 'No audio in this section.'}</p>
       ) : (
-        <ul className="divide-y divide-border rounded-md border border-border bg-background overflow-hidden">
+        <ul className="inset-list">
           {files.map((f, i) => {
             const sec = f.sectionId !== null ? byId.get(f.sectionId) : null;
             const active = playingId === f.id;
             return (
-              <li key={f.id} className={cn('flex items-center gap-3 px-3 py-2 min-h-14', active && 'bg-accent/40')}>
+              <li key={f.id} className={cn('inset-row flex items-center gap-3 px-3 py-2 hover:shadow-card', active && 'ring-2 ring-primary')}>
                 <div className="flex flex-col items-center shrink-0 w-12">
                   <button
                     type="button"
                     aria-label={active && player.isPlaying ? `Pause ${f.label ?? f.filename}` : `Play ${f.label ?? f.filename}`}
                     onClick={() => (active ? player.toggle() : player.playQueue(queue, i))}
-                    className={cn(
-                      'inline-flex items-center justify-center w-10 h-10 rounded-full border',
-                      active ? 'bg-primary text-primary-foreground border-primary' : 'border-border hover:bg-accent',
-                    )}
+                    className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-primary text-primary-foreground hover:bg-primary-hover active:bg-primary-active shadow-sm"
                   >
-                    {active && player.isPlaying ? (
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></svg>
-                    ) : (
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden><path d="M8 5v14l11-7z" /></svg>
-                    )}
+                    <Icon name={active && player.isPlaying ? 'pause' : 'play_arrow'} filled />
                   </button>
-                  <span className="text-[10px] tabular-nums text-muted-foreground mt-0.5">
+                  <span className="text-xs tabular-nums text-muted-foreground mt-0.5">
                     {f.durationMs ? formatTime(f.durationMs / 1000) : ''}
                   </span>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm truncate flex items-center gap-1.5">
+                  <div className="text-base font-medium truncate flex items-center gap-2">
                     {sec && !editing && (
-                      <span className="text-[9px] uppercase font-semibold px-1 rounded bg-violet-100 text-violet-800 shrink-0">{sec.badge}</span>
+                      <span className={cn('text-xs font-semibold px-1.5 py-0.5 rounded border shrink-0', f.sectionId === mySection ? 'bg-accent text-accent-foreground border-primary/30' : 'border-border text-muted-foreground')}>{sec.badge}</span>
                     )}
                     <span className="truncate">{f.label?.trim() || f.filename}</span>
                   </div>
-                  <div className="text-xs text-muted-foreground truncate">
+                  <div className="text-sm text-muted-foreground truncate">
                     {f.createdByName ? `Shared by ${f.createdByName}` : 'Shared'}
                   </div>
                 </div>
-                <span className="text-xs text-muted-foreground shrink-0 hidden sm:block">{formatDate(f.createdAt)}</span>
+                <span className="text-sm text-muted-foreground shrink-0 hidden sm:block">{formatDate(f.createdAt)}</span>
                 <RowMenu file={f} editing={editing} onMutated={onMutated} sections={editing ? sections : undefined} />
               </li>
             );
@@ -490,14 +490,14 @@ function RowMenu({
         aria-label="More"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
-        className="inline-flex items-center justify-center w-9 h-9 rounded-md hover:bg-accent text-muted-foreground"
+        className="inline-flex items-center justify-center w-11 h-11 rounded-md hover:bg-accent hover:text-accent-foreground text-muted-foreground"
       >
-        <KebabIcon />
+        <Icon name="more_vert" />
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} aria-hidden />
-          <div className="absolute right-0 top-full mt-1 w-56 bg-background border border-border rounded-md shadow-lg z-30 p-1 text-sm">
+          <div className="absolute right-0 top-full mt-1 w-60 card shadow-float z-30 p-1 text-base">
             <a href={file.url} download={file.filename} target="_blank" rel="noreferrer" className="block px-3 py-2 rounded hover:bg-accent">
               Download
             </a>
@@ -572,7 +572,7 @@ function RowMenu({
               </>
             )}
             {err && <div className="px-3 py-1 text-xs text-destructive">{err}</div>}
-            <div className="px-3 pt-1 pb-1.5 text-[10px] text-muted-foreground truncate flex items-center gap-1" title={file.filename}>
+            <div className="px-3 pt-1 pb-1.5 text-xs text-muted-foreground truncate flex items-center gap-1" title={file.filename}>
               <KindBadge kind={file.kind} /> {file.filename}
             </div>
           </div>
@@ -605,14 +605,14 @@ function RemarksPanel({ piece, sections, editing, onSaved }: { piece: Piece; sec
 
   const shown = editing ? sections : sections.filter((s) => piece.remarks.some((r) => r.sectionId === s.id));
   return (
-    <section className="rounded-md border border-border bg-background p-4 space-y-3">
-      <h2 className="text-sm font-semibold">Remarks</h2>
+    <section className="bg-card-2 rounded-md p-4 space-y-3">
+      <h2 className="text-base font-semibold">Remarks</h2>
       {shown.length === 0 && <p className="text-sm text-muted-foreground">No remarks yet.</p>}
       {shown.map((s) => {
         const r = piece.remarks.find((x) => x.sectionId === s.id);
         return (
           <div key={s.id} className="space-y-1">
-            <h3 className="text-xs font-medium text-muted-foreground">Remarks for {lower(s.label)}s</h3>
+            <h3 className="text-sm font-medium text-muted-foreground">Remarks for {lower(s.label)}s</h3>
             {editing ? (
               <div className="space-y-1">
                 <textarea
@@ -664,13 +664,13 @@ function LinksPanel({ piece, editing, onMutated }: { piece: Piece; editing: bool
   }
 
   return (
-    <section className="rounded-md border border-border bg-background p-4 space-y-3">
-      <h2 className="text-sm font-semibold">Links</h2>
+    <section className="bg-card-2 rounded-md p-4 space-y-3">
+      <h2 className="text-base font-semibold">Links</h2>
       {piece.links.length === 0 && <p className="text-sm text-muted-foreground">No links yet.</p>}
       <ul className="space-y-1">
         {piece.links.map((l) => (
           <li key={l.id} className="flex items-center gap-2 text-sm">
-            <span className="text-[10px] uppercase font-semibold px-1 py-0.5 rounded bg-muted text-muted-foreground shrink-0">{LINK_TYPE_LABEL[l.type]}</span>
+            <span className="text-xs uppercase font-semibold px-1 py-0.5 rounded bg-muted text-muted-foreground shrink-0">{LINK_TYPE_LABEL[l.type]}</span>
             <a href={l.url} target="_blank" rel="noreferrer" className="flex-1 min-w-0 truncate hover:underline">{l.label || l.url}</a>
             {editing && (
               <button type="button" aria-label="Remove link" className="text-muted-foreground hover:text-destructive" onClick={() => void deletePieceLink(piece.id, l.id).then(onMutated)}>
@@ -709,10 +709,10 @@ function LinksPanel({ piece, editing, onMutated }: { piece: Piece; editing: bool
   );
 }
 
-const FACES: Array<{ value: 1 | 2 | 3; label: string; glyph: string }> = [
-  { value: 1, label: 'Not confident', glyph: '☹' },
-  { value: 2, label: 'Getting there', glyph: '😐' },
-  { value: 3, label: 'Confident', glyph: '☺' },
+const FACES: Array<{ value: 1 | 2 | 3; label: string; icon: string }> = [
+  { value: 1, label: 'Not confident', icon: 'sentiment_dissatisfied' },
+  { value: 2, label: 'Getting there', icon: 'sentiment_neutral' },
+  { value: 3, label: 'Confident', icon: 'sentiment_satisfied' },
 ];
 
 function ConfidencePanel({ piece }: { piece: Piece }) {
@@ -730,8 +730,8 @@ function ConfidencePanel({ piece }: { piece: Piece }) {
   }
 
   return (
-    <section className="rounded-md border border-border bg-background p-4 flex flex-wrap items-center gap-3">
-      <h2 className="text-sm font-semibold flex-1 min-w-48">How confident are you performing this song?</h2>
+    <section className="card p-4 sm:p-6 flex flex-wrap items-center gap-3">
+      <h2 className="text-base font-semibold flex-1 min-w-48">How confident are you performing this song?</h2>
       <div className="flex items-center gap-2" role="radiogroup" aria-label="Confidence">
         {FACES.map((f) => (
           <button
@@ -743,11 +743,11 @@ function ConfidencePanel({ piece }: { piece: Piece }) {
             title={f.label}
             onClick={() => void pick(f.value)}
             className={cn(
-              'w-11 h-11 rounded-full border text-2xl leading-none inline-flex items-center justify-center',
-              value === f.value ? 'bg-primary text-primary-foreground border-primary' : 'border-border hover:bg-accent text-muted-foreground',
+              'w-12 h-12 rounded-full inline-flex items-center justify-center transition-colors',
+              value === f.value ? 'bg-primary text-primary-foreground' : 'hover:bg-accent text-muted-foreground',
             )}
           >
-            {f.glyph}
+            <Icon name={f.icon} filled={value === f.value} className="text-4xl" />
           </button>
         ))}
       </div>
@@ -772,12 +772,12 @@ function PrivateNotes({ piece }: { piece: Piece }) {
   }
 
   return (
-    <section className="rounded-md border border-border bg-background p-4 space-y-2">
+    <section className="card p-4 sm:p-6 space-y-2">
       <div className="flex items-center gap-2">
-        <h2 className="text-sm font-semibold flex-1">Private notes</h2>
+        <h2 className="text-base font-semibold flex-1">Private notes</h2>
         {!editing && (
-          <button type="button" aria-label="Edit private notes" onClick={() => setEditing(true)} className="text-muted-foreground hover:text-foreground">
-            <PencilIcon />
+          <button type="button" aria-label="Edit private notes" onClick={() => setEditing(true)} className="w-11 h-11 inline-flex items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground">
+            <Icon name="edit" />
           </button>
         )}
       </div>
@@ -834,7 +834,8 @@ function SongSettings({ piece, onSaved }: { piece: Piece; onSaved: () => void })
   }
 
   return (
-    <form onSubmit={save} className="rounded-md border border-amber-200 bg-amber-50/40 p-4 grid gap-3 sm:grid-cols-[1fr_1fr_auto] items-end">
+    <form onSubmit={save} className="card p-4 sm:p-6 grid gap-3 items-end">
+      <h2 className="text-base font-semibold">Repertoire settings</h2>
       <label className="text-xs space-y-1">
         <span className="text-muted-foreground">Title</span>
         <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} className="w-full h-9 px-2 rounded-md border border-border bg-background text-sm" />
@@ -844,47 +845,9 @@ function SongSettings({ piece, onSaved }: { piece: Piece; onSaved: () => void })
         <input type="text" value={artist} onChange={(e) => setArtist(e.target.value)} className="w-full h-9 px-2 rounded-md border border-border bg-background text-sm" />
       </label>
       <Button size="sm" type="submit" disabled={!dirty || !title.trim() || busy}>{busy ? 'Saving…' : 'Save'}</Button>
-      {err && <p className="text-xs text-destructive sm:col-span-3">{err}</p>}
+      {err && <p className="text-sm text-destructive">{err}</p>}
     </form>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Icons
-// ---------------------------------------------------------------------------
 
-function MusicIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-      <path d="M9 18V5l12-2v13" />
-      <circle cx="6" cy="18" r="3" />
-      <circle cx="18" cy="16" r="3" />
-    </svg>
-  );
-}
-function PrintIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-      <path d="M6 9V3h12v6" />
-      <rect x="3" y="9" width="18" height="8" rx="1.5" />
-      <path d="M6 14h12v7H6z" />
-    </svg>
-  );
-}
-function KebabIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-      <circle cx="12" cy="5" r="1.8" />
-      <circle cx="12" cy="12" r="1.8" />
-      <circle cx="12" cy="19" r="1.8" />
-    </svg>
-  );
-}
-function PencilIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-      <path d="M4 20h4l10-10-4-4L4 16v4z" />
-      <path d="M13 7l4 4" />
-    </svg>
-  );
-}

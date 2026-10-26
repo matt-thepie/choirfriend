@@ -72,7 +72,7 @@ export function AudioPlayer({ pieceId, refreshTick = 0, mySectionId = null }: Au
             title={f.filename}
           >
             {sec && (
-              <span className={cn('text-[9px] uppercase font-semibold px-1 rounded', active ? 'bg-primary-foreground/20' : 'bg-violet-100 text-violet-800')}>
+              <span className={cn('text-xs uppercase font-semibold px-1 rounded', active ? 'bg-primary-foreground/20' : 'bg-violet-100 text-violet-800')}>
                 {sec.badge}
               </span>
             )}

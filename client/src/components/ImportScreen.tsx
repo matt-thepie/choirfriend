@@ -684,7 +684,7 @@ export function ImportScreen({ onClose }: ImportScreenProps) {
     .map((g) => ({ id: g.id, title: g.title.trim() || g.label }));
 
   return (
-    <div className="h-full overflow-auto bg-muted/20">
+    <div className="h-full overflow-auto">
       <div className="max-w-3xl mx-auto px-4 py-6 space-y-5">
         <div className="flex items-center justify-between">
           <h1 className="text-lg font-semibold">Import files</h1>
@@ -1164,7 +1164,7 @@ function ConfidenceBadge({ level }: { level: 'high' | 'medium' | 'low' }) {
     low: 'text-rose-700 bg-rose-50',
   } as const;
   return (
-    <span className={cn('inline-block text-[10px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded', styles[level])}>
+    <span className={cn('inline-block text-xs uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded', styles[level])}>
       AI guess: {level} confidence
     </span>
   );

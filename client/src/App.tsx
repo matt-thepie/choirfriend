@@ -12,6 +12,7 @@ import { PlayerProvider } from '@/player/PlayerContext.tsx';
 import { usePieces } from '@/hooks/usePieces.ts';
 import { useSections, saveMySection } from '@/hooks/useSections.ts';
 import { useSetLists } from '@/hooks/useSetLists.ts';
+import { Icon } from '@/components/ui/button.tsx';
 
 interface HealthResponse {
   status: string;
@@ -161,32 +162,28 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
   return (
     <div className="h-dvh flex flex-col">
       {!readMode && (
-        <header className="px-3 py-2 border-b border-border flex items-center gap-2 text-sm shrink-0">
+        <header className="bg-background border-b border-border shadow-sm shrink-0 h-14 md:h-16 px-4 flex items-center gap-3 text-base">
           {view === 'viewer' ? (
             <button
               type="button"
               onClick={closeViewer}
-              className="inline-flex items-center gap-1.5 font-medium hover:opacity-80 shrink-0"
+              className="inline-flex items-center gap-1 font-medium hover:text-accent-foreground shrink-0 h-11 -ml-2 px-2 rounded-md"
               aria-label="Back to song"
             >
-              <BackIcon /> Song
+              <Icon name="arrow_back" /> Song
             </button>
           ) : view === 'piece' ? (
             <button
               type="button"
               onClick={goHome}
-              className="inline-flex items-center gap-1.5 font-medium hover:opacity-80 shrink-0"
+              className="inline-flex items-center gap-1 font-medium hover:text-accent-foreground shrink-0 h-11 -ml-2 px-2 rounded-md"
               aria-label="Back"
             >
-              <BackIcon /> {setListId !== null ? 'Set list' : 'Repertoire'}
+              <Icon name="arrow_back" /> {setListId !== null ? 'Set list' : 'Repertoire'}
             </button>
           ) : (
             <>
               <span className="inline-flex items-center shrink-0"><img src="/brand/choirfriend-icon.svg" alt="choirfriend" width="26" height="26" className="rounded-md sm:hidden dark:sm:block" /><img src="/brand/choirfriend-wordmark.svg" alt="choirfriend" className="h-7 hidden sm:block dark:sm:hidden" /></span>
-              <nav className="ml-2 inline-flex items-center rounded-md border border-border p-0.5 text-sm" aria-label="Set lists and repertoire">
-                <TabButton active={tab === 'setlists'} onClick={() => { setTab('setlists'); setSetListId(null); }}>Set lists</TabButton>
-                <TabButton active={tab === 'songs'} onClick={() => { setTab('songs'); setSetListId(null); }}>Repertoire</TabButton>
-              </nav>
             </>
           )}
 
@@ -198,7 +195,7 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
             <button
               type="button"
               onClick={toggleEditMode}
-              className={`ml-auto shrink-0 h-9 px-3 rounded-md border text-xs font-medium ${editing ? 'border-amber-600 bg-amber-50 text-amber-800' : 'border-border hover:bg-accent'}`}
+              className={`ml-auto shrink-0 h-10 px-3 rounded-md border text-sm font-medium transition-colors ${editing ? 'border-primary bg-accent text-accent-foreground' : 'border-border hover:bg-accent'}`}
               aria-pressed={editing}
             >
               {editing ? 'Switch to view mode' : 'Switch to edit mode'}
@@ -210,18 +207,18 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
               onClick={() => { setMenuOpen((o) => !o); setPartMenuOpen(false); }}
               aria-label="Menu"
               aria-expanded={menuOpen}
-              className="inline-flex items-center justify-center w-9 h-9 rounded-md border border-border hover:bg-accent"
+              className="inline-flex items-center justify-center w-11 h-11 rounded-md hover:bg-accent text-muted-foreground"
             >
-              <MenuIcon />
+              <Icon name="menu" />
             </button>
             {menuOpen && (
               <>
                 <div className="fixed inset-0 z-20" onClick={() => setMenuOpen(false)} aria-hidden />
-                <div className="absolute right-0 top-full mt-1 w-60 bg-background border border-border rounded-md shadow-lg z-30 p-1">
+                <div className="absolute right-0 top-full mt-2 w-64 card shadow-float z-30 p-1">
                   {(view === 'piece' || view === 'viewer') && (
                     <>
                       <MenuItem
-                        icon={<PianoIcon />}
+                        icon={<Icon name="piano" className="text-xl" />}
                         label="Piano"
                         active={pianoOpen}
                         onClick={() => {
@@ -231,7 +228,7 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
                       />
                       {view === 'viewer' && (
                         <MenuItem
-                          icon={<ReadIcon />}
+                          icon={<Icon name="auto_stories" className="text-xl" />}
                           label="Read mode"
                           active={readMode}
                           onClick={() => {
@@ -245,14 +242,14 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
                   )}
 
                   <MenuItem
-                    icon={<PartIcon />}
+                    icon={<Icon name="person" className="text-xl" />}
                     label={mySection ? `My part: ${mySection.label}` : 'My part: not set'}
                     onClick={() => setPartMenuOpen((o) => !o)}
                   />
                   {partMenuOpen && (
                     <div className="ml-6 mb-1 border-l border-border pl-1">
                       {sections.map((s) => (
-                        <MenuItem key={s.id} icon={<span className="text-[10px] font-bold w-4 text-center">{s.badge}</span>} label={s.label} active={s.id === mySectionId} onClick={() => void chooseSection(s.id)} />
+                        <MenuItem key={s.id} icon={<span className="text-xs font-bold w-4 text-center">{s.badge}</span>} label={s.label} active={s.id === mySectionId} onClick={() => void chooseSection(s.id)} />
                       ))}
                       <MenuItem icon={<span className="w-4" />} label="Not set" active={mySectionId === null} onClick={() => void chooseSection(null)} />
                     </div>
@@ -261,10 +258,10 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
 
                   <div className="px-3 py-1.5 text-xs text-muted-foreground">
                     Signed in as {me.displayName ?? me.email}
-                    {isAdmin && <span className="ml-1 uppercase tracking-wide font-semibold text-amber-700">admin</span>}
+                    {isAdmin && <span className="ml-1 uppercase tracking-wide font-semibold text-accent-foreground">admin</span>}
                   </div>
                   <div className="px-3 py-1 text-xs text-muted-foreground flex items-center gap-1.5">
-                    <span className={`inline-block w-2 h-2 rounded-full ${health?.database === 'ok' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                    <span className={`inline-block w-2 h-2 rounded-full ${health?.database === 'ok' ? 'bg-primary' : 'bg-destructive'}`} />
                     server {health?.database ?? '…'}
                   </div>
                 </div>
@@ -275,6 +272,14 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
       )}
 
       <main className="flex-1 min-h-0 flex flex-col">
+        {!readMode && (view === 'home' || view === 'setlists') && !importing && (
+          <div className="max-w-(--max) w-full mx-auto px-4 sm:px-6 pt-5">
+            <nav className="inline-flex items-center rounded-full bg-black/20 p-1" aria-label="Set lists and repertoire">
+              <TabButton active={tab === 'setlists'} onClick={() => { setTab('setlists'); setSetListId(null); }}>Set lists</TabButton>
+              <TabButton active={tab === 'songs'} onClick={() => { setTab('songs'); setSetListId(null); }}>Repertoire</TabButton>
+            </nav>
+          </div>
+        )}
         {importing ? (
           <ImportScreen
             onClose={() => {
@@ -361,21 +366,13 @@ function TabButton({ active, onClick, children }: { active: boolean; onClick: ()
       type="button"
       onClick={onClick}
       aria-current={active ? 'page' : undefined}
-      className={`px-2.5 py-1 rounded-md ${active ? 'bg-accent font-medium' : 'text-muted-foreground hover:text-foreground'}`}
+      className={`h-10 px-5 rounded-full text-base font-medium transition-colors ${active ? 'bg-card text-foreground shadow-sm' : 'text-on-field hover:bg-white/10'}`}
     >
       {children}
     </button>
   );
 }
 
-function PartIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-      <circle cx="12" cy="8" r="4" />
-      <path d="M4 21a8 8 0 0 1 16 0" />
-    </svg>
-  );
-}
 
 function MenuItem({
   label,
@@ -405,43 +402,6 @@ function MenuItem({
   );
 }
 
-function MenuIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-      <line x1="4" y1="7" x2="20" y2="7" />
-      <line x1="4" y1="12" x2="20" y2="12" />
-      <line x1="4" y1="17" x2="20" y2="17" />
-    </svg>
-  );
-}
 
-function BackIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden>
-      <path d="M15 6l-6 6 6 6" />
-    </svg>
-  );
-}
 
-function PianoIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-      <rect x="3" y="6" width="18" height="12" rx="1" />
-      <line x1="9" y1="6" x2="9" y2="18" />
-      <line x1="15" y1="6" x2="15" y2="18" />
-      <rect x="7" y="6" width="4" height="6" fill="currentColor" stroke="none" />
-      <rect x="13" y="6" width="4" height="6" fill="currentColor" stroke="none" />
-    </svg>
-  );
-}
 
-function ReadIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-      <path d="M3 5h6a3 3 0 0 1 3 3v13" />
-      <path d="M21 5h-6a3 3 0 0 0-3 3v13" />
-      <path d="M3 5v13" />
-      <path d="M21 5v13" />
-    </svg>
-  );
-}
