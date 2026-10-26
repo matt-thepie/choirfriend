@@ -157,6 +157,10 @@ async function main(): Promise<void> {
 
   // Set list membership decides is_current.
   const rehearsalIds = new Set((manifest.setlists['Rehearsal'] ?? []).map((i) => i.id));
+  // Some set list items carry a song id that is not in songs[] (ChoirMate
+  // re-created the song), so also match by normalised title.
+  const rehearsalKeys = new Set((manifest.setlists['Rehearsal'] ?? []).map((i) => normTitle(i.title)));
+  const pieceByKey = new Map<string, number>();
 
   // Existing pieces, for matching by title (e.g. "One Day Like This" already there).
   const existingByTitle = new Map(listPieces().map((p) => [normTitle(p.title), p.id]));
@@ -173,7 +177,7 @@ async function main(): Promise<void> {
 
     // Prefer the title spelling that is on the rehearsal list, else the first.
     const primary = songs.find((s) => rehearsalIds.has(s.id)) ?? songs[0]!;
-    const isCurrent = songs.some((s) => rehearsalIds.has(s.id));
+    const isCurrent = songs.some((s) => rehearsalIds.has(s.id)) || rehearsalKeys.has(key);
     const composer = songs.map((s) => s.artist?.trim()).find(Boolean) ?? null;
     const createdAt = Math.min(...songs.map((s) => epoch(s.created_at) ?? Number.MAX_SAFE_INTEGER));
 
@@ -191,7 +195,7 @@ async function main(): Promise<void> {
     const notes = noteLines.length ? noteLines.join('\n') : null;
 
     // Resolve piece id: progress → existing by title → create.
-    let pieceId = songs.map((s) => progress.pieces[s.id]).find((v) => v !== undefined) ?? existingByTitle.get(key);
+    let pieceId: number | undefined = songs.map((s) => progress.pieces[s.id]).find((v) => v !== undefined) ?? existingByTitle.get(key);
     if (pieceId === undefined) {
       if (dryRun) {
         pieceId = -1;
@@ -205,6 +209,7 @@ async function main(): Promise<void> {
       }
       pieceCount++;
     } else if (!dryRun) {
+
       // Matched an existing piece: fill in blanks only, never overwrite.
       const row = db.prepare('SELECT composer, notes FROM pieces WHERE id = ?').get(pieceId) as { composer: string | null; notes: string | null } | undefined;
       if (row) {
@@ -216,6 +221,7 @@ async function main(): Promise<void> {
       }
     }
     for (const s of songs) progress.pieces[s.id] = pieceId;
+    pieceByKey.set(key, pieceId);
     await save();
 
     console.log(`\n[${pieceId}] ${primary.title}${composer ? ` — ${composer}` : ''}${isCurrent ? ' (current)' : ''}${songs.length > 1 ? ` [merged ${songs.length}]` : ''}`);
@@ -329,7 +335,7 @@ async function main(): Promise<void> {
       }
       const pieceIds: number[] = [];
       for (const it of [...items].sort((a, b) => a.rank - b.rank)) {
-        const pid = progress.pieces[it.id];
+        const pid = progress.pieces[it.id] ?? pieceByKey.get(normTitle(it.title));
         if (pid === undefined) {
           console.log(`  set list "${name}": no piece for ${JSON.stringify(it.title)}`);
           continue;
