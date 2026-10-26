@@ -149,37 +149,43 @@ plus the files it references) into the database and B2:
 It is resumable (progress in `<export>/.choirfriend-import.json`). Songs with
 the same title (ignoring case/punctuation) are merged; ChoirMate's free-text
 artist goes into `composer`; songs on the "Rehearsal" set list become current
-repertoire and the rest are archived; `.docx` attachments are skipped and
-listed at the end.
+repertoire and the rest are archived; Word documents and lyric-named PDFs are
+filed as lyrics. A second pass fills in what the first import had no home for:
+
+    node --env-file=../.env src/tools/backfill-from-manifest.ts ~/sgmc-export [--dry-run]
+
+(audio durations, per-section remarks, links). `tools/merge-pieces.ts <survivor> <loser>`
+folds one duplicate piece into another and `tools/dedupe-files.ts` collapses
+exact duplicate files within a piece.
 
 ## Status
 
 Working and deployed at `music.sgmc.org.uk` (SGMC members only, via sgmc-identity).
+The SGMC repertoire (101 songs, ~640 files) is imported from ChoirMate.
 
 Built:
 
-- Home screen: active repertoire vs. all other songs, search, admin controls to move pieces between lists and create new ones.
-- PDF viewer with pen annotations and navigation markers (segno, coda, D.S., D.C., voltas, repeats, bar numbers) on two layers: private per user and shared choir-wide.
-- Read/perform mode: minimal chrome, page-turn navigation.
-- Learning-track audio player with pitch-preserving tempo slowdown and an A/B loop.
-- Piano widget for notebashing.
-- File upload / replace / delete via presigned B2 URLs, with voice-part labels on tracks.
-- Bulk importer: Claude reads title/composer off PDF first pages and matches audio files to pieces by filename; a human confirms.
+- Information architecture, labels and flows match ChoirMate so members need no retraining: **Set lists | Repertoire** toggle (Set lists is the landing page), admins get **Switch to edit mode / view mode**, and members never see admin controls.
+- Repertoire: one flat table (Title, Artist/Arranger, Sheet music tick + count), search, sort, letter groups with an A–Z strip, "Add new song".
+- Song page, audio-first: breadcrumb, **Remarks / Lyrics / Links**, section dropdown defaulting to the member's own part, **Sheet music** list (open in the annotating viewer, print, download), **Audio files for <section>** rows with round play button, duration, "Shared by", date, kebab; **How confident are you performing this song?** faces; **Private notes**.
+- Edit mode on a song: Repertoire settings (Title, Artist/Arranger), one audio block per section with its own **Add audio** that pre-assigns the part, Edit / Replace file / Delete per file, remark text areas per section, add/remove links, Add sheet music / lyrics / score.
+- File kinds: sheet music (PDF), audio, **lyrics** (pdf/docx/rtf/txt/odt/md) and **scores** (MuseScore / MusicXML, only shown to admins and `SCORE_ROLES`).
+- PDF viewer with pen annotations and navigation markers on private and shared layers; read/perform mode; fit-to-width on phones.
+- Set lists: picture tiles, create / rename / drag reorder / archive / copy / delete / Order, one list pinned as "this week"; **Practice list** panel ("Viewing content for" + section) queues one track per song; the virtual **All songs** list.
+- Persistent mini player (72px card, seek bar, 48px play) with speed 0.5–1.5x, A-B loop, repeat and Media Session for lock-screen controls.
+- Design system: SGMC claret field, white cards, Inter, Material Symbols, 16px base, 44px tap targets, dark mode via `prefers-color-scheme`; installable PWA (manifest + icons, no offline caching yet).
+- Piano widget; bulk importer (Claude reads title/composer off PDFs); ChoirMate migration importer and backfill tools.
 - Admin gate on all write routes (members of any `ADMIN_ROLES` group).
-- Choir sections (Tenor 1, Tenor 2, Baritone, Bass, Musician): audio tracks and members are tagged with a voice part; members pick "My part" from the menu.
-- Set lists: admin CRUD with drag reorder, archive and copy; a virtual "All songs" list; "Practise this set list" queues one track per song for the chosen part.
-- Persistent queue player (bottom bar + expanded mini player): prev/next, speed, A-B loop, repeat, Media Session so lock-screen controls work.
 
 Not built (from the ChoirMate brief):
 
-- Personal practice lists, per-member confidence rating and private notes, section remarks, member-side uploads.
-- Links (Spotify/YouTube) and lyrics on a song.
-- Repertoire / set list exports (CSV, PDF), duplicate detection and merge.
-- Track Mixer (per-part volume mixing).
-- ChoirMate migration import.
+- Personal practice lists ("Your practice lists", "Toggle in practice list", "Add to practice list when uploading audio files").
+- Member-side uploads with a private/shared toggle.
+- Set list cover image upload (tiles use a placeholder), set list / repertoire exports (CSV, PDF), "Export repertoire list".
+- Lyrics as inline text (lyrics are files: view/download), "Override song sections", "Order audio files by", Track Mixer.
 
 Not built (other):
 
-- Offline support (service worker + IndexedDB).
+- Offline support (service worker is registered but caches nothing yet).
 - Generic OIDC auth provider (stub only; sgmc-identity is the one real provider).
-- Any of Choirmate's non-music features (members, messages, polls, events, documents). Out of scope unless a choir asks for them.
+- Any of ChoirMate's non-music features (members, messages, polls, events, documents). Out of scope unless a choir asks for them.
