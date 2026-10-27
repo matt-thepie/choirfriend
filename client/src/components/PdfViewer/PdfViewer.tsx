@@ -191,6 +191,9 @@ export function PdfViewer({
   const [selectedPdfId, setSelectedPdfId] = useState<number | null>(initialFileId);
   /** Phones in read mode hide the toolbar; this shows it on demand. */
   const [toolsOpen, setToolsOpen] = useState(false);
+  // Phones: the toolbars wrap and show only the everyday controls; the rest
+  // sit behind a More button rather than in a sideways-scrolling strip.
+  const [moreOpen, setMoreOpen] = useState(false);
   const pdfFile = useMemo(
     () => pdfFiles.find((f) => f.id === selectedPdfId) ?? pdfFiles[0] ?? null,
     [pdfFiles, selectedPdfId],
@@ -237,6 +240,8 @@ export function PdfViewer({
   const [markerKind, setMarkerKind] = useState<MarkerKind>('segno');
   const [markerLabelInput, setMarkerLabelInput] = useState('');
   const [jumpOpen, setJumpOpen] = useState(false);
+  // Separate state for the phone copy of Jump, so a hidden copy never pops up its list.
+  const [phoneJumpOpen, setPhoneJumpOpen] = useState(false);
   const [filesOpen, setFilesOpen] = useState(false);
   const [navMode, setNavMode] = useState<NavMode>(pickInitialNavMode);
   const [currentPage, setCurrentPage] = useState(1);
@@ -583,6 +588,20 @@ export function PdfViewer({
   const canPrev = chunked ? chunkIndex > 0 : currentPage > 1;
   const canNext = chunked ? chunkIndex < chunks.length - 1 : currentPage < pageCount;
 
+  // While a score is open, the page itself must not scroll or bounce: on iOS a
+  // drag past the end of the score otherwise carries on into the document and
+  // lifts the player bar off the bottom of the screen.
+  useEffect(() => {
+    const html = document.documentElement;
+    const prev = [html.style.overflow, html.style.overscrollBehavior, document.body.style.overflow];
+    html.style.overflow = 'hidden';
+    html.style.overscrollBehavior = 'none';
+    document.body.style.overflow = 'hidden';
+    return () => {
+      [html.style.overflow, html.style.overscrollBehavior, document.body.style.overflow] = prev as [string, string, string];
+    };
+  }, []);
+
   // Arrow keys + PageUp/PageDown in page mode.
   useEffect(() => {
     if (effectiveNavMode !== 'page') return;
@@ -727,6 +746,7 @@ export function PdfViewer({
 
   function jumpToMarker(m: MarkerAnnotation): void {
     setJumpOpen(false);
+    setPhoneJumpOpen(false);
     if (effectiveNavMode === 'page') {
       setCurrentPage(m.page);
       // In a system view, land on the step that holds the marker.
@@ -802,13 +822,23 @@ export function PdfViewer({
 
   // ------- Toolbars -------------------------------------------------------
 
+  /** Wraps a less-used control: always shown from md up, on phones only once More is open. */
+  const extra = cn('contents', !moreOpen && 'max-md:hidden');
+  const moreButton = (
+    <button
+      type="button"
+      onClick={() => setMoreOpen((o) => !o)}
+      aria-expanded={moreOpen}
+      className="md:hidden inline-flex items-center gap-1 h-9 px-3 rounded-md border border-border bg-background text-xs font-medium"
+    >
+      <Icon name={moreOpen ? 'expand_less' : 'more_horiz'} className="text-lg" />
+      {moreOpen ? 'Less' : 'More'}
+    </button>
+  );
+
   const fullToolbar = (
-    // On phones the toolbar stays a single horizontally-scrollable row so it
-    // doesn't stack into several rows and eat the vertical space the score
-    // needs. From md up it wraps as before. [&>*]:shrink-0 stops the groups
-    // squashing in the scroll row.
-    <div className="px-4 py-2 flex items-center gap-2 flex-nowrap overflow-x-auto [&>*]:shrink-0 md:flex-wrap md:overflow-visible">
-      {piece && <h2 className="text-sm font-semibold mr-2">{piece.title}</h2>}
+    <div className="px-3 py-2 md:px-4 flex flex-wrap items-center gap-2">
+      {piece && <h2 className="hidden md:block text-sm font-semibold mr-2">{piece.title}</h2>}
       {onEnterReadMode && (
         <Button size="sm" onClick={onEnterReadMode} title="Hide the editing tools and sing from the score">
           <Icon name="auto_stories" className="text-xl" />
@@ -821,6 +851,7 @@ export function PdfViewer({
       <PdfSwitcher files={pdfFiles} selectedId={pdfFile?.id ?? null} onSelect={setSelectedPdfId} />
       {piece && <DocumentsMenu files={piece.files} onView={setSelectedPdfId} />}
 
+      <div className={extra}>
       {isAdmin && <UploadButton pieceId={pieceId} onUploaded={handleUploaded} />}
       {isAdmin && piece && (
         <FilesDropdown
@@ -832,7 +863,8 @@ export function PdfViewer({
           onReplaced={handleUploaded}
         />
       )}
-      {isAdmin && <div className="h-6 w-px bg-border mx-1" />}
+      {isAdmin && <div className="hidden md:block h-6 w-px bg-border mx-1" />}
+      </div>
 
       <div className="flex items-center rounded-md border border-border overflow-hidden">
         <ToolButton active={tool === 'pan'} onClick={() => setTool('pan')}>Pan</ToolButton>
@@ -843,6 +875,12 @@ export function PdfViewer({
 
       {inkTool && <InkColorPicker pen={activePen} color={activeInk.color} onChange={(c) => setInkColor(activePen, c)} />}
 
+      <Button size="sm" variant="ghost" className="md:hidden" onClick={handleUndo} disabled={myAnnotationCount === 0}>
+        Undo
+      </Button>
+      {moreButton}
+
+      <div className={extra}>
       <div
         className={cn(
           'flex items-center rounded-md border border-border overflow-hidden',
@@ -861,7 +899,7 @@ export function PdfViewer({
         <ShareWithPicker sections={sections} mySectionId={mySectionId} value={shareWithIds} onChange={setShareWith} />
       )}
 
-      <div className="h-6 w-px bg-border mx-1" />
+      <div className="hidden md:block h-6 w-px bg-border mx-1" />
 
       <label className="text-xs flex items-center gap-1 select-none cursor-pointer">
         <input type="checkbox" checked={showPrivate} onChange={(e) => setShowPrivate(e.target.checked)} />
@@ -874,11 +912,11 @@ export function PdfViewer({
 
       {myLineControl}
 
-      <div className="h-6 w-px bg-border mx-1" />
+      <div className="hidden md:block h-6 w-px bg-border mx-1" />
 
       <ZoomControls zoom={zoom} onZoom={setZoom} />
 
-      <div className="ml-auto flex items-center gap-2">
+      <div className="md:ml-auto flex flex-wrap items-center gap-2">
         <JumpToDropdown
           markers={markersInOrder}
           sectionsById={sectionsById}
@@ -889,12 +927,13 @@ export function PdfViewer({
         <span className="text-xs text-muted-foreground">
           {annotationsLoading ? 'Loading…' : `${annotations.length} mark${annotations.length === 1 ? '' : 's'}`}
         </span>
-        <Button size="sm" variant="ghost" onClick={handleUndo} disabled={myAnnotationCount === 0}>
+        <Button size="sm" variant="ghost" className="max-md:hidden" onClick={handleUndo} disabled={myAnnotationCount === 0}>
           Undo mine
         </Button>
         <Button size="sm" variant="ghost" onClick={() => handleClearMine(drawTarget)} disabled={myAnnotationCount === 0}>
           Clear my {drawTarget}
         </Button>
+      </div>
       </div>
     </div>
   );
@@ -902,7 +941,7 @@ export function PdfViewer({
   /** Read-mode toolbar. Only what you'd want while singing:
    *    pen on/off, layer, page nav (page mode), zoom (scroll mode), jump-to, scroll/pages toggle, exit. */
   const minimalToolbar = (
-    <div className="px-3 py-1.5 flex items-center gap-2 flex-nowrap overflow-x-auto [&>*]:shrink-0 md:flex-wrap md:overflow-visible">
+    <div className="px-3 py-1.5 flex flex-wrap items-center gap-2">
       {piece && <h2 className="hidden md:block text-sm font-semibold mr-1 truncate max-w-[12rem]" title={piece.title}>{piece.title}</h2>}
 
       <PdfSwitcher files={pdfFiles} selectedId={pdfFile?.id ?? null} onSelect={setSelectedPdfId} />
@@ -915,6 +954,24 @@ export function PdfViewer({
 
       {inkTool && <InkColorPicker pen={activePen} color={activeInk.color} onChange={(c) => setInkColor(activePen, c)} />}
 
+      {effectiveNavMode === 'page' && pageCount > 0 && (
+        <div className="md:hidden flex items-center gap-1">
+          <Button size="sm" variant="outline" onClick={prevPage} disabled={!canPrev} aria-label="Previous">◀</Button>
+          <Button size="sm" variant="outline" onClick={nextPage} disabled={!canNext} aria-label="Next">▶</Button>
+        </div>
+      )}
+      <div className="md:hidden contents">
+        <JumpToDropdown
+          markers={markersInOrder}
+          sectionsById={sectionsById}
+          open={phoneJumpOpen}
+          onOpenChange={setPhoneJumpOpen}
+          onJump={jumpToMarker}
+        />
+      </div>
+      {moreButton}
+
+      <div className={extra}>
       {inkTool && (
         <div className="flex items-center rounded-md border border-border overflow-hidden">
           <ToolButton active={drawTarget === 'private'} onClick={() => setDrawTarget('private')}>
@@ -932,7 +989,7 @@ export function PdfViewer({
 
       {myLineControl}
 
-      <div className="h-5 w-px bg-border mx-1" />
+      <div className="hidden md:block h-5 w-px bg-border mx-1" />
 
       {/* Scroll / Pages toggle */}
       <div className="flex items-center rounded-md border border-border overflow-hidden">
@@ -954,16 +1011,18 @@ export function PdfViewer({
       )}
 
       {effectiveNavMode === 'page' && pageCount > 0 && (
-        <>
+        <div className="hidden md:contents">
           <Button size="sm" variant="outline" onClick={prevPage} disabled={!canPrev} aria-label="Previous">◀</Button>
           <span className="text-xs tabular-nums w-14 text-center">{currentPage} / {pageCount}</span>
           <Button size="sm" variant="outline" onClick={nextPage} disabled={!canNext} aria-label="Next">▶</Button>
-        </>
+        </div>
       )}
 
       {effectiveNavMode === 'scroll' && <ZoomControls zoom={zoom} onZoom={setZoom} />}
+      </div>
 
-      <div className="ml-auto flex items-center gap-2">
+      {/* Phones have Listen, Jump and Exit elsewhere (floating buttons / the row above). */}
+      <div className="hidden md:flex ml-auto items-center gap-2">
         {piece && onPlayerHiddenChange && (
           <ListenButton piece={piece} playerHidden={playerHidden} onPlayerHiddenChange={onPlayerHiddenChange} />
         )}
@@ -1084,7 +1143,7 @@ export function PdfViewer({
             {currentPage} / {pageCount}
           </div>
         )}
-        <div ref={scrollContainerRef} className="absolute inset-0 overflow-auto bg-stage">
+        <div ref={scrollContainerRef} className="absolute inset-0 overflow-auto overscroll-contain bg-stage">
           <div
             ref={contentRef}
             className={cn(
