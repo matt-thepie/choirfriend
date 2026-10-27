@@ -34,6 +34,9 @@ function serviceWorker(): Plugin {
 
 export default defineConfig({
   plugins: [react(), tailwindcss(), serviceWorker()],
+  // Registered as /sw.js?v=<build>: Cloudflare caches /sw.js at the edge, so a
+  // fresh URL per deploy is what makes devices pick up the new worker.
+  define: { __BUILD_ID__: JSON.stringify(Date.now().toString(36)) },
   resolve: {
     alias: {
       '@': path.resolve(import.meta.dirname, './src'),

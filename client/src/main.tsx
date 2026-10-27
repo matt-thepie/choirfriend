@@ -5,7 +5,7 @@ import './index.css';
 
 // Service worker: installability plus offline shell and scores (client/sw/sw.js).
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
-  window.addEventListener('load', () => void navigator.serviceWorker.register('/sw.js').catch(() => {}));
+  window.addEventListener('load', () => void navigator.serviceWorker.register(`/sw.js?v=${__BUILD_ID__}`).catch(() => {}));
 }
 
 // Keep Chrome's install prompt so the app can offer its own Install button.
