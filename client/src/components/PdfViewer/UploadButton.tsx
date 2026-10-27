@@ -1,6 +1,5 @@
-import { useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button.tsx';
-import { Popover } from '@/components/ui/popover.tsx';
 import { inferKind, UPLOAD_ACCEPT, useUploadFile, type UploadStatus } from '@/hooks/useUploadFile.ts';
 import { FILE_KIND_LABEL, isPdfFile, type FileKind } from '@/hooks/usePiece.ts';
 import { KindBadge } from './KindBadge.tsx';
@@ -56,7 +55,7 @@ interface Staged {
 /**
  * Compact upload control. Hidden `<input type=file>` triggered by a button.
  *
- * Every picked file lands in a small staging panel first so the admin can
+ * Every picked file lands in a modal dialog first so the admin can
  * check what it's being filed as and name it: audio gets a voice-part label,
  * a PDF can be flipped between sheet music and lyrics, MuseScore files are
  * flagged as scores (MD / committee only). Nothing uploads until "Upload".
@@ -72,7 +71,8 @@ export function UploadButton({
   variant = 'outline',
 }: UploadButtonProps) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const anchorRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
   const { status, upload } = useUploadFile(pieceId);
   const [staged, setStaged] = useState<Staged[]>([]);
   const [skipped, setSkipped] = useState<string[]>([]);
@@ -102,15 +102,34 @@ export function UploadButton({
   }
 
   async function uploadStaged(): Promise<void> {
-    const items = staged;
-    for (const item of items) {
+    const failed: Staged[] = [];
+    for (const item of staged) {
       const result = await upload(item.file, item.kind, item.label.trim() || undefined, {
         sectionId: item.kind === 'audio' ? sectionId : undefined,
       });
       if (result) onUploaded();
+      else failed.push(item);
     }
-    setStaged([]);
+    // Anything that failed stays in the box, with the error showing.
+    setStaged(failed);
+    setSkipped([]);
   }
+
+  function closeDialog(): void {
+    setStaged([]);
+    setSkipped([]);
+  }
+
+  const open = staged.length > 0 || skipped.length > 0;
+  useEffect(() => {
+    const d = dialogRef.current;
+    if (!d) return;
+    if (open && !d.open) {
+      d.showModal();
+      // showModal focuses the first control (a remove button); start on the label.
+      d.querySelector<HTMLInputElement>('input[type="text"]')?.focus();
+    } else if (!open && d.open) d.close();
+  }, [open]);
 
   function patch(index: number, p: Partial<Staged>): void {
     setStaged((prev) => prev.map((s, i) => (i === index ? { ...s, ...p } : s)));
@@ -119,7 +138,7 @@ export function UploadButton({
   const hasScore = staged.some((s) => s.kind === 'score');
 
   return (
-    <div ref={anchorRef} className="relative inline-flex items-center gap-2">
+    <div className="relative inline-flex items-center gap-2">
       <input
         ref={inputRef}
         type="file"
@@ -145,93 +164,109 @@ export function UploadButton({
         </span>
       )}
 
-      {(staged.length > 0 || skipped.length > 0) && (
-        <Popover anchorRef={anchorRef} className="w-[22rem] p-2 space-y-2">
-          {skipped.length > 0 && (
-            <div className="text-xs text-destructive">
-              Not supported: {skipped.join(', ')}. Use PDF, audio, a lyrics document (docx, rtf, txt) or a MuseScore / MusicXML file.
-            </div>
-          )}
-          {staged.length > 0 && (
-            <>
-              <div className="text-xs font-medium">
-                Check {staged.length === 1 ? 'this file' : 'these files'}
-              </div>
-              <div className="space-y-1.5 max-h-72 overflow-auto">
-                {staged.map((item, i) => {
-                  const pdf = isPdfFile({ mimeType: item.file.type, filename: item.file.name });
-                  return (
-                    <div key={`${item.file.name}-${i}`} className="flex items-start gap-2">
-                      {/* A PDF can be sheet music or lyrics; other kinds are fixed by their format. */}
-                      {pdf && !fixedKind ? (
-                        <select
-                          value={item.kind}
-                          onChange={(e) => patch(i, { kind: e.target.value as FileKind })}
-                          aria-label="File this as"
-                          className="text-xs h-7 px-1 rounded border border-border bg-background shrink-0"
-                          disabled={busy}
-                        >
-                          <option value="pdf">Sheet music</option>
-                          <option value="lyrics">Lyrics</option>
-                        </select>
-                      ) : (
-                        <span className="mt-1.5"><KindBadge kind={item.kind} /></span>
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <input
-                          type="text"
-                          autoFocus={i === 0}
-                          value={item.label}
-                          onChange={(e) => patch(i, { label: e.target.value })}
-                          placeholder={
-                            item.kind === 'audio'
-                              ? (sectionId !== null ? 'Track name (optional)' : 'Voice part (e.g. Tenor 1)')
-                              : item.kind === 'lyrics'
-                              ? 'Label (e.g. T2 lyrics)'
-                              : 'Label (optional)'
-                          }
-                          disabled={busy}
-                          className="w-full text-xs h-7 px-1.5 rounded border border-border bg-background focus:outline-none focus:ring-1 focus:ring-primary"
-                        />
-                        <div className="text-xs text-muted-foreground truncate px-1.5" title={item.file.name}>
-                          {item.file.name}
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        aria-label={`Remove ${item.file.name}`}
-                        onClick={() => setStaged((prev) => prev.filter((_, j) => j !== i))}
-                        className="text-muted-foreground hover:text-destructive mt-1.5"
+      <dialog
+        ref={dialogRef}
+        aria-labelledby={titleId}
+        onCancel={(e) => {
+          e.preventDefault();
+          if (!busy) closeDialog();
+        }}
+        className="m-auto w-[min(28rem,calc(100vw-2rem))] max-h-[calc(100dvh-2rem)] rounded-lg border border-border bg-background text-foreground p-0 shadow-xl backdrop:bg-black/50"
+      >
+        <div className="flex flex-col max-h-[calc(100dvh-2rem)]">
+          <div className="px-4 pt-4 pb-2">
+            <h2 id={titleId} className="text-base font-semibold">
+              {staged.length > 0 ? `Upload ${staged.length === 1 ? 'this file' : `${staged.length} files`}?` : 'Can\u2019t upload that'}
+            </h2>
+            {staged.length > 0 && (
+              <p className="text-sm text-muted-foreground mt-0.5">Check what each file is and name it, then press Upload.</p>
+            )}
+          </div>
+
+          <div className="px-4 py-2 space-y-3 overflow-auto">
+            {skipped.length > 0 && (
+              <p className="text-sm text-destructive">
+                Not supported: {skipped.join(', ')}. Use PDF, audio, a lyrics document (docx, rtf, txt) or a MuseScore / MusicXML file.
+              </p>
+            )}
+            {staged.map((item, i) => {
+              const pdf = isPdfFile({ mimeType: item.file.type, filename: item.file.name });
+              return (
+                <div key={`${item.file.name}-${i}`} className="rounded-md border border-border p-2.5 space-y-2">
+                  <div className="flex items-center gap-2">
+                    {/* A PDF can be sheet music or lyrics; other kinds are fixed by their format. */}
+                    {pdf && !fixedKind ? (
+                      <select
+                        value={item.kind}
+                        onChange={(e) => patch(i, { kind: e.target.value as FileKind })}
+                        aria-label="File this as"
+                        className="text-sm h-9 px-2 rounded border border-border bg-background shrink-0"
                         disabled={busy}
                       >
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><path d="M6 6 18 18M18 6 6 18" /></svg>
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-              {hasScore && (
-                <p className="text-xs text-muted-foreground">
-                  The {FILE_KIND_LABEL.score.toLowerCase()} file is only shown to the MD, committee and section admins. Everyone gets the flowing score made from it.
-                </p>
-              )}
-              <div className="flex items-center justify-end gap-2">
-                <Button size="sm" variant="ghost" onClick={() => { setStaged([]); setSkipped([]); }} disabled={busy}>
-                  Cancel
+                        <option value="pdf">Sheet music</option>
+                        <option value="lyrics">Lyrics</option>
+                      </select>
+                    ) : (
+                      <KindBadge kind={item.kind} />
+                    )}
+                    <span className="flex-1 min-w-0 text-sm truncate" title={item.file.name}>{item.file.name}</span>
+                    <button
+                      type="button"
+                      aria-label={`Remove ${item.file.name}`}
+                      onClick={() => setStaged((prev) => prev.filter((_, j) => j !== i))}
+                      className="h-9 w-9 -mr-1 inline-flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-muted"
+                      disabled={busy}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><path d="M6 6 18 18M18 6 6 18" /></svg>
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    value={item.label}
+                    onChange={(e) => patch(i, { label: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !busy) void uploadStaged();
+                    }}
+                    aria-label={`Label for ${item.file.name}`}
+                    placeholder={
+                      item.kind === 'audio'
+                        ? (sectionId !== null ? 'Track name (optional)' : 'Voice part (e.g. Tenor 1)')
+                        : item.kind === 'lyrics'
+                        ? 'Label (e.g. T2 lyrics)'
+                        : 'Label (optional)'
+                    }
+                    disabled={busy}
+                    className="w-full text-sm h-9 px-2 rounded border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                </div>
+              );
+            })}
+            {hasScore && (
+              <p className="text-sm text-muted-foreground">
+                The {FILE_KIND_LABEL.score.toLowerCase()} file is only shown to the MD, committee and section admins. Everyone gets the flowing score made from it.
+              </p>
+            )}
+            {description && status.phase !== 'done' && (
+              <p role="status" className={status.phase === 'error' ? 'text-sm text-destructive' : 'text-sm text-muted-foreground'}>
+                {description}
+              </p>
+            )}
+          </div>
+
+          <div className="px-4 pt-2 pb-4 flex items-center justify-end gap-2 border-t border-border mt-2">
+            {staged.length > 0 ? (
+              <>
+                <Button variant="ghost" onClick={closeDialog} disabled={busy}>Cancel</Button>
+                <Button onClick={() => void uploadStaged()} disabled={busy}>
+                  {busy ? 'Uploading…' : `Upload ${staged.length === 1 ? 'file' : `${staged.length} files`}`}
                 </Button>
-                <Button size="sm" onClick={() => void uploadStaged()} disabled={busy}>
-                  {busy ? 'Uploading…' : `Upload ${staged.length} file${staged.length === 1 ? '' : 's'}`}
-                </Button>
-              </div>
-            </>
-          )}
-          {staged.length === 0 && (
-            <div className="flex justify-end">
-              <Button size="sm" variant="ghost" onClick={() => setSkipped([])}>OK</Button>
-            </div>
-          )}
-        </Popover>
-      )}
+              </>
+            ) : (
+              <Button onClick={closeDialog}>OK</Button>
+            )}
+          </div>
+        </div>
+      </dialog>
     </div>
   );
 }

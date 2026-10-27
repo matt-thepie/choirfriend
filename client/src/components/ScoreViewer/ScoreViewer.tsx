@@ -208,6 +208,27 @@ export function ScoreViewer({
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const scoreRef = useRef<HTMLDivElement>(null);
+  /** The title plus the music: what scrolls and what pages are cut from. */
+  const sheetRef = useRef<HTMLDivElement>(null);
+
+  // In read mode the toolbar floats over the music and is open when the
+  // score first appears, so the sheet starts with a gap its height.
+  const headerRef = useRef<HTMLElement>(null);
+  const [headerH, setHeaderH] = useState(0);
+  useLayoutEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+    const measure = () => {
+      const h = el.offsetHeight;
+      if (h > 0) setHeaderH((old) => (Math.abs(old - h) > 1 ? h : old));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [readMode]);
+  const topGap = readMode ? headerH : 0;
+
   const [width, setWidth] = useState(0);
   const [viewportH, setViewportH] = useState(0);
   useLayoutEffect(() => {
@@ -308,15 +329,16 @@ export function ScoreViewer({
       }
     }
 
-    // Lines (systems) in content coordinates, for page turns and following.
-    const base = root.getBoundingClientRect().top;
+    // Lines (systems) in sheet coordinates (title included), for page turns
+    // and following.
+    const base = (sheetRef.current ?? root).getBoundingClientRect().top;
     setSystems(
       Array.from(root.querySelectorAll('g.system')).map((s) => {
         const r = s.getBoundingClientRect();
         return { top: r.top - base, bottom: r.bottom - base };
       }),
     );
-  }, [svg, model, partLineOn, myLine, visibleParts]);
+  }, [svg, model, partLineOn, myLine, visibleParts, topGap]);
 
   // ------- Pages: screenfuls of whole lines --------------------------------
 
@@ -326,8 +348,9 @@ export function ScoreViewer({
     const out: Array<{ top: number; bottom: number }> = [];
     let cur: { top: number; bottom: number } | null = null;
     for (const s of systems) {
-      // A small lead-in above each line catches dynamics and bar numbers.
-      const top = Math.max(0, s.top - 12);
+      // A small lead-in above each line catches dynamics and bar numbers;
+      // the first page starts at the top so it carries the title.
+      const top: number = cur || out.length ? Math.max(0, s.top - 12) : 0;
       if (!cur || s.bottom - cur.top > room) {
         if (cur) out.push(cur);
         cur = { top, bottom: s.bottom };
@@ -938,6 +961,7 @@ export function ScoreViewer({
         .cf-score g.measure { cursor: pointer; }
       `}</style>
       <header
+        ref={headerRef}
         onPointerDown={touchTools}
         onKeyDown={touchTools}
         className={cn(
@@ -980,11 +1004,18 @@ export function ScoreViewer({
             }
           >
             <div
-              ref={scoreRef}
-              className="cf-score"
+              ref={sheetRef}
               style={effectiveNavMode === 'page' && page ? { transform: `translateY(${-page.top}px)` } : undefined}
-              dangerouslySetInnerHTML={svgHtml}
-            />
+            >
+              <ScoreTitle
+                title={piece?.title || model?.credits.title || null}
+                composer={piece?.composer || model?.credits.composer || null}
+                arranger={piece?.arranger || model?.credits.arranger || null}
+                lyricist={model?.credits.lyricist ?? null}
+                gap={topGap}
+              />
+              <div ref={scoreRef} className="cf-score" dangerouslySetInnerHTML={svgHtml} />
+            </div>
           </div>
 
           {svg && effectiveNavMode === 'scroll' && setListFlow && onOpenSong && (
@@ -1055,6 +1086,33 @@ export function ScoreViewer({
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+/** The heading on the first page: title, then who wrote and arranged it. */
+function ScoreTitle({
+  title,
+  composer,
+  arranger,
+  lyricist,
+  gap,
+}: {
+  title: string | null;
+  composer: string | null;
+  arranger: string | null;
+  lyricist: string | null;
+  gap: number;
+}) {
+  const by = [composer, arranger && `arr. ${arranger}`, lyricist && lyricist !== arranger && `words ${lyricist}`].filter(Boolean);
+  return (
+    <div style={{ paddingTop: gap }}>
+      {title && (
+        <div className="px-3 pt-4 pb-1 text-center text-black font-[Tinos,'Times_New_Roman',serif]">
+          <h1 className="text-2xl md:text-3xl leading-tight">{title}</h1>
+          {by.length > 0 && <p className="mt-1 text-sm md:text-base text-neutral-700">{by.join(' · ')}</p>}
+        </div>
+      )}
     </div>
   );
 }

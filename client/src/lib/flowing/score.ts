@@ -79,6 +79,25 @@ export interface ScoreModel {
   markedTempo: number | null;
   measures: ScoreMeasure[];
   rehearsals: Array<{ label: string; measure: number }>;
+  /** Title and creators from the file's header, where it has them. */
+  credits: ScoreCredits;
+}
+
+export interface ScoreCredits {
+  title: string | null;
+  composer: string | null;
+  arranger: string | null;
+  lyricist: string | null;
+}
+
+function readCredits(doc: Document): ScoreCredits {
+  const text = (sel: string) => doc.querySelector(sel)?.textContent?.trim() || null;
+  return {
+    title: text('work > work-title') ?? text('movement-title'),
+    composer: text('identification > creator[type="composer"]'),
+    arranger: text('identification > creator[type="arranger"]'),
+    lyricist: text('identification > creator[type="lyricist"]') ?? text('identification > creator[type="poet"]'),
+  };
 }
 
 /** Velocities for the written dynamics, when MuseScore didn't export a
@@ -291,6 +310,7 @@ export function parseScore(rawXml: string): ScoreModel {
     markedTempo: firstSet && firstSet.pos <= 4 ? firstSet.bpm : null,
     measures,
     rehearsals,
+    credits: readCredits(doc),
   };
 }
 
