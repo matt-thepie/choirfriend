@@ -242,11 +242,12 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
             <button
               type="button"
               onClick={toggleEditMode}
-              className="ml-auto shrink-0 h-10 px-3 rounded-md border border-border bg-background text-foreground text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground"
+              className={`ml-auto shrink-0 inline-flex items-center gap-1.5 h-10 px-3 rounded-md border text-sm font-medium transition-colors ${editing ? 'border-primary bg-primary text-primary-foreground hover:opacity-90' : 'border-border bg-background text-foreground hover:bg-accent hover:text-accent-foreground'}`}
               aria-pressed={editing}
             >
-              <span className="sm:hidden">{editing ? 'View mode' : 'Edit mode'}</span>
-              <span className="hidden sm:inline">{editing ? 'Switch to view mode' : 'Switch to edit mode'}</span>
+              {/* A toggle: the label never changes, the fill shows it's on. */}
+              <Icon name={editing ? 'check' : 'edit'} className="text-lg" />
+              Edit mode
             </button>
           )}
           <div className={`${isAdmin ? 'ml-2' : 'ml-auto'} relative shrink-0`}>

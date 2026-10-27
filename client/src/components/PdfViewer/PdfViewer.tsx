@@ -1122,7 +1122,10 @@ export function PdfViewer({
               onClick={() => setToolsOpen((o) => !o)}
               aria-label={toolsOpen ? 'Hide tools' : 'Show tools'}
               aria-pressed={toolsOpen}
-              className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-background/90 text-foreground shadow-card backdrop-blur"
+              className={cn(
+                'inline-flex items-center justify-center w-10 h-10 rounded-full shadow-card backdrop-blur',
+                toolsOpen ? 'bg-primary text-primary-foreground' : 'bg-background/90 text-foreground',
+              )}
             >
               <Icon name="tune" className="text-xl" />
             </button>
