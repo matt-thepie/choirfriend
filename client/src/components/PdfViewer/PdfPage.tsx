@@ -5,6 +5,7 @@ import type {
   AnnotationLayer,
   AnnotationTool,
   InkAnnotation,
+  InkPen,
   MarkerAnnotation,
   MarkerKind,
 } from '@/types/annotations.ts';
@@ -22,13 +23,13 @@ interface PdfPageProps {
   drawTarget: AnnotationLayer | null;
   /** Current tool. */
   tool: AnnotationTool;
-  /** Ink settings (only meaningful when tool === 'pen'). */
+  /** Ink settings (only meaningful for the pen and highlighter tools). */
   inkColor: string;
   inkWidth: number;
   /** Marker settings (only meaningful when tool === 'marker'). */
   markerKind: MarkerKind | null;
   markerLabelInput: string;
-  onStrokeFinished: (input: { layer: AnnotationLayer; page: number; color: string; width: number; points: Array<{ x: number; y: number }> }) => void;
+  onStrokeFinished: (input: { layer: AnnotationLayer; page: number; pen: InkPen; color: string; width: number; points: Array<{ x: number; y: number }> }) => void;
   onMarkerPlaced: (input: { layer: AnnotationLayer; page: number; markerKind: MarkerKind; label: string | null; position: { x: number; y: number } }) => void;
   onDeleteAnnotation: (id: string) => void;
   /** Resolves a marker's "follow" action (e.g. D.S. → Segno), or null. */
@@ -72,6 +73,7 @@ export function PdfPage({
   const activeStrokeRef = useRef<{ points: Array<{ x: number; y: number }> } | null>(null);
 
   const inkAnnotations = annotations.filter((a): a is InkAnnotation => a.kind === 'ink');
+  const inkPen: InkPen | null = tool === 'pen' || tool === 'highlighter' ? tool : null;
   const markerAnnotations = annotations.filter((a): a is MarkerAnnotation => a.kind === 'marker');
 
   // Render the PDF page whenever the source or scale changes.
@@ -139,8 +141,14 @@ export function PdfPage({
       (p.y * renderedSize.height - renderedSize.offY) * dpr,
     ];
 
-    for (const a of inkAnnotations) {
+    // Highlighters first so pen lines sit on top of them.
+    const ordered = [
+      ...inkAnnotations.filter((a) => a.pen === 'highlighter'),
+      ...inkAnnotations.filter((a) => a.pen !== 'highlighter'),
+    ];
+    for (const a of ordered) {
       if (a.points.length === 0) continue;
+      ctx.globalCompositeOperation = a.pen === 'highlighter' ? 'darken' : 'source-over';
       ctx.strokeStyle = a.color;
       ctx.lineWidth = a.width * scale * renderedSize.dpr;
       ctx.lineCap = 'round';
@@ -169,6 +177,8 @@ export function PdfPage({
     if (!canvas || !stroke || stroke.points.length < 2) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+    // 'darken' stops a highlighter's overlapping segments building up.
+    ctx.globalCompositeOperation = inkPen === 'highlighter' ? 'darken' : 'source-over';
     ctx.strokeStyle = inkColor;
     ctx.lineWidth = inkWidth * scale * (renderedSize?.dpr ?? 1);
     ctx.lineCap = 'round';
@@ -185,7 +195,7 @@ export function PdfPage({
     ctx.stroke();
   }
 
-  const inkEnabled = tool === 'pen' && drawTarget !== null;
+  const inkEnabled = inkPen !== null && drawTarget !== null;
   const markerEnabled = tool === 'marker' && drawTarget !== null && markerKind !== null;
   const canvasInteractive = inkEnabled || markerEnabled;
 
@@ -222,6 +232,7 @@ export function PdfPage({
     onStrokeFinished({
       layer: drawTarget,
       page: pageNumber,
+      pen: inkPen!,
       color: inkColor,
       width: inkWidth,
       points: stroke.points,
@@ -241,6 +252,8 @@ export function PdfPage({
         className="absolute inset-0 block"
         style={{
           touchAction: 'none',
+          // Multiply onto the score so highlighter colour never hides the notes.
+          mixBlendMode: 'multiply',
           cursor,
           pointerEvents: canvasInteractive ? 'auto' : 'none',
         }}

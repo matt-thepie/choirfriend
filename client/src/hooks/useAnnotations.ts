@@ -9,13 +9,14 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import type { Annotation, AnnotationLayer, MarkerKind } from '@/types/annotations.ts';
+import type { Annotation, AnnotationLayer, InkPen, MarkerKind } from '@/types/annotations.ts';
 
 interface NewInkInput {
   fileId: number;
   layer: AnnotationLayer;
   page: number;
   kind: 'ink';
+  pen: InkPen;
   color: string;
   width: number;
   points: Array<{ x: number; y: number }>;
@@ -54,6 +55,7 @@ function makeOptimistic(id: string, pieceId: number, input: NewAnnotationInput):
     return {
       ...common,
       kind: 'ink',
+      pen: input.pen,
       color: input.color,
       width: input.width,
       points: input.points,

@@ -49,8 +49,12 @@ interface AnnotationCommon {
   updatedAt: number;
 }
 
+/** `highlighter` strokes are wide and drawn so notes show through them. */
+export type InkPen = 'pen' | 'highlighter';
+
 export interface InkAnnotationDTO extends AnnotationCommon {
   kind: 'ink';
+  pen: InkPen;
   color: string;
   width: number;
   points: Array<{ x: number; y: number }>;
@@ -98,6 +102,7 @@ function rowToDTO(row: AnnotationRow, requesterId: number): AnnotationDTO {
     return {
       ...common,
       kind: 'ink',
+      pen: payload.pen === 'highlighter' ? 'highlighter' : 'pen',
       color: payload.color as string,
       width: payload.width as number,
       points: payload.points as Array<{ x: number; y: number }>,
@@ -154,6 +159,7 @@ interface CreateCommon {
 export type CreateAnnotationInput =
   | (CreateCommon & {
       kind: 'ink';
+      pen: InkPen;
       color: string;
       width: number;
       points: Array<{ x: number; y: number }>;
@@ -168,7 +174,7 @@ export type CreateAnnotationInput =
 export function createAnnotation(input: CreateAnnotationInput): AnnotationDTO {
   const payload =
     input.kind === 'ink'
-      ? JSON.stringify({ color: input.color, width: input.width, points: input.points })
+      ? JSON.stringify({ pen: input.pen, color: input.color, width: input.width, points: input.points })
       : JSON.stringify({ markerKind: input.markerKind, label: input.label, position: input.position });
 
   insertStmt.run(

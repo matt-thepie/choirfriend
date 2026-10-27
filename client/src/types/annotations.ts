@@ -13,7 +13,23 @@
 
 export type AnnotationLayer = 'private' | 'shared';
 
-export type AnnotationTool = 'pen' | 'pan' | 'marker';
+export type AnnotationTool = 'pen' | 'highlighter' | 'pan' | 'marker';
+
+// ---------------------------------------------------------------------------
+// Ink
+// ---------------------------------------------------------------------------
+
+/** `highlighter` strokes are wide and drawn so the notes show through them. */
+export type InkPen = 'pen' | 'highlighter';
+
+export const INK_WIDTH: Record<InkPen, number> = { pen: 2, highlighter: 12 };
+
+/** Highlighter colours are light and opaque: the ink canvas multiplies onto
+ *  the score, so black notes stay black under them. */
+export const INK_COLORS: Record<InkPen, readonly string[]> = {
+  pen: ['#111827', '#1d4ed8', '#dc2626', '#16a34a', '#ea580c', '#7c3aed'],
+  highlighter: ['#fde047', '#86efac', '#93c5fd', '#f9a8d4', '#fdba74'],
+};
 
 // ---------------------------------------------------------------------------
 // Markers
@@ -103,6 +119,8 @@ interface AnnotationCommon {
 
 export interface InkAnnotation extends AnnotationCommon {
   kind: 'ink';
+  /** Missing on strokes saved before highlighters existed — treat as `pen`. */
+  pen?: InkPen;
   color: string;
   width: number;
   points: Array<{ x: number; y: number }>;

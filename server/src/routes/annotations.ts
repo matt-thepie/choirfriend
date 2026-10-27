@@ -6,6 +6,7 @@ import {
   listAnnotationsForPiece,
   type AnnotationLayer,
   type CreateAnnotationInput,
+  type InkPen,
   type MarkerKind,
 } from '../db/annotations.ts';
 import { getPieceWithFiles } from '../db/pieces.ts';
@@ -36,6 +37,7 @@ interface CreateBodyCommon {
 type CreateBody =
   | (CreateBodyCommon & {
       kind: 'ink';
+      pen?: InkPen;
       color: string;
       width: number;
       points: Array<{ x: number; y: number }>;
@@ -62,6 +64,7 @@ function validateBody(body: unknown): { ok: true; value: CreateBody } | { ok: fa
   if (typeof b.page !== 'number') return { ok: false, reason: 'page missing' };
 
   if (b.kind === 'ink') {
+    if (b.pen !== undefined && b.pen !== 'pen' && b.pen !== 'highlighter') return { ok: false, reason: 'invalid pen' };
     if (typeof b.color !== 'string') return { ok: false, reason: 'color missing' };
     if (typeof b.width !== 'number') return { ok: false, reason: 'width missing' };
     if (!Array.isArray(b.points) || !b.points.every(isPoint)) {
@@ -141,6 +144,7 @@ export const annotationRoutes: FastifyPluginAsync = async (app) => {
           ? {
               ...common,
               kind: 'ink',
+              pen: body.pen ?? 'pen',
               color: body.color,
               width: body.width,
               points: body.points,

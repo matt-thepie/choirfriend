@@ -6,12 +6,15 @@ import { usePlayer } from '@/player/PlayerContext.tsx';
 import { toQueueTrack } from '@/components/AudioPlayer/AudioPlayer.tsx';
 import { cn } from '@/lib/utils.ts';
 import {
+  INK_COLORS,
+  INK_WIDTH,
   MARKER_KIND_ORDER,
   MARKER_PICKER_LABEL,
   markerLabel,
   type Annotation,
   type AnnotationLayer,
   type AnnotationTool,
+  type InkPen,
   type MarkerAnnotation,
   type MarkerKind,
 } from '@/types/annotations.ts';
@@ -78,6 +81,20 @@ const FIT_OPTIONS: Array<{ value: FitMode; label: string; title: string }> = [
   { value: '3', label: '3', title: 'Three systems at a time' },
 ];
 const FIT_KEY = 'choirfriend.readFit';
+const INK_COLORS_KEY = 'choirfriend.inkColors';
+function loadInkColors(): Record<InkPen, string> {
+  const colors: Record<InkPen, string> = { pen: INK_COLORS.pen[1]!, highlighter: INK_COLORS.highlighter[0]! };
+  try {
+    const saved = JSON.parse(localStorage.getItem(INK_COLORS_KEY) ?? '{}') as Partial<Record<InkPen, string>>;
+    for (const pen of ['pen', 'highlighter'] as const) {
+      const c = saved[pen];
+      if (c && INK_COLORS[pen].includes(c)) colors[pen] = c;
+    }
+  } catch {
+    // storage unavailable or junk
+  }
+  return colors;
+}
 function loadFit(): FitMode {
   try {
     const v = localStorage.getItem(FIT_KEY);
@@ -237,11 +254,22 @@ export function PdfViewer({
   // Page 1 intrinsic viewport — needed to compute fit-scale.
   const [intrinsicPageSize, setIntrinsicPageSize] = useState<{ w: number; h: number } | null>(null);
 
-  const inkPresets: Record<AnnotationLayer, { color: string; width: number }> = {
-    private: { color: '#1d4ed8', width: 2 },
-    shared: { color: '#ea580c', width: 2 },
+  // Each pen remembers its own colour on this device.
+  const [inkColors, setInkColorsState] = useState<Record<InkPen, string>>(loadInkColors);
+  const setInkColor = (pen: InkPen, color: string): void => {
+    setInkColorsState((prev) => {
+      const next = { ...prev, [pen]: color };
+      try {
+        localStorage.setItem(INK_COLORS_KEY, JSON.stringify(next));
+      } catch {
+        // storage unavailable
+      }
+      return next;
+    });
   };
-  const activeInk = inkPresets[drawTarget];
+  const activePen: InkPen = tool === 'highlighter' ? 'highlighter' : 'pen';
+  const activeInk = { color: inkColors[activePen], width: INK_WIDTH[activePen] };
+  const inkTool = tool === 'pen' || tool === 'highlighter';
 
   useEffect(() => {
     if (!pdfFile) {
@@ -503,6 +531,7 @@ export function PdfViewer({
   function handleStrokeFinished(input: {
     layer: AnnotationLayer;
     page: number;
+    pen: InkPen;
     color: string;
     width: number;
     points: Array<{ x: number; y: number }>;
@@ -680,8 +709,11 @@ export function PdfViewer({
       <div className="flex items-center rounded-md border border-border overflow-hidden">
         <ToolButton active={tool === 'pan'} onClick={() => setTool('pan')}>Pan</ToolButton>
         <ToolButton active={tool === 'pen'} onClick={() => setTool('pen')}>Pen</ToolButton>
+        <ToolButton active={tool === 'highlighter'} onClick={() => setTool('highlighter')}>Highlight</ToolButton>
         <ToolButton active={tool === 'marker'} onClick={() => setTool('marker')}>Marker</ToolButton>
       </div>
+
+      {inkTool && <InkColorPicker pen={activePen} color={activeInk.color} onChange={(c) => setInkColor(activePen, c)} />}
 
       <div
         className={cn(
@@ -690,11 +722,9 @@ export function PdfViewer({
         )}
       >
         <ToolButton active={drawTarget === 'private'} onClick={() => setDrawTarget('private')}>
-          <span className="inline-block w-2 h-2 rounded-full mr-1.5" style={{ background: inkPresets.private.color }} />
           Private
         </ToolButton>
         <ToolButton active={drawTarget === 'shared'} onClick={() => setDrawTarget('shared')}>
-          <span className="inline-block w-2 h-2 rounded-full mr-1.5" style={{ background: inkPresets.shared.color }} />
           Shared
         </ToolButton>
       </div>
@@ -745,16 +775,17 @@ export function PdfViewer({
       <div className="flex items-center rounded-md border border-border overflow-hidden">
         <ToolButton active={tool === 'pan'} onClick={() => setTool('pan')}>Look</ToolButton>
         <ToolButton active={tool === 'pen'} onClick={() => setTool('pen')}>Pen</ToolButton>
+        <ToolButton active={tool === 'highlighter'} onClick={() => setTool('highlighter')}>Highlight</ToolButton>
       </div>
 
-      {tool === 'pen' && (
+      {inkTool && <InkColorPicker pen={activePen} color={activeInk.color} onChange={(c) => setInkColor(activePen, c)} />}
+
+      {inkTool && (
         <div className="flex items-center rounded-md border border-border overflow-hidden">
           <ToolButton active={drawTarget === 'private'} onClick={() => setDrawTarget('private')}>
-            <span className="inline-block w-2 h-2 rounded-full mr-1.5" style={{ background: inkPresets.private.color }} />
             Private
           </ToolButton>
           <ToolButton active={drawTarget === 'shared'} onClick={() => setDrawTarget('shared')}>
-            <span className="inline-block w-2 h-2 rounded-full mr-1.5" style={{ background: inkPresets.shared.color }} />
             Shared
           </ToolButton>
         </div>
@@ -1029,6 +1060,47 @@ function ToolButton({
     >
       {children}
     </button>
+  );
+}
+
+/** Colour swatch for the active pen; opens a row of colours to pick from. */
+function InkColorPicker({ pen, color, onChange }: { pen: InkPen; color: string; onChange: (c: string) => void }) {
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  return (
+    <div ref={anchorRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-label={`${pen === 'highlighter' ? 'Highlighter' : 'Pen'} colour`}
+        aria-expanded={open}
+        className="h-8 px-2 rounded-md border border-border bg-background hover:bg-accent flex items-center gap-1"
+      >
+        <span className="w-5 h-5 rounded-full border border-black/20" style={{ background: color }} />
+        <span className="text-xs">▾</span>
+      </button>
+      {open && (
+        <Popover anchorRef={anchorRef} onClose={() => setOpen(false)} className="p-2 flex gap-2">
+          {INK_COLORS[pen].map((c) => (
+            <button
+              key={c}
+              type="button"
+              aria-label={c}
+              aria-pressed={c === color}
+              onClick={() => {
+                onChange(c);
+                setOpen(false);
+              }}
+              className={cn(
+                'w-9 h-9 rounded-full border border-black/20',
+                c === color && 'ring-2 ring-offset-2 ring-primary ring-offset-background',
+              )}
+              style={{ background: c }}
+            />
+          ))}
+        </Popover>
+      )}
+    </div>
   );
 }
 
