@@ -89,6 +89,7 @@ const FIT_OPTIONS: Array<{ value: FitMode; label: string; title: string }> = [
 ];
 const FIT_KEY = 'choirfriend.readFit';
 const INK_COLORS_KEY = 'choirfriend.inkColors';
+const DRAW_TARGET_KEY = 'choirfriend.drawTarget';
 const SHARE_WITH_KEY = 'choirfriend.shareWith';
 function loadShareWith(): number[] {
   try {
@@ -212,7 +213,23 @@ export function PdfViewer({
   // the screen width" (capped at 125% on wide screens so desktop pages don't
   // balloon).
   const [zoom, setZoom] = useState(1);
-  const [drawTarget, setDrawTarget] = useState<AnnotationLayer>('shared');
+  // New marks are private until the member chooses Shared; the choice is
+  // remembered per device so a section leader who mostly shares isn't reset.
+  const [drawTarget, setDrawTargetState] = useState<AnnotationLayer>(() => {
+    try {
+      return localStorage.getItem(DRAW_TARGET_KEY) === 'shared' ? 'shared' : 'private';
+    } catch {
+      return 'private';
+    }
+  });
+  const setDrawTarget = (t: AnnotationLayer): void => {
+    setDrawTargetState(t);
+    try {
+      localStorage.setItem(DRAW_TARGET_KEY, t);
+    } catch {
+      /* storage blocked */
+    }
+  };
   /** Which parts new shared marks are for; empty = everyone. */
   const { sections, byId: sectionsById } = useSections();
   const [shareWith, setShareWithState] = useState<number[]>(loadShareWith);
