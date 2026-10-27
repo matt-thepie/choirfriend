@@ -215,7 +215,7 @@ export function PdfViewer({
     onPieceMutated?.();
   }
 
-  const { annotations, loading: annotationsLoading, error: annotationsError, add, remove } = useAnnotations(pieceId);
+  const { annotations, error: annotationsError, add, remove } = useAnnotations(pieceId);
 
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
   const [pdfLoadError, setPdfLoadError] = useState<string | null>(null);
@@ -257,11 +257,12 @@ export function PdfViewer({
   const shareWithIds = shareWith.filter((id) => sectionsById.has(id));
   const sectionIdsFor = (layer: AnnotationLayer): number[] | null =>
     layer === 'shared' && shareWithIds.length ? shareWithIds : null;
-  const [tool, setTool] = useState<AnnotationTool>('pan');
-  // Entering read mode drops the marker tool — you're performing, not placing
-  // marks, so taps should jump/navigate rather than drop new markers.
+  // Reading is the default; Mark up switches to drawing with the chosen pen.
+  // Only while marking up do fingers draw, so reading never leaves stray ink.
+  const [markUp, setMarkUp] = useState(false);
+  const [markTool, setMarkTool] = useState<Exclude<AnnotationTool, 'pan'>>('pen');
+  const tool: AnnotationTool = markUp ? markTool : 'pan';
   useEffect(() => {
-    if (readMode) setTool((t) => (t === 'marker' ? 'pan' : t));
     if (!readMode) setToolsOpen(false);
   }, [readMode]);
   const [showPrivate, setShowPrivate] = useState(true);
@@ -317,6 +318,11 @@ export function PdfViewer({
   // music starts below them; otherwise a mark at the top of a system can't be
   // tapped. Wider screens show the toolbar instead and need no gap.
   const [isPhone, setIsPhone] = useState(() => typeof window !== 'undefined' && !window.matchMedia('(min-width: 768px)').matches);
+  // Phone read mode: hiding the tools also ends marking up, so the pen can't
+  // stay live with no Done button on screen.
+  useEffect(() => {
+    if (readMode && isPhone && !toolsOpen) setMarkUp(false);
+  }, [readMode, isPhone, toolsOpen]);
   useEffect(() => {
     const mq = window.matchMedia('(min-width: 768px)');
     const onChange = () => setIsPhone(!mq.matches);
@@ -505,7 +511,7 @@ export function PdfViewer({
       onAdjustingChange={setAdjustingLine}
       hasCorrections={Object.keys(lineOverrides).length > 0}
       onReset={() => saveLineOverrides({})}
-      onActivate={() => setTool('pan')}
+      onActivate={() => setMarkUp(false)}
     />
   );
 
@@ -596,6 +602,30 @@ export function PdfViewer({
   // while drawing, while pinch-zoomed, and when the content can still scroll
   // in the swipe's direction, so panning a zoomed page never flips it.
   const swipeRef = useRef<{ x: number; y: number; t: number } | null>(null);
+  // Two-finger tap undoes, as in Procreate. Only while marking up.
+  const twoTapRef = useRef<{ t: number; x: number; y: number; moved: boolean } | null>(null);
+  function onTwoTapStart(e: React.TouchEvent): void {
+    if (!markUp) return;
+    if (e.touches.length === 2) {
+      const [a, b] = [e.touches[0]!, e.touches[1]!];
+      twoTapRef.current = { t: Date.now(), x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2, moved: false };
+    } else if (e.touches.length > 2) {
+      twoTapRef.current = null;
+    }
+  }
+  function onTwoTapMove(e: React.TouchEvent): void {
+    const s = twoTapRef.current;
+    if (!s || e.touches.length < 2) return;
+    const [a, b] = [e.touches[0]!, e.touches[1]!];
+    if (Math.hypot((a.clientX + b.clientX) / 2 - s.x, (a.clientY + b.clientY) / 2 - s.y) > 12) s.moved = true;
+  }
+  function onTwoTapEnd(e: React.TouchEvent): void {
+    const s = twoTapRef.current;
+    if (!s || e.touches.length > 0) return;
+    twoTapRef.current = null;
+    if (!s.moved && Date.now() - s.t < 350) handleUndo();
+  }
+
   function onSwipeStart(e: React.TouchEvent): void {
     swipeRef.current = e.touches.length === 1 ? { x: e.touches[0]!.clientX, y: e.touches[0]!.clientY, t: Date.now() } : null;
   }
@@ -763,9 +793,6 @@ export function PdfViewer({
     if (KIND_TAKES_LABEL[input.markerKind]) {
       setMarkerLabelInput('');
     }
-    // One-and-done: you wouldn't place the same marker twice, so drop back to
-    // the Look tool after a placement.
-    setTool('pan');
   }
 
   function handleUndo(): void {
@@ -779,6 +806,7 @@ export function PdfViewer({
   }
 
   function handleClearMine(layer: AnnotationLayer): void {
+    if (!window.confirm(`Delete all your ${layer} marks on this score?`)) return;
     for (const a of annotations) {
       if (a.layer === layer && a.isMine !== false && belongsToActivePdf(a)) {
         void remove(a.id);
@@ -873,9 +901,24 @@ export function PdfViewer({
 
   // ------- Toolbars -------------------------------------------------------
 
-  /** Wraps a less-used control: always shown from md up, on phones only once More is open. */
-  const extra = cn('contents', !moreOpen && 'max-md:hidden');
-  const moreButton = (
+  /** Wraps a less-used reading control: always shown from md up, on phones
+   *  only once More is open, and hidden while marking up (which has its own row). */
+  const extra = markUp ? 'hidden' : cn('contents', !moreOpen && 'max-md:hidden');
+
+  // Page turning stays while marking up, since edge taps and swipes are off then.
+  const pageNav = effectiveNavMode === 'page' && pageCount > 0 && (
+    <div className="flex items-center gap-1">
+      <Button size="sm" variant="outline" onClick={prevPage} disabled={!canPrev} aria-label="Previous">◀</Button>
+      <span className="hidden md:inline text-xs tabular-nums w-14 text-center">{currentPage} / {pageCount}</span>
+      <Button size="sm" variant="outline" onClick={nextPage} disabled={!canNext} aria-label="Next">▶</Button>
+    </div>
+  );
+
+  // On phones Done sits up here, beside Mark up; the mark-up row wraps.
+  const phoneDone = markUp && (
+    <Button size="sm" variant="outline" className="md:hidden ml-auto" onClick={() => setMarkUp(false)}>Done</Button>
+  );
+  const moreButton = !markUp && (
     <button
       type="button"
       onClick={() => setMoreOpen((o) => !o)}
@@ -887,11 +930,39 @@ export function PdfViewer({
     </button>
   );
 
+  // Solid when on, like the other toggles.
+  const markUpButton = (
+    <button
+      type="button"
+      onClick={() => setMarkUp((m) => !m)}
+      aria-pressed={markUp}
+      title="Draw, highlight and place markers"
+      className={cn(
+        'inline-flex items-center gap-1.5 h-9 px-3 rounded-md border text-xs font-medium',
+        markUp ? 'bg-primary text-primary-foreground border-primary' : 'border-border bg-background hover:bg-accent',
+      )}
+    >
+      <Icon name="edit" className="text-lg" />
+      Mark up
+    </button>
+  );
+
+  const jumpTo = (open: boolean, onOpenChange: (o: boolean) => void) =>
+    !markUp && (
+      <JumpToDropdown
+        markers={markersInOrder}
+        sectionsById={sectionsById}
+        open={open}
+        onOpenChange={onOpenChange}
+        onJump={jumpToMarker}
+      />
+    );
+
   const fullToolbar = (
     <div className="px-3 py-2 md:px-4 flex flex-wrap items-center gap-2">
       {piece && <h2 className="hidden md:block text-sm font-semibold mr-2">{piece.title}</h2>}
       {onEnterReadMode && (
-        <Button size="sm" onClick={onEnterReadMode} title="Hide the editing tools and sing from the score">
+        <Button size="sm" variant="outline" onClick={onEnterReadMode} title="Hide the editing tools and sing from the score">
           <Icon name="auto_stories" className="text-xl" />
           Read mode
         </Button>
@@ -902,174 +973,74 @@ export function PdfViewer({
       <PdfSwitcher files={pdfFiles} selectedId={pdfFile?.id ?? null} onSelect={setSelectedPdfId} />
       {piece && <DocumentsMenu files={piece.files} onView={setSelectedPdfId} />}
 
-      <div className={extra}>
-      {isAdmin && <UploadButton pieceId={pieceId} onUploaded={handleUploaded} />}
-      {isAdmin && piece && (
-        <FilesDropdown
-          files={piece.files}
-          open={filesOpen}
-          onOpenChange={setFilesOpen}
-          onPatch={patchFile}
-          onDelete={deleteFile}
-          onReplaced={handleUploaded}
-        />
-      )}
-      {isAdmin && <div className="hidden md:block h-6 w-px bg-border mx-1" />}
-      </div>
-
-      <div className="flex items-center rounded-md border border-border overflow-hidden">
-        <ToolButton active={tool === 'pan'} onClick={() => setTool('pan')}>Pan</ToolButton>
-        <ToolButton active={tool === 'pen'} onClick={() => setTool('pen')}>Pen</ToolButton>
-        <ToolButton active={tool === 'highlighter'} onClick={() => setTool('highlighter')}>Highlight</ToolButton>
-        <ToolButton active={tool === 'marker'} onClick={() => setTool('marker')}>Marker</ToolButton>
-      </div>
-
-      {inkTool && <InkColorPicker pen={activePen} color={activeInk.color} onChange={(c) => setInkColor(activePen, c)} />}
-
-      <Button size="sm" variant="ghost" className="md:hidden" onClick={handleUndo} disabled={myAnnotationCount === 0}>
-        Undo
-      </Button>
+      {markUpButton}
+      {phoneDone}
+      {jumpTo(jumpOpen, setJumpOpen)}
       {moreButton}
 
       <div className={extra}>
-      <div
-        className={cn(
-          'flex items-center rounded-md border border-border overflow-hidden',
-          tool === 'pan' && 'opacity-50',
+        {myLineControl}
+        <ZoomControls zoom={zoom} onZoom={setZoom} />
+        <label className="text-xs flex items-center gap-1 select-none cursor-pointer">
+          <input type="checkbox" checked={showPrivate} onChange={(e) => setShowPrivate(e.target.checked)} />
+          Show private
+        </label>
+        <label className="text-xs flex items-center gap-1 select-none cursor-pointer">
+          <input type="checkbox" checked={showShared} onChange={(e) => setShowShared(e.target.checked)} />
+          Show shared
+        </label>
+        {isAdmin && <div className="hidden md:block h-6 w-px bg-border mx-1" />}
+        {isAdmin && <UploadButton pieceId={pieceId} onUploaded={handleUploaded} />}
+        {isAdmin && piece && (
+          <FilesDropdown
+            files={piece.files}
+            open={filesOpen}
+            onOpenChange={setFilesOpen}
+            onPatch={patchFile}
+            onDelete={deleteFile}
+            onReplaced={handleUploaded}
+          />
         )}
-      >
-        <ToolButton active={drawTarget === 'private'} onClick={() => setDrawTarget('private')}>
-          Private
-        </ToolButton>
-        <ToolButton active={drawTarget === 'shared'} onClick={() => setDrawTarget('shared')}>
-          Shared
-        </ToolButton>
-      </div>
-
-      {tool !== 'pan' && drawTarget === 'shared' && (
-        <ShareWithPicker sections={sections} mySectionId={mySectionId} value={shareWithIds} onChange={setShareWith} />
-      )}
-
-      <div className="hidden md:block h-6 w-px bg-border mx-1" />
-
-      <label className="text-xs flex items-center gap-1 select-none cursor-pointer">
-        <input type="checkbox" checked={showPrivate} onChange={(e) => setShowPrivate(e.target.checked)} />
-        Show private
-      </label>
-      <label className="text-xs flex items-center gap-1 select-none cursor-pointer">
-        <input type="checkbox" checked={showShared} onChange={(e) => setShowShared(e.target.checked)} />
-        Show shared
-      </label>
-
-      {myLineControl}
-
-      <div className="hidden md:block h-6 w-px bg-border mx-1" />
-
-      <ZoomControls zoom={zoom} onZoom={setZoom} />
-
-      <div className="md:ml-auto flex flex-wrap items-center gap-2">
-        <JumpToDropdown
-          markers={markersInOrder}
-          sectionsById={sectionsById}
-          open={jumpOpen}
-          onOpenChange={setJumpOpen}
-          onJump={jumpToMarker}
-        />
-        <span className="text-xs text-muted-foreground">
-          {annotationsLoading ? 'Loading…' : `${annotations.length} mark${annotations.length === 1 ? '' : 's'}`}
-        </span>
-        <Button size="sm" variant="ghost" className="max-md:hidden" onClick={handleUndo} disabled={myAnnotationCount === 0}>
-          Undo mine
-        </Button>
-        <Button size="sm" variant="ghost" onClick={() => handleClearMine(drawTarget)} disabled={myAnnotationCount === 0}>
-          Clear my {drawTarget}
-        </Button>
-      </div>
       </div>
     </div>
   );
 
-  /** Read-mode toolbar. Only what you'd want while singing:
-   *    pen on/off, layer, page nav (page mode), zoom (scroll mode), jump-to, scroll/pages toggle, exit. */
+  /** Read-mode toolbar. Only what you'd want while singing. */
   const minimalToolbar = (
     <div className="px-3 py-1.5 flex flex-wrap items-center gap-2">
       {piece && <h2 className="hidden md:block text-sm font-semibold mr-1 truncate max-w-[12rem]" title={piece.title}>{piece.title}</h2>}
 
       <PdfSwitcher files={pdfFiles} selectedId={pdfFile?.id ?? null} onSelect={setSelectedPdfId} />
-
-      <div className="flex items-center rounded-md border border-border overflow-hidden">
-        <ToolButton active={tool === 'pan'} onClick={() => setTool('pan')}>Look</ToolButton>
-        <ToolButton active={tool === 'pen'} onClick={() => setTool('pen')}>Pen</ToolButton>
-        <ToolButton active={tool === 'highlighter'} onClick={() => setTool('highlighter')}>Highlight</ToolButton>
-      </div>
-
-      {inkTool && <InkColorPicker pen={activePen} color={activeInk.color} onChange={(c) => setInkColor(activePen, c)} />}
-
-      {effectiveNavMode === 'page' && pageCount > 0 && (
-        <div className="md:hidden flex items-center gap-1">
-          <Button size="sm" variant="outline" onClick={prevPage} disabled={!canPrev} aria-label="Previous">◀</Button>
-          <Button size="sm" variant="outline" onClick={nextPage} disabled={!canNext} aria-label="Next">▶</Button>
-        </div>
-      )}
-      <div className="md:hidden contents">
-        <JumpToDropdown
-          markers={markersInOrder}
-          sectionsById={sectionsById}
-          open={phoneJumpOpen}
-          onOpenChange={setPhoneJumpOpen}
-          onJump={jumpToMarker}
-        />
-      </div>
+      {markUpButton}
+      {pageNav}
+      {phoneDone}
+      <div className="md:hidden contents">{jumpTo(phoneJumpOpen, setPhoneJumpOpen)}</div>
       {moreButton}
 
       <div className={extra}>
-      {inkTool && (
+        {myLineControl}
+
+        <div className="hidden md:block h-5 w-px bg-border mx-1" />
+
         <div className="flex items-center rounded-md border border-border overflow-hidden">
-          <ToolButton active={drawTarget === 'private'} onClick={() => setDrawTarget('private')}>
-            Private
-          </ToolButton>
-          <ToolButton active={drawTarget === 'shared'} onClick={() => setDrawTarget('shared')}>
-            Shared
-          </ToolButton>
+          <ToolButton active={navMode === 'scroll'} onClick={() => setNavMode('scroll')}>Scroll</ToolButton>
+          <ToolButton active={navMode === 'page'} onClick={() => setNavMode('page')}>Pages</ToolButton>
         </div>
-      )}
 
-      {inkTool && drawTarget === 'shared' && (
-        <ShareWithPicker sections={sections} mySectionId={mySectionId} value={shareWithIds} onChange={setShareWith} />
-      )}
-
-      {myLineControl}
-
-      <div className="hidden md:block h-5 w-px bg-border mx-1" />
-
-      {/* Scroll / Pages toggle */}
-      <div className="flex items-center rounded-md border border-border overflow-hidden">
-        <ToolButton active={navMode === 'scroll'} onClick={() => setNavMode('scroll')}>Scroll</ToolButton>
-        <ToolButton active={navMode === 'page'} onClick={() => setNavMode('page')}>Pages</ToolButton>
-      </div>
-
-      {readMode && effectiveNavMode === 'page' && (
-        <div className="flex items-center gap-1">
-          <span className="text-sm text-muted-foreground">Show</span>
-          <div className="flex items-center rounded-md border border-border overflow-hidden" role="group" aria-label="How much to show at once">
-            {FIT_OPTIONS.map((o) => (
-              <ToolButton key={o.value} active={fit === o.value} onClick={() => setFit(o.value)} title={o.title}>
-                {o.label}
-              </ToolButton>
-            ))}
+        {effectiveNavMode === 'page' && (
+          <div className="flex items-center gap-1">
+            <span className="text-sm text-muted-foreground">Show</span>
+            <div className="flex items-center rounded-md border border-border overflow-hidden" role="group" aria-label="How much to show at once">
+              {FIT_OPTIONS.map((o) => (
+                <ToolButton key={o.value} active={fit === o.value} onClick={() => setFit(o.value)} title={o.title}>
+                  {o.label}
+                </ToolButton>
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {effectiveNavMode === 'page' && pageCount > 0 && (
-        <div className="hidden md:contents">
-          <Button size="sm" variant="outline" onClick={prevPage} disabled={!canPrev} aria-label="Previous">◀</Button>
-          <span className="text-xs tabular-nums w-14 text-center">{currentPage} / {pageCount}</span>
-          <Button size="sm" variant="outline" onClick={nextPage} disabled={!canNext} aria-label="Next">▶</Button>
-        </div>
-      )}
-
-      {effectiveNavMode === 'scroll' && <ZoomControls zoom={zoom} onZoom={setZoom} />}
+        {effectiveNavMode === 'scroll' && <ZoomControls zoom={zoom} onZoom={setZoom} />}
       </div>
 
       {/* Phones have Listen, Jump and Exit elsewhere (floating buttons / the row above). */}
@@ -1077,13 +1048,7 @@ export function PdfViewer({
         {piece && onPlayerHiddenChange && (
           <ListenButton piece={piece} playerHidden={playerHidden} onPlayerHiddenChange={onPlayerHiddenChange} />
         )}
-        <JumpToDropdown
-          markers={markersInOrder}
-          sectionsById={sectionsById}
-          open={jumpOpen}
-          onOpenChange={setJumpOpen}
-          onJump={jumpToMarker}
-        />
+        {jumpTo(jumpOpen, setJumpOpen)}
         {onExitReadMode && (
           <button
             type="button"
@@ -1102,9 +1067,47 @@ export function PdfViewer({
     </div>
   );
 
-  // Second toolbar row, shown only while the Marker tool is active — keeps the
-  // crowded main row clear and gives the marker kinds room (incl. voltas) as
-  // tappable icon buttons. Placing a marker drops back to the Look tool.
+  // Second row, shown while marking up: everything about drawing, and nothing else.
+  const markUpToolbar = (
+    <div className="px-3 md:px-4 py-1.5 flex flex-wrap items-center gap-2 border-t border-border bg-muted/40">
+      <Button
+        onClick={handleUndo}
+        disabled={myAnnotationCount === 0}
+        title="Undo your last mark (or tap the score with two fingers)"
+        className="h-9 px-4"
+      >
+        <Icon name="undo" className="text-xl" />
+        Undo
+      </Button>
+
+      <div className="flex items-center rounded-md border border-border overflow-hidden">
+        <ToolButton active={markTool === 'pen'} onClick={() => setMarkTool('pen')}>Pen</ToolButton>
+        <ToolButton active={markTool === 'highlighter'} onClick={() => setMarkTool('highlighter')}>Highlighter</ToolButton>
+        <ToolButton active={markTool === 'marker'} onClick={() => setMarkTool('marker')} title="Repeats, D.S., Coda and other signs you can tap to jump">
+          Marker
+        </ToolButton>
+      </div>
+
+      {inkTool && <InkColorPicker pen={activePen} color={activeInk.color} onChange={(c) => setInkColor(activePen, c)} />}
+
+      <div className="flex items-center rounded-md border border-border overflow-hidden">
+        <ToolButton active={drawTarget === 'private'} onClick={() => setDrawTarget('private')}>Private</ToolButton>
+        <ToolButton active={drawTarget === 'shared'} onClick={() => setDrawTarget('shared')}>Shared</ToolButton>
+      </div>
+      {drawTarget === 'shared' && (
+        <ShareWithPicker sections={sections} mySectionId={mySectionId} value={shareWithIds} onChange={setShareWith} />
+      )}
+
+      <div className="ml-auto flex items-center gap-2">
+        <Button size="sm" variant="ghost" onClick={() => handleClearMine(drawTarget)} disabled={myAnnotationCount === 0}>
+          Clear my {drawTarget}…
+        </Button>
+        <Button size="sm" variant="outline" className="max-md:hidden" onClick={() => setMarkUp(false)}>Done</Button>
+      </div>
+    </div>
+  );
+
+  // Marker kinds, under the mark-up row while the Marker pen is chosen.
   const markerToolbar = (
     <div className="px-4 py-1.5 flex flex-wrap items-center gap-1 border-t border-border bg-muted/40">
       <span className="text-xs text-muted-foreground mr-1 self-center">Place:</span>
@@ -1147,7 +1150,8 @@ export function PdfViewer({
     <div className="flex flex-col h-full">
       <header className={cn('sticky top-0 z-10 bg-background/95 backdrop-blur border-b border-border', readMode && !toolsOpen && 'hidden md:block')}>
         {readMode ? minimalToolbar : fullToolbar}
-        {!readMode && tool === 'marker' && markerToolbar}
+        {markUp && markUpToolbar}
+        {tool === 'marker' && markerToolbar}
         {annotationsError && (
           <div className="px-4 pb-2 text-xs text-destructive">Annotation sync issue: {annotationsError}</div>
         )}
@@ -1156,10 +1160,10 @@ export function PdfViewer({
       <div
         ref={stageRef}
         className="flex-1 relative min-h-0"
-        onTouchStart={onSwipeStart}
-        onTouchMove={onSwipeMove}
-        onTouchEnd={onSwipeEnd}
-        onTouchCancel={() => { swipeRef.current = null; }}
+        onTouchStart={(e) => { onSwipeStart(e); onTwoTapStart(e); }}
+        onTouchMove={(e) => { onSwipeMove(e); onTwoTapMove(e); }}
+        onTouchEnd={(e) => { onSwipeEnd(e); onTwoTapEnd(e); }}
+        onTouchCancel={() => { swipeRef.current = null; twoTapRef.current = null; }}
       >
         {readMode && (
           // Phone read mode: the score fills the screen; two floating buttons
@@ -1283,10 +1287,9 @@ export function PdfViewer({
           </div>
         </div>
 
-        {/* Edge tap zones for page-turn nav. Narrow so the middle of the
-            page is free for pen strokes. Disabled while marker tool is
-            active so a placement at the page edge doesn't trigger a flip. */}
-        {effectiveNavMode === 'page' && pageCount > 0 && tool !== 'marker' && (
+        {/* Edge tap zones for page-turn nav. Off while marking up so a
+            stroke or marker at the page edge doesn't flip the page. */}
+        {effectiveNavMode === 'page' && pageCount > 0 && !markUp && (
           <>
             <button
               type="button"

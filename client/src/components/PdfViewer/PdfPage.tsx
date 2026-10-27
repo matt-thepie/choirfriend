@@ -85,7 +85,11 @@ export function PdfPage({
   const annotationCanvasRef = useRef<HTMLCanvasElement>(null);
   // width/height: the full page in CSS px; offX/offY/viewW/viewH: the visible (clipped) window.
   const [renderedSize, setRenderedSize] = useState<{ width: number; height: number; dpr: number; offX: number; offY: number; viewW: number; viewH: number } | null>(null);
-  const activeStrokeRef = useRef<{ points: Array<{ x: number; y: number }> } | null>(null);
+  const activeStrokeRef = useRef<{ pointerId: number; points: Array<{ x: number; y: number }> } | null>(null);
+  // A marker goes down when the finger lifts, so a two-finger tap (undo) never places one.
+  const pendingMarkerRef = useRef<{ pointerId: number; position: { x: number; y: number } } | null>(null);
+  // Bumped to wipe a stroke that a second finger cancelled.
+  const [redrawTick, setRedrawTick] = useState(0);
 
   const inkAnnotations = annotations.filter((a): a is InkAnnotation => a.kind === 'ink');
   const inkPen: InkPen | null = tool === 'pen' || tool === 'highlighter' ? tool : null;
@@ -174,7 +178,7 @@ export function PdfPage({
       for (let i = 1; i < a.points.length; i++) ctx.lineTo(...px(a.points[i]!));
       ctx.stroke();
     }
-  }, [inkAnnotations, renderedSize, scale]);
+  }, [inkAnnotations, renderedSize, scale, redrawTick]);
 
   function getNormalisedPoint(e: React.PointerEvent<HTMLCanvasElement>): { x: number; y: number } {
     const canvas = e.currentTarget;
@@ -215,32 +219,40 @@ export function PdfPage({
   const canvasInteractive = inkEnabled || markerEnabled;
 
   function handlePointerDown(e: React.PointerEvent<HTMLCanvasElement>): void {
-    if (inkEnabled) {
-      (e.target as HTMLCanvasElement).setPointerCapture(e.pointerId);
-      activeStrokeRef.current = { points: [getNormalisedPoint(e)] };
+    if (!e.isPrimary) {
+      // A second finger: a two-finger tap or pinch, not a mark.
+      if (activeStrokeRef.current) {
+        activeStrokeRef.current = null;
+        setRedrawTick((n) => n + 1);
+      }
+      pendingMarkerRef.current = null;
       return;
     }
-    if (markerEnabled && markerKind) {
-      const position = getNormalisedPoint(e);
-      const label = markerLabelInput.trim().length > 0 ? markerLabelInput.trim() : null;
-      onMarkerPlaced({
-        layer: drawTarget!,
-        page: pageNumber,
-        markerKind,
-        label,
-        position,
-      });
+    if (inkEnabled) {
+      (e.target as HTMLCanvasElement).setPointerCapture(e.pointerId);
+      activeStrokeRef.current = { pointerId: e.pointerId, points: [getNormalisedPoint(e)] };
+      return;
     }
+    if (markerEnabled) pendingMarkerRef.current = { pointerId: e.pointerId, position: getNormalisedPoint(e) };
   }
 
   function handlePointerMove(e: React.PointerEvent<HTMLCanvasElement>): void {
-    if (!inkEnabled || !activeStrokeRef.current) return;
+    if (!inkEnabled || !activeStrokeRef.current || activeStrokeRef.current.pointerId !== e.pointerId) return;
     activeStrokeRef.current.points.push(getNormalisedPoint(e));
     drawLiveStroke();
   }
 
-  function handlePointerUp(): void {
-    if (!inkEnabled || !activeStrokeRef.current) return;
+  function handlePointerUp(e: React.PointerEvent<HTMLCanvasElement>): void {
+    const pending = pendingMarkerRef.current;
+    if (pending && pending.pointerId === e.pointerId) {
+      pendingMarkerRef.current = null;
+      if (e.type === 'pointerup' && markerEnabled && markerKind) {
+        const label = markerLabelInput.trim().length > 0 ? markerLabelInput.trim() : null;
+        onMarkerPlaced({ layer: drawTarget!, page: pageNumber, markerKind, label, position: pending.position });
+      }
+      return;
+    }
+    if (!inkEnabled || !activeStrokeRef.current || activeStrokeRef.current.pointerId !== e.pointerId) return;
     const stroke = activeStrokeRef.current;
     activeStrokeRef.current = null;
     if (stroke.points.length < 2 || !drawTarget) return;
