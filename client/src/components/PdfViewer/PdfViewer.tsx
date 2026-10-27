@@ -91,6 +91,7 @@ const FIT_KEY = 'choirfriend.readFit';
 const INK_COLORS_KEY = 'choirfriend.inkColors';
 const DRAW_TARGET_KEY = 'choirfriend.drawTarget';
 const SHARE_WITH_KEY = 'choirfriend.shareWith';
+const MY_LINE_SEEN_KEY = 'choirfriend.myLineSeen';
 function loadShareWith(): number[] {
   try {
     const saved = JSON.parse(localStorage.getItem(SHARE_WITH_KEY) ?? '[]') as unknown;
@@ -480,6 +481,7 @@ export function PdfViewer({
       onAdjustingChange={setAdjustingLine}
       hasCorrections={Object.keys(lineOverrides).length > 0}
       onReset={() => saveLineOverrides({})}
+      onActivate={() => setTool('pan')}
     />
   );
 
@@ -1312,6 +1314,7 @@ function MyLineControl({
   onAdjustingChange,
   hasCorrections,
   onReset,
+  onActivate,
 }: {
   on: boolean;
   onChange: (on: boolean) => void;
@@ -1321,9 +1324,26 @@ function MyLineControl({
   onAdjustingChange: (adjusting: boolean) => void;
   hasCorrections: boolean;
   onReset: () => void;
+  /** Turning it on or adjusting is about reading, not drawing: put the pen
+   *  down so the next drag scrolls instead of leaving a stroke. */
+  onActivate: () => void;
 }) {
   const anchorRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
+  const toggle = (): void => {
+    if (on) return onChange(false);
+    onChange(true);
+    onActivate();
+    // The first time, say what just happened and how to fix a wrong guess.
+    let seen = true;
+    try {
+      seen = localStorage.getItem(MY_LINE_SEEN_KEY) === '1';
+      localStorage.setItem(MY_LINE_SEEN_KEY, '1');
+    } catch {
+      /* private mode: just don't show the hint */
+    }
+    if (!seen) setOpen(true);
+  };
   if (adjusting) {
     return (
       <div className="flex items-center gap-2">
@@ -1336,11 +1356,14 @@ function MyLineControl({
   return (
     <div ref={anchorRef} className="relative">
       <div className="flex items-center rounded-md border border-border overflow-hidden">
-        <ToolButton active={on} onClick={() => onChange(!on)} title="Highlight my part's stave">My line</ToolButton>
+        <ToolButton active={on} onClick={toggle} title="Shade your own part's stave in pale blue, all through the score">
+          <span className="mr-1.5 inline-block h-2.5 w-2.5 rounded-sm bg-sky-300 ring-1 ring-sky-500/40" aria-hidden />
+          Shade my part
+        </ToolButton>
         <button
           type="button"
           onClick={() => setOpen((o) => !o)}
-          aria-label="My line options"
+          aria-label="Shade my part options"
           aria-expanded={open}
           className="h-8 px-1.5 text-xs border-l border-border hover:bg-accent"
         >
@@ -1349,7 +1372,10 @@ function MyLineControl({
       </div>
       {open && (
         <Popover anchorRef={anchorRef} onClose={() => setOpen(false)} className="p-1 min-w-[14rem]">
-          <p className="px-3 pt-2 pb-1 text-xs text-muted-foreground max-w-[16rem]">
+          <p className="px-3 pt-2 text-xs font-medium max-w-[16rem]">
+            {on ? 'Your part is shaded blue on every page.' : 'Shades your part blue on every page.'}
+          </p>
+          <p className="px-3 pt-1 pb-1 text-xs text-muted-foreground max-w-[16rem]">
             {guessable
               ? `Guessed from the part names printed on the score (${partName}). Fix any system it gets wrong with Adjust.`
               : partName
@@ -1361,6 +1387,7 @@ function MyLineControl({
             className={row}
             onClick={() => {
               if (!on) onChange(true);
+              onActivate();
               onAdjustingChange(true);
               setOpen(false);
             }}
