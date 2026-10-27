@@ -92,6 +92,7 @@ const INK_COLORS_KEY = 'choirfriend.inkColors';
 const DRAW_TARGET_KEY = 'choirfriend.drawTarget';
 const SHARE_WITH_KEY = 'choirfriend.shareWith';
 const MY_LINE_SEEN_KEY = 'choirfriend.myLineSeen';
+const NAV_MODE_KEY = 'choirfriend.navMode';
 function loadShareWith(): number[] {
   try {
     const saved = JSON.parse(localStorage.getItem(SHARE_WITH_KEY) ?? '[]') as unknown;
@@ -163,6 +164,14 @@ function buildChunks(pageCount: number, layouts: Map<number, PageLayout>, fit: F
  *  sensible default. Tablets and desktops default to one-page-at-a-time. */
 function pickInitialNavMode(): NavMode {
   if (typeof window === 'undefined') return 'page';
+  // Remember Scroll or Pages per device; until it's been chosen, phones
+  // scroll and bigger screens turn pages.
+  try {
+    const saved = localStorage.getItem(NAV_MODE_KEY);
+    if (saved === 'scroll' || saved === 'page') return saved;
+  } catch {
+    // storage blocked; fall through to the default
+  }
   return window.innerWidth < 768 ? 'scroll' : 'page';
 }
 
@@ -263,7 +272,15 @@ export function PdfViewer({
   // Separate state for the phone copy of Jump, so a hidden copy never pops up its list.
   const [phoneJumpOpen, setPhoneJumpOpen] = useState(false);
   const [filesOpen, setFilesOpen] = useState(false);
-  const [navMode, setNavMode] = useState<NavMode>(pickInitialNavMode);
+  const [navMode, setNavModeState] = useState<NavMode>(pickInitialNavMode);
+  const setNavMode = (m: NavMode) => {
+    setNavModeState(m);
+    try {
+      localStorage.setItem(NAV_MODE_KEY, m);
+    } catch {
+      // not remembered this time
+    }
+  };
   const [currentPage, setCurrentPage] = useState(1);
   // Read mode: what to show per step, and the top of the current step on
   // its page (a fraction), so re-analysis never loses your place.
