@@ -7,7 +7,8 @@
  * What works offline:
  *   - the app shell (HTML, JS, CSS, icons, fonts, piano samples): precached
  *   - pages already visited (set lists, songs, annotations): GET /api and
- *     /auth/me are network-first with the last good response as fallback
+ *     /auth/me are network-first with the last good response as fallback,
+ *     also used when the network takes longer than API_TIMEOUT_MS
  *   - sheet music: any .pdf is cache-first in the `scores` cache, filled when a
  *     score is opened and by the score sync in the app (lib/offline.ts)
  * Learning tracks are deliberately left to the network.
@@ -77,7 +78,7 @@ self.addEventListener('fetch', (event) => {
   }
   if (url.pathname === '/api/health') return;
   if (url.pathname.startsWith('/api/') || url.pathname === '/auth/me') {
-    event.respondWith(apiNetworkFirst(req, url));
+    event.respondWith(apiNetworkFirst(event, req, url));
     return;
   }
   if (url.pathname.startsWith('/auth/')) return;
@@ -99,24 +100,40 @@ async function navigation(req) {
   }
 }
 
-async function apiNetworkFirst(req, url) {
+/** How long a slow connection gets before a saved copy is shown instead. The
+ *  network answer still lands in the cache for next time. */
+const API_TIMEOUT_MS = 3000;
+
+function offlineCopy(hit) {
+  const headers = new Headers(hit.headers);
+  headers.set('X-Choirfriend-Offline', '1');
+  return new Response(hit.body, { status: hit.status, statusText: hit.statusText, headers });
+}
+
+async function apiNetworkFirst(event, req, url) {
   const cache = await caches.open(API);
-  try {
-    const res = await fetch(req);
+  const net = fetch(req).then((res) => {
     if (res.ok) {
-      await cache.put(req, res.clone());
+      // Cache in the background: the page shouldn't wait on the disk write.
+      event.waitUntil(cache.put(req, res.clone()).catch(() => {}));
     } else if (res.status === 401 && url.pathname === '/auth/me') {
       // Signed out (or someone else signing in next): drop the last user's data.
-      await caches.delete(API);
+      event.waitUntil(caches.delete(API));
     }
     return res;
+  });
+  event.waitUntil(net.catch(() => {}));
+  const hit = await cache.match(req, { ignoreVary: true });
+  if (hit) {
+    let timer;
+    const slow = new Promise((resolve) => { timer = setTimeout(() => resolve(null), API_TIMEOUT_MS); });
+    const res = await Promise.race([net, slow]).catch(() => null);
+    clearTimeout(timer);
+    return res ?? offlineCopy(hit);
+  }
+  try {
+    return await net;
   } catch {
-    const hit = await cache.match(req, { ignoreVary: true });
-    if (hit) {
-      const headers = new Headers(hit.headers);
-      headers.set('X-Choirfriend-Offline', '1');
-      return new Response(hit.body, { status: hit.status, statusText: hit.statusText, headers });
-    }
     return new Response(JSON.stringify({ error: 'offline' }), {
       status: 503,
       headers: { 'Content-Type': 'application/json', 'X-Choirfriend-Offline': '1' },

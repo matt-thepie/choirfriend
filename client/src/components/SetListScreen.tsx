@@ -48,7 +48,7 @@ export function SetListScreen({
   onOpenSetList,
 }: SetListScreenProps) {
   const isVirtual = setListId === 0;
-  const { setList, loading, error, refresh, setSetList } = useSetList(setListId === 0 ? -1 : setListId);
+  const { setList, loading, error, refresh, setSetList } = useSetList(isVirtual ? null : setListId);
   const [all, setAll] = useState<SetList | null>(null);
   const [allError, setAllError] = useState<string | null>(null);
 
@@ -75,6 +75,10 @@ export function SetListScreen({
   const [sectionId, setSectionId] = useState<number | null>(mySectionId);
   useEffect(() => setSectionId(mySectionId), [mySectionId]);
   const [editing, setEditing] = useState(false);
+  // Filters the list on screen only; numbers stay as the running order and
+  // Play still queues the whole list.
+  const [query, setQuery] = useState('');
+  const q = query.trim().toLowerCase();
 
   const queue = useMemo<Queue | null>(() => {
     if (!list) return null;
@@ -98,7 +102,7 @@ export function SetListScreen({
     );
   }
   if (!list) {
-    return <div className="p-6 text-sm text-muted-foreground">{loading ? 'Loading…' : ''}</div>;
+    return <div className="p-6 text-base text-on-field-muted">{loading || isVirtual ? 'Loading…' : ''}</div>;
   }
 
   if (editing && isAdmin && !isVirtual) {
@@ -188,8 +192,21 @@ export function SetListScreen({
             {isAdmin ? 'No songs yet. Use Edit set list to add some.' : 'No songs in this set list yet.'}
           </p>
         ) : (
+          <>
+          <input
+            type="search"
+            aria-label="Search this set list"
+            placeholder="Search this set list…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="w-full h-11 px-4 mb-3 rounded-full border border-border bg-background text-base"
+          />
+          {q && !list.songs.some((s) => `${s.title} ${s.composer ?? ''} ${s.arranger ?? ''}`.toLowerCase().includes(q)) && (
+            <p className="text-base text-muted-foreground text-center py-6">No songs match “{query.trim()}”.</p>
+          )}
           <ol className="inset-list">
             {list.songs.map((song, i) => {
+              if (q && !`${song.title} ${song.composer ?? ''} ${song.arranger ?? ''}`.toLowerCase().includes(q)) return null;
               const track = queue ? pickTrackForSection(song.audio, sectionId) : null;
               const qIndex = queue && track ? queue.tracks.findIndex((t) => t.fileId === track.id) : -1;
               const playing = player.current?.pieceId === song.id && player.queue?.name === queue?.name;
@@ -222,6 +239,7 @@ export function SetListScreen({
               );
             })}
           </ol>
+          </>
         )}
         </div>
         </div>

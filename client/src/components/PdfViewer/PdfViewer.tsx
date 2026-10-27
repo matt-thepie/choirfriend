@@ -781,18 +781,14 @@ export function PdfViewer({
       return { label: 'Back to start', run: jumpToTop };
     }
     const at = markersInOrder.findIndex((x) => x.id === m.id);
-    if (m.markerKind === 'repeat-end') {
+    if (m.markerKind === 'repeat-end' || m.markerKind === 'volta-1') {
       // Back to the nearest start-repeat before this one; with none, a repeat
-      // goes back to the beginning.
+      // goes back to the beginning. A 1st-time bar ends in the repeat, so
+      // singers tap its bracket expecting to go back, not on to the 2nd time.
       const start = markersInOrder.slice(0, at).reverse().find((x) => x.markerKind === 'repeat-start');
       return start
         ? { label: 'Repeat from start-repeat', run: () => jumpToMarker(start) }
         : { label: 'Repeat from the beginning', run: jumpToTop };
-    }
-    if (m.markerKind === 'volta-1') {
-      // Second time round you skip the 1st-time bar.
-      const second = markersInOrder.slice(at + 1).find((x) => x.markerKind === 'volta-2');
-      if (second) return { label: 'Skip to 2nd time', run: () => jumpToMarker(second) };
     }
     return null;
   }
