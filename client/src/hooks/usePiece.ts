@@ -198,5 +198,25 @@ export function usePiece(pieceId: number | null, externalRefreshKey = 0): UsePie
     };
   }, [pieceId, tick, externalRefreshKey]);
 
+  // A just-uploaded score is converted on the server; check back quietly
+  // (no loading state) until its flowing score is ready or has failed.
+  const converting = piece?.id === pieceId && (piece?.flowing ?? []).some((f) => f.status === 'pending');
+  useEffect(() => {
+    if (!converting || pieceId === null) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      fetch(`/api/pieces/${pieceId}`, { credentials: 'include' })
+        .then((r) => (r.ok ? (r.json() as Promise<Piece>) : null))
+        .then((p) => {
+          if (p && !cancelled) setPiece(p);
+        })
+        .catch(() => {});
+    }, 3000);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [converting, pieceId, piece]);
+
   return { piece, loading, error, refresh };
 }

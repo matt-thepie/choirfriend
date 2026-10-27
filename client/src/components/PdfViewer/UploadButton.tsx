@@ -79,12 +79,14 @@ export function UploadButton({
   const description = describeStatus(status);
   const busy = status.phase === 'signing' || status.phase === 'uploading' || status.phase === 'completing';
 
-  function handleFiles(files: FileList | null): void {
+  function handleFiles(list: FileList | null): void {
+    // Copy before clearing: the FileList is live, and resetting the input
+    // (so the same file can be picked again) empties it in Chrome.
+    const files = list ? Array.from(list) : [];
     if (inputRef.current) inputRef.current.value = '';
-    if (!files) return;
     const next: Staged[] = [];
     const bad: string[] = [];
-    for (const file of Array.from(files)) {
+    for (const file of files) {
       let kind = inferKind(file);
       if (fixedKind) {
         // A lyric-named PDF dropped on "Add sheet music" is still a PDF; honour
@@ -210,7 +212,7 @@ export function UploadButton({
               </div>
               {hasScore && (
                 <p className="text-xs text-muted-foreground">
-                  {FILE_KIND_LABEL.score}s are only shown to the MD, committee and section admins.
+                  The {FILE_KIND_LABEL.score.toLowerCase()} file is only shown to the MD, committee and section admins. Everyone gets the flowing score made from it.
                 </p>
               )}
               <div className="flex items-center justify-end gap-2">

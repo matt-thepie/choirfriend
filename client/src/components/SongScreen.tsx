@@ -193,7 +193,7 @@ export function SongScreen({
         {scores.length > 0 || editing ? (
           <DocumentList
             title="Scores"
-            subtitle="MuseScore / MusicXML — only shown to the MD, committee and section admins"
+            subtitle="MuseScore / MusicXML — the files are only shown to the MD, committee and section admins; everyone gets the flowing score"
             files={scores}
             editing={editing}
             onOpenViewer={onOpenViewer}
