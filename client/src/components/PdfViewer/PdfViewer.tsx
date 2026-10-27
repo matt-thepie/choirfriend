@@ -19,6 +19,7 @@ import {
   type MarkerKind,
 } from '@/types/annotations.ts';
 import { FILE_KIND_LABEL, isPdfFile, usePiece, type FileKind, type Piece, type PieceFile } from '@/hooks/usePiece.ts';
+import type { SetListFlow } from '@/hooks/useSetListFlow.ts';
 import { KindBadge } from './KindBadge.tsx';
 import { useSections, type Section } from '@/hooks/useSections.ts';
 import { replaceFile } from '@/hooks/useUploadFile.ts';
@@ -58,6 +59,10 @@ interface PdfViewerProps {
   /** Read mode only: whether the user has tucked the player bar away. */
   playerHidden?: boolean;
   onPlayerHiddenChange?: (hidden: boolean) => void;
+  /** Opened from a set list: where this song sits in it. Turning past the
+   *  last page goes to the next song. */
+  setListFlow?: SetListFlow | null;
+  onOpenSong?: (pieceId: number) => void;
 }
 
 /** Marker kinds that benefit from a free-text label. */
@@ -189,6 +194,8 @@ export function PdfViewer({
   initialFileId = null,
   playerHidden = false,
   onPlayerHiddenChange,
+  setListFlow = null,
+  onOpenSong,
 }: PdfViewerProps) {
   const { piece, loading: pieceLoading, error: pieceError, refresh: refreshPiece } = usePiece(pieceId, refreshTick);
 
@@ -589,10 +596,15 @@ export function PdfViewer({
     setCurrentPage(c.page);
     setChunkY(c.clip?.y0 ?? 0);
   }, []);
+  const atEnd = chunked ? chunkIndex >= chunks.length - 1 : currentPage >= pageCount;
+  const nextSong = setListFlow?.next ?? null;
+  const prevSong = setListFlow?.prev ?? null;
   const nextPage = useCallback(() => {
+    // Performing a set list: turning past the last page opens the next song.
+    if (atEnd && nextSong && onOpenSong && pageCount > 0) return onOpenSong(nextSong.id);
     if (chunked) return goToChunk(chunks[chunkIndex + 1]);
     setCurrentPage((p) => Math.min(pageCount, p + 1));
-  }, [pageCount, chunked, chunks, chunkIndex, goToChunk]);
+  }, [pageCount, chunked, chunks, chunkIndex, goToChunk, atEnd, nextSong, onOpenSong]);
   const prevPage = useCallback(() => {
     if (chunked) return goToChunk(chunks[chunkIndex - 1]);
     setCurrentPage((p) => Math.max(1, p - 1));
@@ -671,7 +683,7 @@ export function PdfViewer({
   }
 
   const canPrev = chunked ? chunkIndex > 0 : currentPage > 1;
-  const canNext = chunked ? chunkIndex < chunks.length - 1 : currentPage < pageCount;
+  const canNext = !atEnd || (nextSong !== null && !!onOpenSong);
 
   // While a score is open, the page itself must not scroll or bounce: on iOS a
   // drag past the end of the score otherwise carries on into the document and
@@ -1284,8 +1296,56 @@ export function PdfViewer({
                   markerFollow={markerFollow}
                 />
               ))}
+
+            {pdf && effectiveNavMode === 'scroll' && setListFlow && onOpenSong && !markUp && (
+              <div className="w-full max-w-md mx-auto my-6 px-4 flex flex-col gap-2 text-center">
+                <p className="text-sm text-muted-foreground">
+                  {setListFlow.name} · song {setListFlow.position} of {setListFlow.total}
+                </p>
+                {nextSong ? (
+                  <Button size="lg" onClick={() => onOpenSong(nextSong.id)} className="h-14 text-base">
+                    Next: {nextSong.title} <Icon name="arrow_forward" />
+                  </Button>
+                ) : (
+                  <p className="text-base font-medium">End of the set list</p>
+                )}
+                {prevSong && (
+                  <Button size="sm" variant="ghost" onClick={() => onOpenSong(prevSong.id)}>
+                    <Icon name="arrow_back" /> Previous: {prevSong.title}
+                  </Button>
+                )}
+              </div>
+            )}
           </div>
         </div>
+
+        {effectiveNavMode === 'page' && pageCount > 0 && setListFlow && onOpenSong && !markUp && (
+          <>
+            {atEnd && nextSong && (
+              <button
+                type="button"
+                onClick={() => onOpenSong(nextSong.id)}
+                className="absolute right-3 bottom-3 z-20 max-w-[70%] truncate rounded-full bg-primary text-primary-foreground px-4 py-2 text-sm font-medium shadow-md"
+              >
+                Next: {nextSong.title} ›
+              </button>
+            )}
+            {atEnd && !nextSong && (
+              <span className="absolute right-3 bottom-3 z-20 rounded-full bg-card border px-4 py-2 text-sm text-muted-foreground shadow-sm">
+                End of the set list
+              </span>
+            )}
+            {!canPrev && prevSong && (
+              <button
+                type="button"
+                onClick={() => onOpenSong(prevSong.id)}
+                className="absolute left-3 bottom-3 z-20 max-w-[45%] truncate rounded-full bg-card border px-3 py-2 text-sm text-muted-foreground shadow-sm"
+              >
+                ‹ {prevSong.title}
+              </button>
+            )}
+          </>
+        )}
 
         {/* Edge tap zones for page-turn nav. Off while marking up so a
             stroke or marker at the page edge doesn't flip the page. */}

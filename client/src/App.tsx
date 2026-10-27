@@ -13,6 +13,7 @@ import { PlayerProvider } from '@/player/PlayerContext.tsx';
 import { usePieces } from '@/hooks/usePieces.ts';
 import { useSections, saveMySection, saveMyPartLine } from '@/hooks/useSections.ts';
 import { useSetLists } from '@/hooks/useSetLists.ts';
+import { fetchDefaultSheet, useSetListFlow } from '@/hooks/useSetListFlow.ts';
 import { Icon } from '@/components/ui/button.tsx';
 import { useOfflineScores } from '@/hooks/useOfflineScores.ts';
 import { useInstallPrompt } from '@/hooks/useInstallPrompt.ts';
@@ -184,6 +185,14 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
 
   function openPiece(id: number): void {
     navigate({ pieceId: id, viewerFileId: null, readMode: false });
+  }
+
+  // Opened from a set list, the viewer can turn straight into the next song.
+  const setListFlow = useSetListFlow(viewerFileId !== null ? setListId : null, pieceId);
+  async function openSongInViewer(id: number): Promise<void> {
+    const sheet = await fetchDefaultSheet(id).catch(() => null);
+    // A song with no sheet music opens on its song page instead.
+    navigate({ pieceId: id, viewerFileId: sheet?.id ?? null, readMode: sheet ? readMode : false });
   }
 
   function closeViewer(): void {
@@ -494,6 +503,8 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
                 onPartLineChange={setPartLine}
                 playerHidden={readPlayerHidden}
                 onPlayerHiddenChange={setReadPlayerHidden}
+                setListFlow={setListFlow}
+                onOpenSong={(id) => void openSongInViewer(id)}
               />
             </div>
             {pianoOpen && <Piano onClose={() => setPianoOpen(false)} />}
