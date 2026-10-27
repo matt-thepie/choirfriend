@@ -141,7 +141,9 @@ export function useAnnotations(pieceId: number | null): UseAnnotationsResult {
           method: 'DELETE',
           credentials: 'include',
         });
-        if (!res.ok && res.status !== 204) throw new Error(`HTTP ${res.status}`);
+        // 404: the server never got it (a save that was cut off) or someone
+        // else already deleted it. Either way it's gone, so don't put it back.
+        if (!res.ok && res.status !== 204 && res.status !== 404) throw new Error(`HTTP ${res.status}`);
       } catch (e) {
         setAnnotations(previous);
         console.error('[annotations] delete failed, rolled back:', e);
