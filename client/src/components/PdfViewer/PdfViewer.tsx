@@ -210,6 +210,8 @@ export function PdfViewer({
 
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
   const [pdfLoadError, setPdfLoadError] = useState<string | null>(null);
+  // Fraction downloaded, or null when the size isn't known yet.
+  const [pdfProgress, setPdfProgress] = useState<number | null>(null);
   // User zoom in scroll mode, relative to the fit-to-width base. 1 = "fits
   // the screen width" (capped at 125% on wide screens so desktop pages don't
   // balloon).
@@ -349,7 +351,12 @@ export function PdfViewer({
     setPdf(null);
     setIntrinsicPageSize(null);
     setPdfLoadError(null);
+    setPdfProgress(null);
     const task = pdfjsLib.getDocument({ url: pdfFile.url, disableRange: true }); // whole file, so the service worker can cache it
+    // Scanned scores can be 10MB+; show how far along the download is.
+    task.onProgress = ({ loaded, total }: { loaded: number; total: number }) => {
+      if (!cancelled && total > 0) setPdfProgress(Math.min(1, loaded / total));
+    };
     task.promise.then(
       async (loaded) => {
         if (cancelled) return;
@@ -1191,7 +1198,20 @@ export function PdfViewer({
             {pieceLoading && <p className="text-sm text-muted-foreground">Loading piece…</p>}
             {!pieceLoading && !pdfFile && <p className="text-sm text-muted-foreground">No PDF in this piece yet.</p>}
             {pdfLoadError && <p className="text-sm text-destructive">Failed to load PDF: {pdfLoadError}</p>}
-            {pdfFile && !pdf && !pdfLoadError && <p className="text-sm text-muted-foreground">Loading PDF…</p>}
+            {pdfFile && !pdf && !pdfLoadError && (
+              <div role="status" className="flex flex-col items-center gap-3 py-16 text-muted-foreground">
+                <svg className="animate-spin h-8 w-8" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" opacity="0.25" />
+                  <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                </svg>
+                <p className="text-sm">
+                  Loading score{pdfProgress !== null ? ` · ${Math.round(pdfProgress * 100)}%` : '…'}
+                </p>
+                {pdfFile.sizeBytes != null && pdfFile.sizeBytes > 4_000_000 && (
+                  <p className="text-xs">Large file ({Math.round(pdfFile.sizeBytes / 1_000_000)} MB), so this can take a while</p>
+                )}
+              </div>
+            )}
 
             {pdf && effectiveNavMode === 'page' && currentPage >= 1 && currentPage <= pageCount && (
               <PdfPage
