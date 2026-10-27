@@ -153,3 +153,23 @@ export function backfillAudioSections(): void {
   }
   if (n > 0) console.log(`[sections] Backfilled section on ${n} of ${rows.length} unsectioned audio files`);
 }
+
+// Identity's canonical voice parts → our section badges (SGMC defaults).
+const VOICE_PART_BADGE: Record<string, string> = {
+  t1: 'T1',
+  t2: 'T2',
+  baritone: 'Bar',
+  bass: 'B',
+  instrumentalist: 'M',
+};
+
+/** Section for an identity voice part, matched by badge, then by label. Null if none fits. */
+export function sectionIdForVoicePart(voicePart: string): number | null {
+  const key = voicePart.toLowerCase().trim();
+  const badge = (VOICE_PART_BADGE[key] ?? '').toLowerCase();
+  const all = listSections();
+  const hit =
+    (badge && all.find((s) => s.badge.toLowerCase() === badge)) ||
+    all.find((s) => s.label.toLowerCase() === key || s.label.toLowerCase().replace(/\s+/g, '') === key);
+  return hit ? hit.id : null;
+}

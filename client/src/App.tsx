@@ -29,6 +29,8 @@ interface MeResponse {
   canSeeScores?: boolean;
   features?: { confidence?: boolean };
   sectionId?: number | null;
+  /** Part comes from the SGMC identity profile; not editable here. */
+  sectionFromIdentity?: boolean;
 }
 
 /**
@@ -246,7 +248,12 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
                     label={mySection ? `My part: ${mySection.label}` : 'My part: not set'}
                     onClick={() => setPartMenuOpen((o) => !o)}
                   />
-                  {partMenuOpen && (
+                  {partMenuOpen && me.sectionFromIdentity && (
+                    <div className="ml-6 mb-1 px-3 py-1.5 text-sm text-muted-foreground">
+                      Set in your SGMC profile. Ask the membership secretary to change it.
+                    </div>
+                  )}
+                  {partMenuOpen && !me.sectionFromIdentity && (
                     <div className="ml-6 mb-1 border-l border-border pl-1">
                       {sections.map((s) => (
                         <MenuItem key={s.id} icon={<span className="text-xs font-bold w-4 text-center">{s.badge}</span>} label={s.label} active={s.id === mySectionId} onClick={() => void chooseSection(s.id)} />

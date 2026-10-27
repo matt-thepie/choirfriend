@@ -11,7 +11,8 @@
 
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { listProviders } from './index.ts';
-import { upsertUserByEmail } from '../db/index.ts';
+import { setUserSectionId, upsertUserByEmail } from '../db/index.ts';
+import { sectionIdForVoicePart } from '../db/sections.ts';
 import { getConfig } from '../config.ts';
 import type { AuthUser } from './types.ts';
 
@@ -38,6 +39,8 @@ function resolveDevBypass(): AuthUser | null {
     email,
     displayName,
     groups,
+    // Pretend identity supplied a part (e.g. DEV_AUTH_VOICE_PART=t2) to test the lock.
+    voicePart: process.env.DEV_AUTH_VOICE_PART,
     raw: { devBypass: true },
   };
 }
@@ -83,12 +86,28 @@ export async function requireAuth(req: FastifyRequest, reply: FastifyReply): Pro
     reply.code(401).send({ error: 'unauthenticated' });
     return;
   }
+  req.user = { ...user, internalId: syncUser(user) };
+}
+
+/** True when the identity provider owns this member's part, so choirfriend
+ *  must not let them change it locally. */
+export function partFromIdentity(user: AuthUser): boolean {
+  return typeof user.voicePart === 'string' && sectionIdForVoicePart(user.voicePart) !== null;
+}
+
+/** Upsert the local user row and, when the provider supplies a voice part,
+ *  make it the member's section so identity stays the source of truth. */
+export function syncUser(user: AuthUser): number {
   const internalId = upsertUserByEmail({
     email: user.email,
     displayName: user.displayName,
     roles: user.groups,
   });
-  req.user = { ...user, internalId };
+  if (typeof user.voicePart === 'string') {
+    const sectionId = sectionIdForVoicePart(user.voicePart);
+    if (sectionId !== null) setUserSectionId(internalId, sectionId);
+  }
+  return internalId;
 }
 
 /**

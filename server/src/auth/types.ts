@@ -30,6 +30,9 @@ export interface AuthUser {
   displayName: string;
   /** Provider-supplied groups/roles, normalised to lowercase strings. */
   groups: string[];
+  /** Voice part from the provider (e.g. sgmc-identity's canonical t1|t2|baritone|bass|instrumentalist).
+   *  undefined = the provider doesn't know about parts; null = the member has none set. */
+  voicePart?: string | null;
   /** Whatever raw payload the provider returned, kept for debugging. */
   raw: unknown;
 }

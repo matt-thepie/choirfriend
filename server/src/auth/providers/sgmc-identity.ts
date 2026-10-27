@@ -37,6 +37,8 @@ interface VerifyResponse {
   sub: string;
   exp: number;
   name?: string | null;
+  /** Token holder's own canonical voice part; absent on older identity builds. */
+  voice_part?: string | null;
 }
 
 export function createSgmcIdentityProvider(): AuthProvider {
@@ -94,6 +96,7 @@ export function createSgmcIdentityProvider(): AuthProvider {
         email: verified.email,
         displayName: verified.name ?? verified.email,
         groups: (verified.roles ?? []).map((r) => r.toLowerCase()),
+        voicePart: verified.voice_part,
         raw: verified,
       };
     },

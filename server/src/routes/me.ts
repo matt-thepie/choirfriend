@@ -1,5 +1,5 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { requireAuth } from '../auth/middleware.ts';
+import { requireAuth, partFromIdentity } from '../auth/middleware.ts';
 import { setUserSectionId } from '../db/index.ts';
 import { sectionExists } from '../db/sections.ts';
 
@@ -13,6 +13,9 @@ export const meRoutes: FastifyPluginAsync = async (app) => {
     const sectionId = body.sectionId;
     if (sectionId !== null && (!Number.isInteger(sectionId) || !sectionExists(sectionId as number))) {
       return reply.code(400).send({ error: 'unknown section' });
+    }
+    if (partFromIdentity(req.user!)) {
+      return reply.code(409).send({ error: 'Your part is set in your SGMC profile' });
     }
     setUserSectionId(req.user!.internalId, sectionId as number | null);
     return { sectionId };
