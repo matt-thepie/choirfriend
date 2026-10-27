@@ -57,7 +57,8 @@ export function MarkerBadge({ marker, pageWidth, pageHeight, interactive, follow
         className={cn(
           'inline-flex items-center px-2 py-0.5 rounded-md border text-xs font-semibold shadow-sm whitespace-nowrap select-none',
           styles,
-          interactive && follow ? 'cursor-pointer hover:shadow-md' : 'cursor-default',
+          // Pad the hit area well beyond the small badge so a finger can find it.
+          interactive && follow ? "relative cursor-pointer hover:shadow-md after:absolute after:-inset-3 after:content-['']" : 'cursor-default',
         )}
         title={follow ? follow.label : `${marker.markerKind}${marker.label ? ` · ${marker.label}` : ''}`}
       >

@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { Button } from '@/components/ui/button.tsx';
+import { Popover } from '@/components/ui/popover.tsx';
 import { inferKind, UPLOAD_ACCEPT, useUploadFile, type UploadStatus } from '@/hooks/useUploadFile.ts';
 import { FILE_KIND_LABEL, isPdfFile, type FileKind } from '@/hooks/usePiece.ts';
 import { KindBadge } from './KindBadge.tsx';
@@ -71,6 +72,7 @@ export function UploadButton({
   variant = 'outline',
 }: UploadButtonProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const anchorRef = useRef<HTMLDivElement>(null);
   const { status, upload } = useUploadFile(pieceId);
   const [staged, setStaged] = useState<Staged[]>([]);
   const [skipped, setSkipped] = useState<string[]>([]);
@@ -115,7 +117,7 @@ export function UploadButton({
   const hasScore = staged.some((s) => s.kind === 'score');
 
   return (
-    <div className="relative inline-flex items-center gap-2">
+    <div ref={anchorRef} className="relative inline-flex items-center gap-2">
       <input
         ref={inputRef}
         type="file"
@@ -142,7 +144,7 @@ export function UploadButton({
       )}
 
       {(staged.length > 0 || skipped.length > 0) && (
-        <div className="absolute left-0 top-full mt-1 z-30 w-[22rem] max-w-[calc(100vw-2rem)] bg-background border border-border rounded-md shadow-lg p-2 space-y-2">
+        <Popover anchorRef={anchorRef} className="w-[22rem] p-2 space-y-2">
           {skipped.length > 0 && (
             <div className="text-xs text-destructive">
               Not supported: {skipped.join(', ')}. Use PDF, audio, a lyrics document (docx, rtf, txt) or a MuseScore / MusicXML file.
@@ -226,7 +228,7 @@ export function UploadButton({
               <Button size="sm" variant="ghost" onClick={() => setSkipped([])}>OK</Button>
             </div>
           )}
-        </div>
+        </Popover>
       )}
     </div>
   );

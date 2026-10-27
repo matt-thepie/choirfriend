@@ -145,6 +145,7 @@ export function PlayerBar({ onOpenPiece }: PlayerBarProps) {
               <option key={r} value={r}>{rateLabel(r)}</option>
             ))}
           </select>
+          <IconButton icon="first_page" label="Back to start" size="sm" onClick={() => p.seek(0)} />
           <IconButton icon="replay_10" label="Back 10 seconds" size="sm" onClick={() => p.skip(-10)} />
           <button
             type="button"

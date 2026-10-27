@@ -117,8 +117,12 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
     return () => window.removeEventListener('popstate', onPop);
   }, []);
   const setSetListId = (id: number | null) => navigate({ setListId: id });
-  const setViewerFileId = (id: number | null) => navigate({ viewerFileId: id, readMode: false });
+  // Opening a score goes straight into read mode: reading is the common case.
+  const setViewerFileId = (id: number | null) => navigate({ viewerFileId: id, readMode: id !== null });
   const setReadMode = (on: boolean) => navigate({ readMode: on });
+  // Read mode keeps the player bar if something is loaded; the viewer's
+  // headphones button tucks it away or brings it back.
+  const [readPlayerHidden, setReadPlayerHidden] = useState(false);
   // Admins flip between the member layout (view mode) and the admin layout
   // (edit mode). Members never see the toggle. Remembered for the session.
   const [editMode, setEditMode] = useState<boolean>(() => {
@@ -196,7 +200,7 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
   const mySection = sections.find((s) => s.id === mySectionId) ?? null;
 
   return (
-    <div className="h-dvh flex flex-col">
+    <div className="h-dvh flex flex-col pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
       {!readMode && (
         <header className="bg-background border-b border-border shadow-sm shrink-0 h-14 md:h-16 px-4 flex items-center gap-3 text-base">
           {view === 'viewer' ? (
@@ -477,6 +481,8 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
                 onExitReadMode={() => setReadMode(false)}
                 onEnterReadMode={() => setReadMode(true)}
                 isAdmin={editing}
+                playerHidden={readPlayerHidden}
+                onPlayerHiddenChange={setReadPlayerHidden}
               />
             </div>
             {pianoOpen && <Piano onClose={() => setPianoOpen(false)} />}
@@ -484,7 +490,7 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
         )}
       </main>
 
-      {!readMode && <PlayerBar onOpenPiece={openPiece} />}
+      {!(readMode && readPlayerHidden) && <PlayerBar onOpenPiece={openPiece} />}
     </div>
   );
 }

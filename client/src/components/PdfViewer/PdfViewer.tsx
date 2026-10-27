@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { pdfjsLib, type PDFDocumentProxy } from '@/lib/pdfjs.ts';
 import { Button, Icon } from '@/components/ui/button.tsx';
+import { Popover } from '@/components/ui/popover.tsx';
+import { usePlayer } from '@/player/PlayerContext.tsx';
+import { toQueueTrack } from '@/components/AudioPlayer/AudioPlayer.tsx';
 import { cn } from '@/lib/utils.ts';
 import {
   MARKER_KIND_ORDER,
@@ -12,7 +15,7 @@ import {
   type MarkerAnnotation,
   type MarkerKind,
 } from '@/types/annotations.ts';
-import { FILE_KIND_LABEL, isPdfFile, usePiece, type FileKind, type PieceFile } from '@/hooks/usePiece.ts';
+import { FILE_KIND_LABEL, isPdfFile, usePiece, type FileKind, type Piece, type PieceFile } from '@/hooks/usePiece.ts';
 import { KindBadge } from './KindBadge.tsx';
 import { useSections, type Section } from '@/hooks/useSections.ts';
 import { replaceFile } from '@/hooks/useUploadFile.ts';
@@ -42,6 +45,9 @@ interface PdfViewerProps {
   isAdmin?: boolean;
   /** Which PDF to open first (from a sheet-music row). Defaults to the first. */
   initialFileId?: number | null;
+  /** Read mode only: whether the user has tucked the player bar away. */
+  playerHidden?: boolean;
+  onPlayerHiddenChange?: (hidden: boolean) => void;
 }
 
 /** Marker kinds that benefit from a free-text label. */
@@ -134,6 +140,8 @@ export function PdfViewer({
   onEnterReadMode,
   isAdmin = false,
   initialFileId = null,
+  playerHidden = false,
+  onPlayerHiddenChange,
 }: PdfViewerProps) {
   const { piece, loading: pieceLoading, error: pieceError, refresh: refreshPiece } = usePiece(pieceId, refreshTick);
 
@@ -595,6 +603,20 @@ export function PdfViewer({
     if (m.markerKind === 'dc') {
       return { label: 'Back to start', run: jumpToTop };
     }
+    const at = markersInOrder.findIndex((x) => x.id === m.id);
+    if (m.markerKind === 'repeat-end') {
+      // Back to the nearest start-repeat before this one; with none, a repeat
+      // goes back to the beginning.
+      const start = markersInOrder.slice(0, at).reverse().find((x) => x.markerKind === 'repeat-start');
+      return start
+        ? { label: 'Repeat from start-repeat', run: () => jumpToMarker(start) }
+        : { label: 'Repeat from the beginning', run: jumpToTop };
+    }
+    if (m.markerKind === 'volta-1') {
+      // Second time round you skip the 1st-time bar.
+      const second = markersInOrder.slice(at + 1).find((x) => x.markerKind === 'volta-2');
+      if (second) return { label: 'Skip to 2nd time', run: () => jumpToMarker(second) };
+    }
     return null;
   }
 
@@ -770,6 +792,9 @@ export function PdfViewer({
       {effectiveNavMode === 'scroll' && <ZoomControls zoom={zoom} onZoom={setZoom} />}
 
       <div className="ml-auto flex items-center gap-2">
+        {piece && onPlayerHiddenChange && (
+          <ListenButton piece={piece} playerHidden={playerHidden} onPlayerHiddenChange={onPlayerHiddenChange} />
+        )}
         <JumpToDropdown
           markers={markersInOrder}
           open={jumpOpen}
@@ -857,6 +882,9 @@ export function PdfViewer({
           // Phone read mode: the score fills the screen; two floating buttons
           // (tools, exit) sit over it so nothing is lost in a scrolling bar.
           <div className="md:hidden absolute top-2 right-2 z-20 flex items-center gap-1.5">
+            {piece && onPlayerHiddenChange && (
+              <ListenButton piece={piece} playerHidden={playerHidden} onPlayerHiddenChange={onPlayerHiddenChange} floating />
+            )}
             <button
               type="button"
               onClick={() => setToolsOpen((o) => !o)}
@@ -1063,8 +1091,9 @@ interface JumpToDropdownProps {
 }
 
 function JumpToDropdown({ markers, open, onOpenChange, onJump }: JumpToDropdownProps) {
+  const anchorRef = useRef<HTMLDivElement>(null);
   return (
-    <div className="relative">
+    <div ref={anchorRef} className="relative">
       <Button
         size="sm"
         variant="outline"
@@ -1074,7 +1103,7 @@ function JumpToDropdown({ markers, open, onOpenChange, onJump }: JumpToDropdownP
         Jump to ▾ ({markers.length})
       </Button>
       {open && markers.length > 0 && (
-        <div className="absolute right-0 top-full mt-1 bg-background border border-border rounded-md shadow-lg z-30 max-h-72 overflow-auto min-w-48">
+        <Popover anchorRef={anchorRef} align="right" onClose={() => onOpenChange(false)} className="max-h-72 overflow-auto min-w-48">
           {markers.map((m) => (
             <button
               key={m.id}
@@ -1092,7 +1121,7 @@ function JumpToDropdown({ markers, open, onOpenChange, onJump }: JumpToDropdownP
               </span>
             </button>
           ))}
-        </div>
+        </Popover>
       )}
     </div>
   );
@@ -1102,20 +1131,78 @@ function JumpToDropdown({ markers, open, onOpenChange, onJump }: JumpToDropdownP
 
 const DOC_KINDS: FileKind[] = ['pdf', 'lyrics', 'score'];
 
+/**
+ * Read mode's player control. With something already loaded it shows or
+ * hides the player bar; with nothing loaded it lists this piece's recordings
+ * so one can be started without leaving the score.
+ */
+function ListenButton({ piece, playerHidden, onPlayerHiddenChange, floating = false }: {
+  piece: Piece;
+  playerHidden: boolean;
+  onPlayerHiddenChange: (hidden: boolean) => void;
+  floating?: boolean;
+}) {
+  const player = usePlayer();
+  const [open, setOpen] = useState(false);
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const tracks = piece.files.filter((f) => f.kind === 'audio');
+  const loaded = !!player.queue;
+  if (!loaded && tracks.length === 0) return null;
+
+  const showing = loaded && !playerHidden;
+  const label = loaded ? (showing ? 'Hide player' : 'Show player') : 'Play a recording';
+  const onClick = () => (loaded ? onPlayerHiddenChange(!playerHidden) : setOpen((o) => !o));
+  return (
+    <div ref={anchorRef} className="relative">
+      <button
+        type="button"
+        onClick={onClick}
+        aria-label={label}
+        title={label}
+        aria-pressed={loaded ? showing : undefined}
+        aria-expanded={loaded ? undefined : open}
+        className={floating
+          ? cn('inline-flex items-center justify-center w-10 h-10 rounded-full shadow-card backdrop-blur', showing ? 'bg-primary text-primary-foreground' : 'bg-background/90 text-foreground')
+          : cn('inline-flex items-center justify-center w-9 h-9 rounded-md border border-border', showing ? 'bg-primary text-primary-foreground border-primary' : 'bg-background text-foreground hover:bg-accent')}
+      >
+        <Icon name="headphones" className="text-xl" />
+      </button>
+      {open && !loaded && (
+        <Popover anchorRef={anchorRef} align="right" onClose={() => setOpen(false)} className="min-w-56 max-h-72 overflow-auto p-1">
+          {tracks.map((f, i) => (
+            <button
+              key={f.id}
+              type="button"
+              className="block w-full text-left px-3 py-2 text-sm rounded hover:bg-accent"
+              onClick={() => {
+                player.playQueue({ name: piece.title, tracks: tracks.map((t) => toQueueTrack(piece, t)) }, i);
+                onPlayerHiddenChange(false);
+                setOpen(false);
+              }}
+            >
+              {f.label?.trim() || f.filename}
+            </button>
+          ))}
+        </Popover>
+      )}
+    </div>
+  );
+}
+
 function DocumentsMenu({ files, onView }: { files: PieceFile[]; onView: (id: number) => void }) {
   const [open, setOpen] = useState(false);
+  const anchorRef = useRef<HTMLDivElement>(null);
   const docs = files.filter((f) => DOC_KINDS.includes(f.kind));
   if (docs.length === 0) return null;
   const groups = DOC_KINDS.map((k) => ({ kind: k, items: docs.filter((f) => f.kind === k) })).filter((g) => g.items.length > 0);
   return (
-    <div className="relative">
+    <div ref={anchorRef} className="relative">
       <Button size="sm" variant="outline" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
         Documents ({docs.length}) ▾
       </Button>
       {open && (
         <>
-          <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} aria-hidden />
-          <div className="absolute left-0 top-full mt-1 w-80 max-h-96 overflow-auto bg-background border border-border rounded-md shadow-lg z-30 p-1">
+          <Popover anchorRef={anchorRef} onClose={() => setOpen(false)} className="w-80 max-h-96 overflow-auto p-1">
             {groups.map((g) => (
               <div key={g.kind} className="py-1">
                 <div className="px-2 pb-1 text-xs uppercase tracking-wide text-muted-foreground">{FILE_KIND_LABEL[g.kind]}</div>
@@ -1153,7 +1240,7 @@ function DocumentsMenu({ files, onView }: { files: PieceFile[]; onView: (id: num
                 })}
               </div>
             ))}
-          </div>
+          </Popover>
         </>
       )}
     </div>
@@ -1176,13 +1263,14 @@ interface FilesDropdownProps {
 
 function FilesDropdown({ files, open, onOpenChange, onPatch, onDelete, onReplaced }: FilesDropdownProps) {
   const { sections } = useSections();
+  const anchorRef = useRef<HTMLDivElement>(null);
   return (
-    <div className="relative">
+    <div ref={anchorRef} className="relative">
       <Button size="sm" variant="outline" onClick={() => onOpenChange(!open)} disabled={files.length === 0}>
         Files ({files.length}) ▾
       </Button>
       {open && files.length > 0 && (
-        <div className="absolute left-0 top-full mt-1 w-80 max-h-96 overflow-auto bg-background border border-border rounded-md shadow-lg z-30 p-1">
+        <Popover anchorRef={anchorRef} onClose={() => onOpenChange(false)} className="w-80 max-h-96 overflow-auto p-1">
           {(['pdf', 'lyrics', 'audio', 'score'] as FileKind[]).map((kind) => {
             const group = files.filter((f) => f.kind === kind);
             if (group.length === 0) return null;
@@ -1195,7 +1283,7 @@ function FilesDropdown({ files, open, onOpenChange, onPatch, onDelete, onReplace
               </div>
             );
           })}
-        </div>
+        </Popover>
       )}
     </div>
   );
