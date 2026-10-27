@@ -176,6 +176,8 @@ Built:
 - Design system: deep teal field (the logo's palette), white cards, Inter, Material Symbols, 16px base, 44px tap targets, dark mode via `prefers-color-scheme`; installable PWA (manifest + icons, no offline caching yet).
 - Piano widget (sampled grand piano, 2–5 octaves depending on screen width); bulk importer (Claude reads title/composer off PDFs); ChoirMate migration importer and backfill tools.
 - Admin gate on all write routes (members of any `ADMIN_ROLES` group).
+- URLs for every screen (`/`, `/repertoire`, `/setlists/:id`, `/songs/:id`, `/songs/:id/view/:fileId`) so the back button, reloads and shared links work.
+- Optional features: the confidence rating can be hidden with `FEATURE_CONFIDENCE=false` (SGMC runs with it off).
 
 Not built (from the ChoirMate brief):
 
