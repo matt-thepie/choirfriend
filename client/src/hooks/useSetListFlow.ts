@@ -6,7 +6,7 @@
 
 import { useEffect, useState } from 'react';
 import type { SetList } from '@/hooks/useSetLists.ts';
-import { isPdfFile, type PieceFile } from '@/hooks/usePiece.ts';
+import { isPdfFile, type FlowingScore, type PieceFile } from '@/hooks/usePiece.ts';
 
 export interface FlowSong {
   id: number;
@@ -34,6 +34,39 @@ export async function fetchDefaultSheet(pieceId: number): Promise<PieceFile | nu
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const piece = (await res.json()) as { files: PieceFile[] };
   return defaultSheet(piece.files);
+}
+
+const PREFER_FLOWING_KEY = 'choirfriend.preferFlowing';
+
+/** Remember whether the member last chose a flowing score or a PDF, so a set
+ *  list carries on in the same kind of view. */
+export function setPreferFlowing(on: boolean): void {
+  try {
+    localStorage.setItem(PREFER_FLOWING_KEY, on ? '1' : '0');
+  } catch {
+    /* storage blocked */
+  }
+}
+
+function preferFlowing(): boolean {
+  try {
+    return localStorage.getItem(PREFER_FLOWING_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+/** What to open a song on: a flowing score if the member prefers those and
+ *  the song has one ready, else its default sheet (or a flowing score when
+ *  there's no PDF at all). */
+export async function fetchDefaultView(pieceId: number): Promise<{ fileId: number; flow: boolean } | null> {
+  const res = await fetch(`/api/pieces/${pieceId}`, { credentials: 'include' });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const piece = (await res.json()) as { files: PieceFile[]; flowing?: FlowingScore[] };
+  const flowing = (piece.flowing ?? []).find((f) => f.status === 'ready');
+  const sheet = defaultSheet(piece.files);
+  if (flowing && (preferFlowing() || !sheet)) return { fileId: flowing.fileId, flow: true };
+  return sheet ? { fileId: sheet.id, flow: false } : null;
 }
 
 /** Largest next-song PDF fetched ahead of time, so a page turn into it is

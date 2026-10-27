@@ -15,6 +15,7 @@ import { offlineRoutes } from './routes/offline.ts';
 import { backfillAudioSections, seedSectionsIfEmpty } from './db/sections.ts';
 import { getConfig } from './config.ts';
 import { seedIfEmpty } from './seed.ts';
+import { resumeRenditions } from './scores/render.ts';
 
 const config = getConfig();
 
@@ -54,6 +55,8 @@ await app.register(authRoutes, { prefix: '/auth' });
 seedIfEmpty();
 seedSectionsIfEmpty();
 backfillAudioSections();
+// Flowing scores missing or out of date are converted in the background.
+resumeRenditions();
 
 try {
   await app.listen({ port: config.port, host: '0.0.0.0' });

@@ -9,8 +9,13 @@
  *   - pages already visited (set lists, songs, annotations): GET /api and
  *     /auth/me are network-first with the last good response as fallback,
  *     also used when the network takes longer than API_TIMEOUT_MS
- *   - sheet music: any .pdf is cache-first in the `scores` cache, filled when a
- *     score is opened and by the score sync in the app (lib/offline.ts)
+ *   - sheet music: any .pdf, and the MusicXML behind flowing scores (.xml), is
+ *     cache-first in the `scores` cache, filled when a score is opened and by
+ *     the score sync in the app (lib/offline.ts)
+ *   - the flowing-score engraver (Verovio, ~7 MB): kept out of the precache so
+ *     not every member downloads it on every deploy; cache-first in its own
+ *     `engraver` cache once someone opens a flowing score. Its file name
+ *     carries a content hash, so a new version simply replaces the old.
  * Learning tracks are deliberately left to the network.
  */
 /* global VERSION, PRECACHE */
@@ -19,10 +24,11 @@ const SHELL = `shell-${VERSION}`;
 const API = 'api-v1';
 const SCORES = 'scores-v1';
 const FONTS = 'fonts-v1';
-const KEEP = new Set([SHELL, API, SCORES, FONTS]);
+const ENGRAVER = 'engraver-v1';
+const KEEP = new Set([SHELL, API, SCORES, FONTS, ENGRAVER]);
 
 const FONT_CSS =
-  'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0..1,0&display=swap';
+  'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Tinos:ital,wght@0,400;0,700;1,400;1,700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0..1,0&display=swap';
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -61,7 +67,7 @@ self.addEventListener('fetch', (event) => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
 
-  if (url.pathname.toLowerCase().endsWith('.pdf')) {
+  if (/\.(pdf|xml)$/i.test(url.pathname)) {
     if (req.headers.has('range')) return; // pdf.js is told not to use ranges
     event.respondWith(scoreFirst(req));
     return;
@@ -83,6 +89,10 @@ self.addEventListener('fetch', (event) => {
   }
   if (url.pathname.startsWith('/auth/')) return;
   if (url.pathname.startsWith('/imported/')) return; // locally stored tracks
+  if (/^\/assets\/verovio-/.test(url.pathname)) {
+    event.respondWith(engraverFirst(req));
+    return;
+  }
   event.respondWith(cacheFirst(req, SHELL));
 });
 
@@ -147,6 +157,19 @@ async function scoreFirst(req) {
   if (hit) return hit;
   const res = await fetch(req);
   if (res.ok && res.status === 200) await cache.put(req.url, res.clone());
+  return res;
+}
+
+async function engraverFirst(req) {
+  const cache = await caches.open(ENGRAVER);
+  const hit = await cache.match(req, { ignoreVary: true });
+  if (hit) return hit;
+  const res = await fetch(req);
+  if (res.ok && res.status === 200) {
+    // Only the current build's engraver is worth keeping.
+    for (const old of await cache.keys()) await cache.delete(old);
+    await cache.put(req, res.clone());
+  }
   return res;
 }
 

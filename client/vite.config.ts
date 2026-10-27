@@ -18,7 +18,11 @@ function serviceWorker(): Plugin {
     name: 'choirfriend-sw',
     apply: 'build',
     generateBundle(_options, bundle) {
-      const built = Object.keys(bundle).filter((f) => !f.endsWith('.map')).map((f) => `/${f}`);
+      // The flowing-score engraver (~7 MB) is cached on first use instead
+      // (see sw.js), so members who never open one don't download it.
+      const built = Object.keys(bundle)
+        .filter((f) => !f.endsWith('.map') && !/^assets\/verovio-/.test(f))
+        .map((f) => `/${f}`);
       const statics = ['brand', 'icons', 'piano'].flatMap(publicFiles).concat('/manifest.json');
       const precache = ['/', ...built, ...statics].sort();
       const src = fs.readFileSync(path.join(root, 'sw', 'sw.js'), 'utf8');

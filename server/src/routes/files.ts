@@ -29,6 +29,7 @@ import { canManageFile, isAdmin, requireAuth } from '../auth/middleware.ts';
 import { guessSectionId, sectionExists } from '../db/sections.ts';
 import { deleteObject, isB2Configured, presignPut } from '../storage/b2.ts';
 import { deleteLocalFile, readableStoredName } from '../import/storage.ts';
+import { deleteRenditionFor, queueRendition } from '../scores/render.ts';
 
 /**
  * Strict MIME allowlist by kind. Server is the source of truth — the client
@@ -229,6 +230,7 @@ export const filesRoutes: FastifyPluginAsync = async (app) => {
             ? body.visibility
             : isAdmin(req.user!) ? 'shared' : 'private',
       });
+      if (fileDto.kind === 'score') queueRendition(fileDto.id);
       return reply.code(201).send(fileDto);
     },
   );
@@ -388,6 +390,7 @@ export const filesRoutes: FastifyPluginAsync = async (app) => {
         createdByUserId: req.user!.internalId,
       });
       if (!updated) return reply.code(404).send({ error: 'not found' });
+      if (row.kind === 'score') queueRendition(id);
 
       if (oldKey !== body.storageKey) {
         if (oldStorage === 'b2' && isB2Configured()) {
@@ -397,6 +400,23 @@ export const filesRoutes: FastifyPluginAsync = async (app) => {
         }
       }
       return updated;
+    },
+  );
+
+  /** Convert a score to its flowing view again (e.g. after the server's
+   *  MuseScore was updated). Conversion runs in the background. */
+  app.post<{ Params: { id: string } }>(
+    '/files/:id/render',
+    { preHandler: requireAuth },
+    async (req, reply) => {
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) return reply.code(400).send({ error: 'invalid file id' });
+      const row = getFileRowById(id);
+      if (!row) return reply.code(404).send({ error: 'not found' });
+      if (row.kind !== 'score') return reply.code(400).send({ error: 'not a score' });
+      if (!canManageFile(req.user!, row)) return reply.code(403).send({ error: 'forbidden' });
+      queueRendition(id);
+      return reply.code(202).send({ status: 'pending' });
     },
   );
 
@@ -417,6 +437,8 @@ export const filesRoutes: FastifyPluginAsync = async (app) => {
       if (!row) return reply.code(404).send({ error: 'not found' });
       if (!canManageFile(req.user!, row)) return reply.code(403).send({ error: 'forbidden' });
 
+      // A score's flowing MusicXML goes with it (its row cascades).
+      if (row.kind === 'score') await deleteRenditionFor(id);
       // Remove the DB row first so a failed object delete doesn't strand an
       // unreferenced file. Both object deletes are best-effort.
       deleteFileRow(id);

@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { createPiece, getPieceWithFiles, listPieces, updatePiece } from '../db/pieces.ts';
 import { canSeeScores, isAdmin, requireAdmin, requireAuth } from '../auth/middleware.ts';
 import { sectionExists } from '../db/sections.ts';
+import { listFlowingScores } from '../db/renditions.ts';
 import {
   addLink,
   deleteLink,
@@ -57,6 +58,9 @@ export const piecesRoutes: FastifyPluginAsync = async (app) => {
           const mine = f.createdByUserId === user.internalId;
           return { ...f, mine, canManage: mine || isAdmin(user) };
         }),
+        // Everyone reads the flowing view; only score managers see ones that
+        // are still converting or failed.
+        flowing: listFlowingScores(id, canSeeScores(user)),
         remarks: listRemarks(id),
         links: listLinks(id),
         me: getMemberPieceState(user.internalId, id),

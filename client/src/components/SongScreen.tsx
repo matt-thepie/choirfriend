@@ -38,6 +38,8 @@ interface SongScreenProps {
   onGoSetList: (id: number) => void;
   /** Open a PDF in the annotating viewer. */
   onOpenViewer: (fileId: number) => void;
+  /** Open an editable score as a flowing score. */
+  onOpenFlowing: (fileId: number) => void;
   onPieceMutated: () => void;
 }
 
@@ -68,6 +70,7 @@ export function SongScreen({
   onGoRepertoire,
   onGoSetList,
   onOpenViewer,
+  onOpenFlowing,
   onPieceMutated,
 }: SongScreenProps) {
   const { piece, loading, error, refresh } = usePiece(pieceId, refreshTick);
@@ -152,6 +155,30 @@ export function SongScreen({
         )}
         {panel === 'lyrics' && <LyricsPanel piece={piece} editing={editing} onSaved={mutated} />}
         {panel === 'links' && <LinksPanel piece={piece} editing={editing} onMutated={mutated} />}
+
+        {(piece.flowing ?? []).length > 0 && (
+          <section className="space-y-2">
+            <div className="flex items-end gap-2">
+              <h2 className="text-lg font-semibold">Flowing score</h2>
+              <span className="text-sm text-muted-foreground">fits your screen, plays your part</span>
+            </div>
+            <ul className="inset-list">
+              {(piece.flowing ?? []).map((f) => (
+                <li key={f.fileId} className="inset-row flex items-center gap-3 px-4 py-2 hover:shadow-card hover:-translate-y-px">
+                  <Icon name="queue_music" className="text-muted-foreground shrink-0" />
+                  <button type="button" onClick={() => onOpenFlowing(f.fileId)} className="flex-1 min-w-0 text-left hover:underline">
+                    <div className="text-base font-medium truncate">{f.title}</div>
+                    {f.status !== 'ready' && (
+                      <div className={f.status === 'failed' ? 'text-xs text-destructive' : 'text-xs text-muted-foreground'}>
+                        {f.status === 'pending' ? 'Preparing…' : f.error ?? 'Couldn’t be made from this file'}
+                      </div>
+                    )}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         <DocumentList
           title="Sheet music"

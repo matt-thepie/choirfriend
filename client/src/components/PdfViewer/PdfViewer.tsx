@@ -30,6 +30,7 @@ import { overrideKey, partFromSection, resolvePartLine, type PartLineOverrides }
 import type { StaveTarget } from './PdfPage.tsx';
 import { UploadButton } from './UploadButton.tsx';
 import { MarkerGlyph } from './markerIcons.tsx';
+import { ViewSwitcher, type ViewTarget } from '@/components/ViewSwitcher.tsx';
 
 interface PdfViewerProps {
   pieceId: number;
@@ -63,6 +64,8 @@ interface PdfViewerProps {
    *  last page goes to the next song. */
   setListFlow?: SetListFlow | null;
   onOpenSong?: (pieceId: number) => void;
+  /** Switch to a flowing score (or another PDF) from the View menu. */
+  onOpenView?: (target: ViewTarget) => void;
 }
 
 /** Marker kinds that benefit from a free-text label. */
@@ -216,6 +219,7 @@ export function PdfViewer({
   onPlayerHiddenChange,
   setListFlow = null,
   onOpenSong,
+  onOpenView,
 }: PdfViewerProps) {
   const { piece, loading: pieceLoading, error: pieceError, refresh: refreshPiece } = usePiece(pieceId, refreshTick);
 
@@ -1052,7 +1056,15 @@ export function PdfViewer({
       {pieceLoading && <span className="text-xs text-muted-foreground">Loading piece…</span>}
       {pieceError && <span className="text-xs text-destructive">Piece error: {pieceError}</span>}
 
-      <PdfSwitcher files={pdfFiles} selectedId={pdfFile?.id ?? null} onSelect={setSelectedPdfId} />
+      {piece && (piece.flowing ?? []).some((f) => f.status === 'ready') && onOpenView ? (
+        <ViewSwitcher
+          piece={piece}
+          current={pdfFile ? { kind: 'pdf', id: pdfFile.id } : null}
+          onSelect={(t) => (t.kind === 'pdf' ? setSelectedPdfId(t.id) : onOpenView(t))}
+        />
+      ) : (
+        <PdfSwitcher files={pdfFiles} selectedId={pdfFile?.id ?? null} onSelect={setSelectedPdfId} />
+      )}
       {piece && <DocumentsMenu files={piece.files} onView={setSelectedPdfId} />}
 
       {markUpButton}
@@ -1092,7 +1104,15 @@ export function PdfViewer({
     <div className="px-3 py-1.5 flex flex-wrap items-center gap-2">
       {piece && <h2 className="hidden md:block text-sm font-semibold mr-1 truncate max-w-[12rem]" title={piece.title}>{piece.title}</h2>}
 
-      <PdfSwitcher files={pdfFiles} selectedId={pdfFile?.id ?? null} onSelect={setSelectedPdfId} />
+      {piece && (piece.flowing ?? []).some((f) => f.status === 'ready') && onOpenView ? (
+        <ViewSwitcher
+          piece={piece}
+          current={pdfFile ? { kind: 'pdf', id: pdfFile.id } : null}
+          onSelect={(t) => (t.kind === 'pdf' ? setSelectedPdfId(t.id) : onOpenView(t))}
+        />
+      ) : (
+        <PdfSwitcher files={pdfFiles} selectedId={pdfFile?.id ?? null} onSelect={setSelectedPdfId} />
+      )}
       {markUpButton}
       {pageNav}
       {phoneDone}
@@ -1423,7 +1443,7 @@ export function PdfViewer({
   );
 }
 
-function ToolButton({
+export function ToolButton({
   active,
   onClick,
   children,
@@ -1773,7 +1793,7 @@ const DOC_KINDS: FileKind[] = ['pdf', 'lyrics', 'score'];
  * hides the player bar; with nothing loaded it lists this piece's recordings
  * so one can be started without leaving the score.
  */
-function ListenButton({ piece, playerHidden, onPlayerHiddenChange }: {
+export function ListenButton({ piece, playerHidden, onPlayerHiddenChange }: {
   piece: Piece;
   playerHidden: boolean;
   onPlayerHiddenChange: (hidden: boolean) => void;

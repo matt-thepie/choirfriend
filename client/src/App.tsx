@@ -13,7 +13,9 @@ import { PlayerProvider, usePlayer } from '@/player/PlayerContext.tsx';
 import { usePieces } from '@/hooks/usePieces.ts';
 import { useSections, saveMySection, saveMyPartLine } from '@/hooks/useSections.ts';
 import { useSetLists } from '@/hooks/useSetLists.ts';
-import { fetchDefaultSheet, useSetListFlow } from '@/hooks/useSetListFlow.ts';
+import { fetchDefaultView, setPreferFlowing, useSetListFlow } from '@/hooks/useSetListFlow.ts';
+import { ScoreViewer } from '@/components/ScoreViewer/index.ts';
+import type { ViewTarget } from '@/components/ViewSwitcher.tsx';
 import { Icon } from '@/components/ui/button.tsx';
 import { useOfflineScores } from '@/hooks/useOfflineScores.ts';
 import { useInstallPrompt } from '@/hooks/useInstallPrompt.ts';
@@ -104,9 +106,10 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
   const [route, setRouteState] = useState<Route>(() => parseRoute(window.location));
   const routeRef = useRef(route);
   routeRef.current = route;
-  const { pieceId, viewerFileId, setListId, tab, readMode } = route;
+  const { pieceId, viewerFileId, setListId, tab, readMode, flow } = route;
   function navigate(patch: Partial<Route>, replace = false): void {
     const next: Route = { ...routeRef.current, ...patch };
+    if (next.viewerFileId === null) next.flow = false;
     const url = formatRoute(next);
     if (url !== formatRoute(routeRef.current)) window.history[replace ? 'replaceState' : 'pushState']({}, '', url);
     routeRef.current = next;
@@ -121,7 +124,13 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
   }, []);
   const setSetListId = (id: number | null) => navigate({ setListId: id });
   // Opening a score goes straight into read mode: reading is the common case.
-  const setViewerFileId = (id: number | null) => navigate({ viewerFileId: id, readMode: id !== null });
+  const setViewerFileId = (id: number | null) => navigate({ viewerFileId: id, flow: false, readMode: id !== null });
+  const openFlowing = (id: number) => navigate({ viewerFileId: id, flow: true, readMode: true });
+  // Switching between a song's PDFs and flowing scores from inside the viewer.
+  function openView(target: ViewTarget): void {
+    setPreferFlowing(target.kind === 'flow');
+    navigate({ viewerFileId: target.id, flow: target.kind === 'flow' });
+  }
   const setReadMode = (on: boolean) => navigate({ readMode: on });
   // Read mode keeps the player bar if something is loaded; the viewer's
   // headphones button tucks it away or brings it back.
@@ -190,9 +199,9 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
   // Opened from a set list, the viewer can turn straight into the next song.
   const setListFlow = useSetListFlow(viewerFileId !== null ? setListId : null, pieceId);
   async function openSongInViewer(id: number): Promise<void> {
-    const sheet = await fetchDefaultSheet(id).catch(() => null);
+    const view = await fetchDefaultView(id).catch(() => null);
     // A song with no sheet music opens on its song page instead.
-    navigate({ pieceId: id, viewerFileId: sheet?.id ?? null, readMode: sheet ? readMode : false });
+    navigate({ pieceId: id, viewerFileId: view?.fileId ?? null, flow: view?.flow ?? false, readMode: view ? readMode : false });
   }
 
   // When the player is playing the set list this score came from, the two move
@@ -509,6 +518,7 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
                 onGoRepertoire={() => navigate({ pieceId: null, viewerFileId: null, readMode: false, tab: 'songs', setListId: null })}
                 onGoSetList={(id) => navigate({ pieceId: null, viewerFileId: null, readMode: false, tab: 'setlists', setListId: id })}
                 onOpenViewer={setViewerFileId}
+                onOpenFlowing={openFlowing}
                 onPieceMutated={bumpPieceRefresh}
               />
             </div>
@@ -517,6 +527,26 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
         ) : (
           <>
             <div className="flex-1 min-h-0">
+              {flow ? (
+              <ScoreViewer
+                key={`flow-${viewerFileId!}`}
+                pieceId={pieceId!}
+                fileId={viewerFileId!}
+                refreshTick={pieceRefreshTick}
+                readMode={readMode}
+                onExitReadMode={() => setReadMode(false)}
+                onEnterReadMode={() => setReadMode(true)}
+                mySectionId={mySectionId}
+                partLineOn={partLine}
+                onPartLineChange={setPartLine}
+                playerHidden={readPlayerHidden}
+                onPlayerHiddenChange={setReadPlayerHidden}
+                setListFlow={setListFlow}
+                onOpenSong={(id) => void openSongInViewer(id)}
+                onOpenView={openView}
+                canManage={me.canSeeScores === true}
+              />
+              ) : (
               <PdfViewer
                 key={viewerFileId!}
                 pieceId={pieceId!}
@@ -534,7 +564,9 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
                 onPlayerHiddenChange={setReadPlayerHidden}
                 setListFlow={setListFlow}
                 onOpenSong={(id) => void openSongInViewer(id)}
+                onOpenView={openView}
               />
+              )}
             </div>
             {pianoOpen && <Piano onClose={() => setPianoOpen(false)} />}
           </>

@@ -4,6 +4,7 @@ A self-hosted, open-source web app for choirs. It does what Choirmate does — s
 
 ## What it does
 
+- Flowing scores: upload a MuseScore or MusicXML file and members read it engraved live to fit their screen, with their part shaded and playback that follows the dynamics, articulation and tempo with their line brought forward.
 - PDF viewer for sheet music that opens in a distraction-free read mode, with private marks and shared marks that can be limited to chosen voice parts.
 - Repeat / coda / D.S. markers you can drop on the score and tap to follow.
 - "Shade my part": a pale band behind the member's own stave, guessed from the stave labels.
@@ -23,6 +24,7 @@ A self-hosted, open-source web app for choirs. It does what Choirmate does — s
 | Storage | Backblaze B2 behind a custom domain | Cheap, direct browser uploads via presigned URLs |
 | Auth | Pluggable providers | sgmc-identity ships built in; generic OIDC is stubbed for other deployments |
 | PDF rendering | PDF.js | Mature, free |
+| Flowing scores | MuseScore 4 (server, headless) → MusicXML → [Verovio](https://www.verovio.org) (browser, WebAssembly) | MuseScore is the only reliable reader of its own format; Verovio engraves to any width. Playback adds FluidR3 GM "Voice Oohs" and "Trumpet" (Frank Wen, MIT licence) from `client/public/sounds/` to the Salamander piano |
 | Audio | Web Audio API | Tempo slowdown without pitch shift; the piano plays [Salamander Grand Piano](https://archive.org/details/SalamanderGrandPianoV3) samples (Alexander Holm, CC BY 3.0, mp3 set from [tonejs/audio](https://github.com/Tonejs/audio)), self-hosted in `client/public/piano/` |
 
 The original app was scaffolded against the SGMC choir's existing identity service. The auth layer is designed so other choirs can plug in Google, Microsoft, Keycloak, magic links, etc. without touching choirfriend itself.
@@ -151,6 +153,8 @@ cd ../client && npm ci && npm run build
 pm2 restart choirfriend --update-env
 ```
 
+Flowing scores need MuseScore 4 on the server. Set `MSCORE_COMMAND` to a command that takes `-o out.musicxml in.mscz`; on the SGMC VPS that's `/home/matt/opt/musescore/run.sh`, a wrapper round the AppImage (extracted, no root) that sets `MU_QT_QPA_PLATFORM=offscreen` (MuseScore ignores `QT_QPA_PLATFORM` alone), caps memory and times out. Conversions run one at a time on upload and at start-up (~0.6 s, ~160 MB each). The server's MuseScore must be at least as new as the one scores were saved with, or conversion fails with a message saying so; after updating it, restart choirfriend and failed scores are retried.
+
 The server has no build step and runs under Node 24 via pm2. nginx serves `client/dist/` statically, proxies `/api` and `/auth` to Fastify, and handles TLS. Schema changes are applied by `server/src/db/index.ts` on start-up, so there is no separate migration step. The client and server deploy together, so a change that adds a field on both sides is safe to push in one go.
 
 Home-screen (PWA) installs pick up a new build only after the app is fully closed and reopened; a service-worker change needs that twice.
@@ -199,6 +203,12 @@ Built:
   - Markers: tapping an end-repeat goes back to the nearest start-repeat (or the top), a 1st-time bar goes back the same way, and D.S. / D.C. / To Coda go to their targets. Start-repeat, 2nd-time bar, segno, coda and fine are landing points only. Tappable markers show a →.
   - **Shade my part**: `lib/pageLayout.ts` finds five-line staves and joins them into systems; `lib/partLine.ts` picks the member's stave from the printed labels and carries it forward by stave position. **Adjust** lets a member tap the right stave per system (saved per member per file); the on/off switch is per member.
   - Safe-area padding for iPad / iPhone home-screen installs.
+- Flowing scores (`server/src/scores/`, `client/src/lib/flowing/`, `components/ScoreViewer/`):
+  - Each uploaded score (kind `score`) is converted on the server to MusicXML and tidied: duplicate lyrics on one note are merged, and parts with no notes at all (e.g. an unfilled rehearsal-piano stave) are dropped. The `.mscz` stays restricted to `SCORE_ROLES`; the flowing view is for every member. Opened from the song page's **Flowing score** row, or **View** in either viewer (`/songs/:id/flow/:fileId`); a set list keeps to whichever kind the member last chose.
+  - Engraved in the browser by Verovio (loaded on first use, cached by the service worker in its own cache). On screens 640px and wider the line breaks are balanced so no line is left with a bar or two, and every line, the last too, is justified. Pages mode shows screenfuls of whole lines.
+  - Same reading controls as the PDF viewer (read mode, Scroll / Pages, Shade my part, Listen, Jump to bar or rehearsal mark, set-list flow, wake lock), plus music size, which parts to show, and playback.
+  - Playback follows dynamics, hairpins and cresc./dim., accents, staccato/tenuto, breath marks, fermatas, tempo marks and rit./a tempo; ties sound once; repeats are played out. **Mix** brings one section's line forward with the others quieter behind it (or that line alone), in piano, oohs or trumpet. Tempo is adjustable and remembered per score; tap a bar to play from it.
+  - Parts are matched to sections by name (`lib/flowing/parts.ts`): Unison/Melody/Voice is everyone; Tenors or Tenor 1 & 2 is both tenor sections; Bass 1 is the baritones; in a two-part score Basses is baritones and basses. Two sections on one stave split it by voice, upper voice to the higher section.
 - Set lists: picture tiles, create / rename / drag reorder / archive / copy / delete / Order, one list pinned as "this week"; in-list search (title, composer, arranger); **Practice list** panel ("Viewing content for" + section) queues one track per song; the virtual **All songs** list.
   - Opening a score from a set list makes it flow: turning past the last page opens the next song's default sheet (prefetched in the background if under 8 MB), with **Next: title** / previous-song buttons and an end-of-list card in Scroll view.
   - When the player is playing that same set list, the two stay linked: the player moving on opens the next score, and turning the score into the next song cues its track paused.
@@ -206,13 +216,14 @@ Built:
 - Design system: deep teal field (the logo's palette), white cards, Inter, Material Symbols, 16px base, 44px tap targets, dark mode via `prefers-color-scheme`; toggle buttons show "on" by fill, not by changing their label; installable PWA (manifest with screenshots, in-app Install button and iOS instructions).
 - Piano widget (sampled grand piano, 2–5 octaves depending on screen width); bulk importer (Claude reads title/composer off PDFs); ChoirMate migration importer and backfill tools.
 - Admin gate on all write routes (members of any `ADMIN_ROLES` group).
-- URLs for every screen (`/`, `/repertoire`, `/setlists/:id`, `/songs/:id`, `/songs/:id/view/:fileId`) so the back button, reloads and shared links work.
+- URLs for every screen (`/`, `/repertoire`, `/setlists/:id`, `/songs/:id`, `/songs/:id/view/:fileId`, `/songs/:id/flow/:fileId`) so the back button, reloads and shared links work.
 - Optional features: the confidence rating can be hidden with `FEATURE_CONFIDENCE=false` (SGMC runs with it off).
 
 Known limitations:
 
 - Uploads classify lyrics by filename only (`lyric|crib|words`), so a lyric sheet uploaded under another name is filed as sheet music. On 27 Oct 2026, 30 sheet-music files with no staves were moved to Lyrics on the live database (backup: `server/data/choirfriend-before-lyrics-move-20261027.db`).
 - Shade my part needs a text layer for labels: on scanned PDFs the first tap in Adjust sets the line. Photo scans of curved pages (e.g. the second Carol of the Bells) defeat the stave finder.
+- Flowing scores have no marks yet (pen, highlighter, markers need anchoring to bars rather than page positions); the PDF is a tap away in **View**. A score with no tempo marking plays at ♩ = 120 until someone sets it.
 - While marking up, one finger draws, so Scroll view needs **Done** to scroll. MD / section leaders cannot see other parts' part-only marks unless they drew them.
 
 Not built (from the ChoirMate brief):

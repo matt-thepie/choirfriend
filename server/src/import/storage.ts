@@ -75,6 +75,13 @@ export async function storeImportedFile(opts: {
   return { storage: 'local', storageKey: key };
 }
 
+/** Read a locally-stored file's bytes (key as stored in the files table). */
+export async function readLocalFile(storageKey: string): Promise<Buffer> {
+  const full = path.resolve(CLIENT_PUBLIC_DIR, storageKey.replace(/^\/+/, ''));
+  if (!full.startsWith(CLIENT_PUBLIC_DIR + path.sep)) throw new Error('local key outside client/public');
+  return fsp.readFile(full);
+}
+
 /** Best-effort removal of a locally-stored (importer) file from client/public.
  *  Only touches keys under `imported/` so it can never delete a repo asset. */
 export async function deleteLocalFile(storageKey: string): Promise<void> {

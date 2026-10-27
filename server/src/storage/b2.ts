@@ -11,7 +11,7 @@
  * reject virtual-hosted-style).
  */
 
-import { DeleteObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import type { Buffer } from 'node:buffer';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { getConfig } from '../config.ts';
@@ -105,6 +105,15 @@ export async function putObject(opts: {
       ContentType: opts.contentType,
     }),
   );
+}
+
+/** Download an object's bytes from the server side (e.g. to convert a score). */
+export async function getObject(unprefixedKey: string): Promise<Uint8Array> {
+  const { b2 } = getConfig();
+  const client = makeClient();
+  const res = await client.send(new GetObjectCommand({ Bucket: b2.bucket, Key: prefixedKey(unprefixedKey) }));
+  if (!res.Body) throw new Error(`empty body for ${unprefixedKey}`);
+  return res.Body.transformToByteArray();
 }
 
 /**

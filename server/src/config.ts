@@ -46,6 +46,9 @@ export interface Config {
   scoreRoles: readonly string[];
   /** Optional member-facing features a choir may not want. */
   features: { confidence: boolean };
+  /** Command that runs MuseScore's converter (`<cmd> -o out.musicxml in.mscz`)
+   *  for flowing scores. Empty = look for a standard install. */
+  mscoreCommand: string;
   b2: {
     keyId: string;
     applicationKey: string;
@@ -72,6 +75,7 @@ export function getConfig(): Config {
     adminRoles: parseRoleList(optional('ADMIN_ROLES', 'committee,trustee,admin')),
     scoreRoles: parseRoleList(optional('SCORE_ROLES', 'md,musical-director,music-director,section-admin,section-leader')),
     features: { confidence: optional('FEATURE_CONFIDENCE', 'true') !== 'false' },
+    mscoreCommand: optional('MSCORE_COMMAND', ''),
     b2: {
       keyId: optional('B2_KEY_ID', ''),
       applicationKey: optional('B2_APPLICATION_KEY', ''),

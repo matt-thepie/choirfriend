@@ -78,6 +78,18 @@ export interface MemberPieceState {
   notes: string | null;
 }
 
+/** A flowing score: MusicXML made on the server from an editable score,
+ *  engraved in the browser to fit the screen. Members get ready ones only;
+ *  score managers also see conversions in progress and failures. */
+export interface FlowingScore {
+  /** The editable score it was made from. */
+  fileId: number;
+  title: string;
+  status: 'pending' | 'ready' | 'failed';
+  url: string | null;
+  error: string | null;
+}
+
 export interface Piece {
   id: number;
   title: string;
@@ -86,6 +98,7 @@ export interface Piece {
   notes: string | null;
   lyrics: string | null;
   files: PieceFile[];
+  flowing?: FlowingScore[];
   remarks: Remark[];
   links: PieceLink[];
   /** The signed-in member's own rating and private notes. */

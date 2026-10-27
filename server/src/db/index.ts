@@ -339,3 +339,22 @@ addColumnIfMissing('pieces', 'lyrics TEXT');
 // Member uploads are private to the uploader until they share them
 // (ChoirMate's Share / Unshare). Everything that existed before is shared.
 addColumnIfMissing('files', "visibility TEXT NOT NULL DEFAULT 'shared' CHECK(visibility IN ('private', 'shared'))");
+
+// Flowing scores: each editable score (kind 'score') is converted to cleaned
+// MusicXML on the server, which the browser engraves to fit the screen. One
+// row per score file; `source_key` is the score's storage key at conversion
+// time, so a replaced score is noticed and converted again.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS score_renditions (
+    file_id INTEGER PRIMARY KEY REFERENCES files(id) ON DELETE CASCADE,
+    status TEXT NOT NULL CHECK(status IN ('pending', 'ready', 'failed')),
+    source_key TEXT NOT NULL,
+    storage TEXT CHECK(storage IN ('b2', 'local')),
+    storage_key TEXT,
+    size_bytes INTEGER,
+    error TEXT,
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+  )
+`);
+// Added after the table first shipped to dev databases.
+addColumnIfMissing('score_renditions', 'size_bytes INTEGER');

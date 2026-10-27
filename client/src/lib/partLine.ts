@@ -19,7 +19,7 @@ export type PartLineOverrides = Record<string, number>;
 
 export const overrideKey = (page: number, system: number): string => `${page}:${system}`;
 
-type Family = 'soprano' | 'alto' | 'tenor' | 'baritone' | 'bass';
+export type Family = 'soprano' | 'alto' | 'tenor' | 'baritone' | 'bass';
 
 const FAMILY_WORDS: Record<Family, string[]> = {
   soprano: ['soprano', 'sopranos', 'sop', 's'],
@@ -29,7 +29,10 @@ const FAMILY_WORDS: Record<Family, string[]> = {
   bass: ['bass', 'basses', 'bs', 'b'],
 };
 
-interface Part {
+/** Staves everyone sings from: "Unison", "Melody", "Voice", "Tutti". */
+const UNISON_WORDS = ['unison', 'unis', 'melody', 'voice', 'voices', 'tutti', 'all', 'choir', 'chorus', 'men', 'singers'];
+
+export interface Part {
   family: Family;
   /** 1 or 2 for divided parts; null when the part isn't numbered. */
   num: number | null;
@@ -72,6 +75,8 @@ export function labelScore(label: string, part: Part): number {
   const families = (Object.entries(FAMILY_WORDS) as Array<[Family, string[]]>)
     .filter(([, names]) => words.some((w) => names.includes(w)))
     .map(([f]) => f);
+  // A unison stave is everyone's line, shared with every other part.
+  if (!families.length) return words.some((w) => UNISON_WORDS.includes(w)) ? 2 : 0;
   const nums = words.filter((w) => w === '1' || w === '2').map(Number);
 
   let best = 0;

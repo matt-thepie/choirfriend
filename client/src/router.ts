@@ -17,15 +17,17 @@ export interface Route {
   setListId: number | null;
   pieceId: number | null;
   viewerFileId: number | null;
+  /** viewerFileId is an editable score shown as a flowing score, not a PDF. */
+  flow: boolean;
   readMode: boolean;
 }
 
-export const HOME_ROUTE: Route = { tab: 'setlists', setListId: null, pieceId: null, viewerFileId: null, readMode: false };
+export const HOME_ROUTE: Route = { tab: 'setlists', setListId: null, pieceId: null, viewerFileId: null, flow: false, readMode: false };
 
 export function formatRoute(r: Route): string {
   if (r.pieceId !== null) {
     let path = `/songs/${r.pieceId}`;
-    if (r.viewerFileId !== null) path += `/view/${r.viewerFileId}`;
+    if (r.viewerFileId !== null) path += `/${r.flow ? 'flow' : 'view'}/${r.viewerFileId}`;
     const q = new URLSearchParams();
     if (r.tab === 'setlists' && r.setListId !== null) q.set('list', r.setListId === 0 ? 'all' : String(r.setListId));
     if (r.viewerFileId !== null && r.readMode) q.set('read', '1');
@@ -58,9 +60,11 @@ export function parseRoute(loc: { pathname: string; search: string }): Route {
     if (!Number.isInteger(pieceId) || pieceId <= 0) return HOME_ROUTE;
     const listId = parseListParam(q.get('list'));
     const base: Route = listId === null ? { ...HOME_ROUTE, tab: 'songs', pieceId } : { ...HOME_ROUTE, setListId: listId, pieceId };
-    if (parts.length === 4 && parts[2] === 'view') {
+    if (parts.length === 4 && (parts[2] === 'view' || parts[2] === 'flow')) {
       const fileId = Number(parts[3]);
-      if (Number.isInteger(fileId) && fileId > 0) return { ...base, viewerFileId: fileId, readMode: q.get('read') === '1' };
+      if (Number.isInteger(fileId) && fileId > 0) {
+        return { ...base, viewerFileId: fileId, flow: parts[2] === 'flow', readMode: q.get('read') === '1' };
+      }
     }
     return base;
   }
