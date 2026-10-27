@@ -211,7 +211,8 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
               className="ml-auto shrink-0 h-10 px-3 rounded-md border border-border bg-background text-foreground text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground"
               aria-pressed={editing}
             >
-              {editing ? 'Switch to view mode' : 'Switch to edit mode'}
+              <span className="sm:hidden">{editing ? 'View mode' : 'Edit mode'}</span>
+              <span className="hidden sm:inline">{editing ? 'Switch to view mode' : 'Switch to edit mode'}</span>
             </button>
           )}
           <div className={`${isAdmin ? 'ml-2' : 'ml-auto'} relative shrink-0`}>

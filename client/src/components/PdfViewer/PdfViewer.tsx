@@ -18,6 +18,7 @@ import { useSections, type Section } from '@/hooks/useSections.ts';
 import { replaceFile } from '@/hooks/useUploadFile.ts';
 import { useAnnotations, type NewAnnotationInput } from '@/hooks/useAnnotations.ts';
 import { PdfPage } from './PdfPage.tsx';
+import { analysePage, type Box, type PageLayout } from '@/lib/pageLayout.ts';
 import { UploadButton } from './UploadButton.tsx';
 import { MarkerGlyph } from './markerIcons.tsx';
 
@@ -60,6 +61,62 @@ const KIND_TAKES_LABEL: Record<MarkerKind, boolean> = {
 };
 
 type NavMode = 'scroll' | 'page';
+
+/** How much of the score read mode shows at once. */
+type FitMode = 'page' | 'half' | '1' | '2' | '3';
+const FIT_OPTIONS: Array<{ value: FitMode; label: string; title: string }> = [
+  { value: 'page', label: 'Page', title: 'A whole page, margins cropped' },
+  { value: 'half', label: '½', title: 'Half a page at a time' },
+  { value: '1', label: '1', title: 'One system (line of music) at a time' },
+  { value: '2', label: '2', title: 'Two systems at a time' },
+  { value: '3', label: '3', title: 'Three systems at a time' },
+];
+const FIT_KEY = 'choirfriend.readFit';
+function loadFit(): FitMode {
+  try {
+    const v = localStorage.getItem(FIT_KEY);
+    if (v && FIT_OPTIONS.some((o) => o.value === v)) return v as FitMode;
+  } catch {
+    // storage unavailable
+  }
+  return 'page';
+}
+
+interface Chunk {
+  page: number;
+  clip: Box | null;
+}
+
+/** Split each page into what read mode shows per step. Pages not yet
+ *  analysed show whole and uncropped. */
+function buildChunks(pageCount: number, layouts: Map<number, PageLayout>, fit: FitMode): Chunk[] {
+  const out: Chunk[] = [];
+  for (let page = 1; page <= pageCount; page++) {
+    const L = layouts.get(page);
+    if (!L) {
+      out.push({ page, clip: null });
+      continue;
+    }
+    const { content: c, systems } = L;
+    const band = (y0: number, y1: number): Chunk => ({ page, clip: { x0: c.x0, x1: c.x1, y0, y1 } });
+    if (fit === 'page' || (systems.length <= 1 && fit !== 'half')) {
+      out.push(band(c.y0, c.y1));
+      continue;
+    }
+    if (systems.length === 0) {
+      // No staves found (lyric sheet, odd scan): halve the page.
+      const mid = (c.y0 + c.y1) / 2;
+      out.push(band(c.y0, mid), band(mid, c.y1));
+      continue;
+    }
+    const per = fit === 'half' ? Math.ceil(systems.length / 2) : Number(fit);
+    for (let i = 0; i < systems.length; i += per) {
+      const group = systems.slice(i, i + per);
+      out.push(band(group[0]!.y0, group[group.length - 1]!.y1));
+    }
+  }
+  return out;
+}
 
 /** Phones are typically narrow; users will be zoomed in so scroll is the
  *  sensible default. Tablets and desktops default to one-page-at-a-time. */
@@ -124,6 +181,19 @@ export function PdfViewer({
   const [filesOpen, setFilesOpen] = useState(false);
   const [navMode, setNavMode] = useState<NavMode>(pickInitialNavMode);
   const [currentPage, setCurrentPage] = useState(1);
+  // Read mode: what to show per step, and the top of the current step on
+  // its page (a fraction), so re-analysis never loses your place.
+  const [fit, setFitState] = useState<FitMode>(loadFit);
+  const setFit = (f: FitMode): void => {
+    setFitState(f);
+    try {
+      localStorage.setItem(FIT_KEY, f);
+    } catch {
+      // storage unavailable
+    }
+  };
+  const [chunkY, setChunkY] = useState(0);
+  const [layouts, setLayouts] = useState<Map<number, PageLayout>>(new Map());
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -198,6 +268,25 @@ export function PdfViewer({
     };
   }, [pdfFile]);
 
+  // Read mode crops margins and can step by system, so analyse each page
+  // once (cached per file) as soon as the score is open in read mode.
+  useEffect(() => {
+    setLayouts(new Map());
+    if (!pdf || !readMode || !pdfFile) return;
+    const fileId = pdfFile.id;
+    let cancelled = false;
+    (async () => {
+      for (let p = 1; p <= pdf.numPages; p++) {
+        const L = await analysePage(pdf, p, `${fileId}`);
+        if (cancelled) return;
+        setLayouts((m) => new Map(m).set(p, L));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [pdf, readMode, pdfFile?.id]);
+
   // Page-turn always re-renders one page; in edit mode we always scroll.
   const effectiveNavMode: NavMode = readMode ? navMode : 'scroll';
 
@@ -219,7 +308,42 @@ export function PdfViewer({
     return Math.max(0.3, Math.min(1.25, contentWidth / intrinsicPageSize.w));
   }, [contentWidth, intrinsicPageSize]);
 
-  const effectiveScale = effectiveNavMode === 'page' ? fitScale : scrollBaseScale * zoom;
+  const pageCountForChunks = pdf?.numPages ?? 0;
+  const chunked = readMode && effectiveNavMode === 'page';
+  const chunks = useMemo(
+    () => (chunked ? buildChunks(pageCountForChunks, layouts, fit) : []),
+    [chunked, pageCountForChunks, layouts, fit],
+  );
+  const chunkIndex = useMemo(() => {
+    let idx = -1;
+    chunks.forEach((c, i) => {
+      if (c.page !== currentPage) return;
+      if (idx === -1 || (c.clip?.y0 ?? 0) <= chunkY + 0.001) idx = i;
+    });
+    return Math.max(0, idx);
+  }, [chunks, currentPage, chunkY]);
+  const chunk = chunked ? chunks[chunkIndex] ?? null : null;
+
+  // Fill the stage with the current step: crop to it, then scale to fit.
+  const chunkScale = useMemo(() => {
+    if (!chunk?.clip || !intrinsicPageSize || containerSize.w === 0) return null;
+    const margin = 8;
+    const w = (containerSize.w - margin * 2) / ((chunk.clip.x1 - chunk.clip.x0) * intrinsicPageSize.w);
+    const h = (containerSize.h - margin * 2) / ((chunk.clip.y1 - chunk.clip.y0) * intrinsicPageSize.h);
+    return Math.max(0.3, Math.min(8, w, h));
+  }, [chunk, intrinsicPageSize, containerSize]);
+
+  // Read-mode scroll: crop each page's margins and fit the music to the width.
+  const readScrollScale = useCallback(
+    (page: number): number => {
+      const L = layouts.get(page);
+      if (!L || !intrinsicPageSize || contentWidth === 0) return scrollBaseScale * zoom;
+      return Math.max(0.3, Math.min(1.8, contentWidth / ((L.content.x1 - L.content.x0) * intrinsicPageSize.w))) * zoom;
+    },
+    [layouts, intrinsicPageSize, contentWidth, scrollBaseScale, zoom],
+  );
+
+  const effectiveScale = effectiveNavMode === 'page' ? chunkScale ?? fitScale : scrollBaseScale * zoom;
 
   // Switching to a different PDF in the piece starts at its first page.
   useEffect(() => {
@@ -232,12 +356,21 @@ export function PdfViewer({
     if (pageCount > 0 && currentPage > pageCount) setCurrentPage(1);
   }, [pageCount, currentPage]);
 
-  const nextPage = useCallback(() => {
-    setCurrentPage((p) => Math.min(pageCount, p + 1));
-  }, [pageCount]);
-  const prevPage = useCallback(() => {
-    setCurrentPage((p) => Math.max(1, p - 1));
+  const goToChunk = useCallback((c: Chunk | undefined) => {
+    if (!c) return;
+    setCurrentPage(c.page);
+    setChunkY(c.clip?.y0 ?? 0);
   }, []);
+  const nextPage = useCallback(() => {
+    if (chunked) return goToChunk(chunks[chunkIndex + 1]);
+    setCurrentPage((p) => Math.min(pageCount, p + 1));
+  }, [pageCount, chunked, chunks, chunkIndex, goToChunk]);
+  const prevPage = useCallback(() => {
+    if (chunked) return goToChunk(chunks[chunkIndex - 1]);
+    setCurrentPage((p) => Math.max(1, p - 1));
+  }, [chunked, chunks, chunkIndex, goToChunk]);
+  const canPrev = chunked ? chunkIndex > 0 : currentPage > 1;
+  const canNext = chunked ? chunkIndex < chunks.length - 1 : currentPage < pageCount;
 
   // Arrow keys + PageUp/PageDown in page mode.
   useEffect(() => {
@@ -382,6 +515,8 @@ export function PdfViewer({
     setJumpOpen(false);
     if (effectiveNavMode === 'page') {
       setCurrentPage(m.page);
+      // In a system view, land on the step that holds the marker.
+      setChunkY(m.position.y);
       // Let the page render, then land on the marker's spot.
       requestAnimationFrame(() => scrollMarkerIntoView(m));
     } else {
@@ -390,8 +525,10 @@ export function PdfViewer({
   }
 
   function jumpToTop(): void {
-    if (effectiveNavMode === 'page') setCurrentPage(1);
-    else scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'auto' });
+    if (effectiveNavMode === 'page') {
+      setCurrentPage(1);
+      setChunkY(0);
+    } else scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'auto' });
   }
 
   /** "Follow" action for a navigation marker: where a singer goes when they hit
@@ -560,11 +697,24 @@ export function PdfViewer({
         <ToolButton active={navMode === 'page'} onClick={() => setNavMode('page')}>Pages</ToolButton>
       </div>
 
+      {readMode && effectiveNavMode === 'page' && (
+        <div className="flex items-center gap-1">
+          <span className="text-sm text-muted-foreground">Show</span>
+          <div className="flex items-center rounded-md border border-border overflow-hidden" role="group" aria-label="How much to show at once">
+            {FIT_OPTIONS.map((o) => (
+              <ToolButton key={o.value} active={fit === o.value} onClick={() => setFit(o.value)} title={o.title}>
+                {o.label}
+              </ToolButton>
+            ))}
+          </div>
+        </div>
+      )}
+
       {effectiveNavMode === 'page' && pageCount > 0 && (
         <>
-          <Button size="sm" variant="outline" onClick={prevPage} disabled={currentPage <= 1} aria-label="Previous page">◀</Button>
+          <Button size="sm" variant="outline" onClick={prevPage} disabled={!canPrev} aria-label="Previous">◀</Button>
           <span className="text-xs tabular-nums w-14 text-center">{currentPage} / {pageCount}</span>
-          <Button size="sm" variant="outline" onClick={nextPage} disabled={currentPage >= pageCount} aria-label="Next page">▶</Button>
+          <Button size="sm" variant="outline" onClick={nextPage} disabled={!canNext} aria-label="Next">▶</Button>
         </>
       )}
 
@@ -682,7 +832,13 @@ export function PdfViewer({
             ref={contentRef}
             className={cn(
               'flex flex-col items-center gap-6',
-              effectiveNavMode === 'page' ? 'py-4 px-4 justify-center min-h-full' : 'py-4 pl-10 pr-2 sm:py-6 sm:pl-12 sm:pr-6',
+              readMode
+                ? effectiveNavMode === 'page'
+                  ? 'p-2 justify-center min-h-full'
+                  : 'py-2 px-1 gap-2 sm:px-4'
+                : effectiveNavMode === 'page'
+                  ? 'py-4 px-4 justify-center min-h-full'
+                  : 'py-4 pl-10 pr-2 sm:py-6 sm:pl-12 sm:pr-6',
             )}
           >
             {pieceLoading && <p className="text-sm text-muted-foreground">Loading piece…</p>}
@@ -696,6 +852,8 @@ export function PdfViewer({
                 pdf={pdf}
                 pageNumber={currentPage}
                 scale={effectiveScale}
+                clip={chunk?.clip ?? null}
+                bare={readMode}
                 annotations={visibleAnnotationsByPage.get(currentPage) ?? []}
                 drawTarget={tool === 'pan' ? null : drawTarget}
                 tool={tool}
@@ -716,7 +874,9 @@ export function PdfViewer({
                   key={pageNumber}
                   pdf={pdf}
                   pageNumber={pageNumber}
-                  scale={effectiveScale}
+                  scale={readMode ? readScrollScale(pageNumber) : effectiveScale}
+                  clip={readMode ? layouts.get(pageNumber)?.content ?? null : null}
+                  bare={readMode}
                   annotations={visibleAnnotationsByPage.get(pageNumber) ?? []}
                   drawTarget={tool === 'pan' ? null : drawTarget}
                   tool={tool}
@@ -742,17 +902,17 @@ export function PdfViewer({
               type="button"
               aria-label="Previous page"
               onClick={prevPage}
-              disabled={currentPage <= 1}
+              disabled={!canPrev}
               className="absolute left-0 top-0 bottom-0 w-16 z-10 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-black/5 focus-visible:bg-black/10 transition-colors"
-              style={{ cursor: currentPage > 1 ? 'w-resize' : 'not-allowed' }}
+              style={{ cursor: canPrev ? 'w-resize' : 'not-allowed' }}
             />
             <button
               type="button"
               aria-label="Next page"
               onClick={nextPage}
-              disabled={currentPage >= pageCount}
+              disabled={!canNext}
               className="absolute right-0 top-0 bottom-0 w-16 z-10 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-black/5 focus-visible:bg-black/10 transition-colors"
-              style={{ cursor: currentPage < pageCount ? 'e-resize' : 'not-allowed' }}
+              style={{ cursor: canNext ? 'e-resize' : 'not-allowed' }}
             />
           </>
         )}
@@ -765,15 +925,19 @@ function ToolButton({
   active,
   onClick,
   children,
+  title,
 }: {
   active: boolean;
   onClick: () => void;
   children: React.ReactNode;
+  title?: string;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      title={title}
+      aria-pressed={active}
       className={cn(
         'px-3 py-1.5 text-xs font-medium transition-colors flex items-center',
         active ? 'bg-primary text-primary-foreground' : 'bg-background hover:bg-accent text-foreground',

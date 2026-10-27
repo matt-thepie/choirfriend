@@ -215,9 +215,9 @@ export function SongScreen({
               editing={false}
               onMutated={mutated}
               menu={
-                <label className="text-sm text-muted-foreground flex items-center gap-1.5 cursor-pointer select-none">
-                  <input type="checkbox" checked={onlyMine} onChange={(e) => setOnlyMine(e.target.checked)} />
-                  Show only audio files added by me
+                <label className="text-sm text-muted-foreground flex items-center gap-1.5 cursor-pointer select-none min-w-0">
+                  <input type="checkbox" className="shrink-0" checked={onlyMine} onChange={(e) => setOnlyMine(e.target.checked)} />
+                  <span className="min-w-0">Show only audio files added by me</span>
                 </label>
               }
               empty={section ? `No audio for ${lower(section.label)} yet.` : 'No audio yet.'}
@@ -359,7 +359,7 @@ function AudioBlock({
   return (
     <section className="space-y-2">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <h2 className="text-lg font-semibold flex-1 min-w-0">{heading}</h2>
+        <h2 className="text-lg font-semibold flex-1 min-w-[12rem]">{heading}</h2>
         {menu}
       </div>
       {files.length === 0 ? (
