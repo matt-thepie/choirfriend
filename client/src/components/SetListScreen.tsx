@@ -87,7 +87,7 @@ export function SetListScreen({
       const f = pickTrackForSection(song.audio, sectionId);
       return f ? [toQueueTrack(song, f)] : [];
     });
-    return { name: secLabel ? `${list.name} · ${secLabel}` : list.name, tracks };
+    return { name: secLabel ? `${list.name} · ${secLabel}` : list.name, tracks, setListId: list.id };
   }, [list, sectionId, sections]);
 
   const songsWithoutAudio = list ? list.songs.filter((s) => !pickTrackForSection(s.audio, sectionId)).length : 0;

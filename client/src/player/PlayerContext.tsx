@@ -42,6 +42,9 @@ export interface Queue {
   /** Shown in the player, e.g. "Rehearsal · Tenor 2" or a song title. */
   name: string;
   tracks: QueueTrack[];
+  /** Set when the queue is a set list (0 = All songs), so a score opened
+   *  from the same list can follow the player and the player the score. */
+  setListId?: number;
 }
 
 export type RepeatMode = 'off' | 'all' | 'one';
@@ -70,6 +73,8 @@ export interface PlayerApi extends PlayerState {
   playQueue: (queue: Queue, startIndex?: number) => void;
   /** Jump to a track in the current queue. */
   playAt: (index: number) => void;
+  /** Load a track in the current queue, paused at its start. */
+  cue: (index: number) => void;
   toggle: () => void;
   pause: () => void;
   next: () => void;
@@ -336,6 +341,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const playAt = useCallback((i: number): void => goTo(i, true), [goTo]);
+  const cue = useCallback((i: number): void => {
+    audioRef.current?.pause();
+    goTo(i, false);
+  }, [goTo]);
 
   const toggle = useCallback((): void => {
     const audio = audioRef.current;
@@ -396,6 +405,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       repeat,
       error,
       playQueue,
+      cue,
       playAt,
       toggle,
       pause,
@@ -412,7 +422,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }),
     [
       queue, index, current, isPlaying, currentTime, duration, rate, loop, repeat, error,
-      playQueue, playAt, toggle, pause, next, prev, skip, seek, setRate, setLoopStart, setLoopEnd, clearLoop, cycleRepeat, clear,
+      playQueue, playAt, cue, toggle, pause, next, prev, skip, seek, setRate, setLoopStart, setLoopEnd, clearLoop, cycleRepeat, clear,
     ],
   );
 

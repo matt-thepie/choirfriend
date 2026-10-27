@@ -45,6 +45,7 @@ export function Popover({ anchorRef, align = 'left', onClose, className, childre
     <>
       {onClose && <div className="fixed inset-0 z-40" onClick={onClose} aria-hidden />}
       <div
+        data-popover
         style={{ top: pos.top, left: pos.left, right: pos.right, maxWidth: 'calc(100vw - 1rem)' }}
         className={cn('fixed z-50 bg-background border border-border rounded-md shadow-lg', className)}
       >

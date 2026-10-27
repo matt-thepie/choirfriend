@@ -98,6 +98,26 @@ const DRAW_TARGET_KEY = 'choirfriend.drawTarget';
 const SHARE_WITH_KEY = 'choirfriend.shareWith';
 const MY_LINE_SEEN_KEY = 'choirfriend.myLineSeen';
 const NAV_MODE_KEY = 'choirfriend.navMode';
+/** How long the read-mode toolbar stays up untouched. */
+const TOOLS_HIDE_MS = 4000;
+/** Set once the read-mode toolbar has been shown this session; the first
+ *  score opened shows it so members learn a tap brings it back. */
+const TOOLS_SEEN_KEY = 'choirfriend.readToolsSeen';
+
+function sessionFlag(key: string): boolean {
+  try {
+    return sessionStorage.getItem(key) === '1';
+  } catch {
+    return false;
+  }
+}
+function setSessionFlag(key: string): void {
+  try {
+    sessionStorage.setItem(key, '1');
+  } catch {
+    /* private mode: the hint just shows again */
+  }
+}
 function loadShareWith(): number[] {
   try {
     const saved = JSON.parse(localStorage.getItem(SHARE_WITH_KEY) ?? '[]') as unknown;
@@ -207,8 +227,11 @@ export function PdfViewer({
     [piece],
   );
   const [selectedPdfId, setSelectedPdfId] = useState<number | null>(initialFileId);
-  /** Phones in read mode hide the toolbar; this shows it on demand. */
-  const [toolsOpen, setToolsOpen] = useState(false);
+  /** Read mode hides the toolbar until a tap on the score shows it. */
+  const [toolsOpen, setToolsOpen] = useState(() => readMode && !sessionFlag(TOOLS_SEEN_KEY));
+  useEffect(() => {
+    if (readMode && toolsOpen) setSessionFlag(TOOLS_SEEN_KEY);
+  }, [readMode, toolsOpen]);
   // Phones: the toolbars wrap and show only the everyday controls; the rest
   // sit behind a More button rather than in a sideways-scrolling strip.
   const [moreOpen, setMoreOpen] = useState(false);
@@ -321,22 +344,12 @@ export function PdfViewer({
     return () => ro.disconnect();
   }, []);
 
-  // Phone read mode floats its buttons over the top-right of the score, so the
-  // music starts below them; otherwise a mark at the top of a system can't be
-  // tapped. Wider screens show the toolbar instead and need no gap.
-  const [isPhone, setIsPhone] = useState(() => typeof window !== 'undefined' && !window.matchMedia('(min-width: 768px)').matches);
-  // Phone read mode: hiding the tools also ends marking up, so the pen can't
-  // stay live with no Done button on screen.
+  // Read mode: hiding the tools also ends marking up, so the pen can't stay
+  // live with no Done button on screen.
   useEffect(() => {
-    if (readMode && isPhone && !toolsOpen) setMarkUp(false);
-  }, [readMode, isPhone, toolsOpen]);
-  useEffect(() => {
-    const mq = window.matchMedia('(min-width: 768px)');
-    const onChange = () => setIsPhone(!mq.matches);
-    mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
-  }, []);
-  const topReserve = readMode && isPhone ? 48 : 0;
+    if (readMode && !toolsOpen) setMarkUp(false);
+  }, [readMode, toolsOpen]);
+
 
   // Width available to a page in scroll mode (the content box of the padded
   // column, so padding is already excluded). Drives fit-to-width.
@@ -433,6 +446,63 @@ export function PdfViewer({
   // --- My line -------------------------------------------------------------
   const [lineOverrides, setLineOverrides] = useState<PartLineOverrides>({});
   const [adjustingLine, setAdjustingLine] = useState(false);
+
+  // The read-mode toolbar hides itself after a few seconds untouched, unless
+  // it's in use: marking up, adjusting the shaded part, or a menu open.
+  const toolsTouchedRef = useRef(0);
+  const touchTools = useCallback(() => { toolsTouchedRef.current = Date.now(); }, []);
+  const toolsBusy = markUp || adjustingLine || jumpOpen || phoneJumpOpen || moreOpen;
+  useEffect(() => {
+    if (!readMode || !toolsOpen || toolsBusy) return;
+    touchTools();
+    const id = setInterval(() => {
+      if (document.querySelector('[data-popover]')) return touchTools();
+      if (Date.now() - toolsTouchedRef.current > TOOLS_HIDE_MS) setToolsOpen(false);
+    }, 500);
+    return () => clearInterval(id);
+  }, [readMode, toolsOpen, toolsBusy, touchTools]);
+
+  // A quick tap on the score (not a scroll, and not on a button such as an
+  // edge zone or a marker) shows or hides the read-mode toolbar.
+  const tapRef = useRef<{ x: number; y: number; t: number } | null>(null);
+  function onStagePointerDown(e: React.PointerEvent): void {
+    tapRef.current = readMode && !markUp && e.isPrimary ? { x: e.clientX, y: e.clientY, t: Date.now() } : null;
+  }
+  function onStagePointerUp(e: React.PointerEvent): void {
+    const s = tapRef.current;
+    tapRef.current = null;
+    if (!s || !e.isPrimary) return;
+    if (Math.hypot(e.clientX - s.x, e.clientY - s.y) > 10 || Date.now() - s.t > 400) return;
+    if ((e.target as Element).closest('button, a, input, select, textarea, [role="button"]')) return;
+    setToolsOpen((o) => !o);
+  }
+
+  // Keep the screen awake while reading, as a music stand would. The lock
+  // drops when the app is backgrounded, so take it again on return.
+  useEffect(() => {
+    if (!readMode || !('wakeLock' in navigator)) return;
+    let lock: WakeLockSentinel | null = null;
+    let cancelled = false;
+    const take = (): void => {
+      if (document.visibilityState !== 'visible') return;
+      navigator.wakeLock
+        .request('screen')
+        .then((l) => {
+          if (cancelled) void l.release();
+          else lock = l;
+        })
+        .catch(() => {
+          /* refused (low battery, unsupported): the screen just dims as usual */
+        });
+    };
+    take();
+    document.addEventListener('visibilitychange', take);
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', take);
+      void lock?.release();
+    };
+  }, [readMode]);
   useEffect(() => {
     setLineOverrides({});
     if (!partLineOn || !pdfFile) return;
@@ -532,9 +602,9 @@ export function PdfViewer({
     if (!intrinsicPageSize || containerSize.w === 0 || containerSize.h === 0) return 1.25;
     const margin = 32;
     const w = (containerSize.w - margin * 2) / intrinsicPageSize.w;
-    const h = (containerSize.h - topReserve - margin * 2) / intrinsicPageSize.h;
+    const h = (containerSize.h - margin * 2) / intrinsicPageSize.h;
     return Math.max(0.3, Math.min(4, Math.min(w, h)));
-  }, [containerSize, intrinsicPageSize, topReserve]);
+  }, [containerSize, intrinsicPageSize]);
 
   // Scroll-mode base: fit the page to the available width (phones), but no
   // larger than the old fixed 125% (desktops). Zoom multiplies this.
@@ -564,9 +634,9 @@ export function PdfViewer({
     if (!chunk?.clip || !intrinsicPageSize || containerSize.w === 0) return null;
     const margin = 8;
     const w = (containerSize.w - margin * 2) / ((chunk.clip.x1 - chunk.clip.x0) * intrinsicPageSize.w);
-    const h = (containerSize.h - topReserve - margin * 2) / ((chunk.clip.y1 - chunk.clip.y0) * intrinsicPageSize.h);
+    const h = (containerSize.h - margin * 2) / ((chunk.clip.y1 - chunk.clip.y0) * intrinsicPageSize.h);
     return Math.max(0.3, Math.min(8, w, h));
-  }, [chunk, intrinsicPageSize, containerSize, topReserve]);
+  }, [chunk, intrinsicPageSize, containerSize]);
 
   // Read-mode scroll: crop each page's margins and fit the music to the width.
   const readScrollScale = useCallback(
@@ -1026,7 +1096,6 @@ export function PdfViewer({
       {markUpButton}
       {pageNav}
       {phoneDone}
-      <div className="md:hidden contents">{jumpTo(phoneJumpOpen, setPhoneJumpOpen)}</div>
       {moreButton}
 
       <div className={extra}>
@@ -1055,8 +1124,7 @@ export function PdfViewer({
         {effectiveNavMode === 'scroll' && <ZoomControls zoom={zoom} onZoom={setZoom} />}
       </div>
 
-      {/* Phones have Listen, Jump and Exit elsewhere (floating buttons / the row above). */}
-      <div className="hidden md:flex ml-auto items-center gap-2">
+      <div className="flex ml-auto items-center gap-2">
         {piece && onPlayerHiddenChange && (
           <ListenButton piece={piece} playerHidden={playerHidden} onPlayerHiddenChange={onPlayerHiddenChange} />
         )}
@@ -1159,8 +1227,18 @@ export function PdfViewer({
   // ------- Render --------------------------------------------------------
 
   return (
-    <div className="flex flex-col h-full">
-      <header className={cn('sticky top-0 z-10 bg-background/95 backdrop-blur border-b border-border', readMode && !toolsOpen && 'hidden md:block')}>
+    <div className="relative flex flex-col h-full">
+      {/* In read mode the toolbar floats over the score, so showing it doesn't
+          shift the music, and the score gets the whole screen while it's hidden. */}
+      <header
+        onPointerDown={touchTools}
+        onKeyDown={touchTools}
+        className={cn(
+          'top-0 bg-background/95 backdrop-blur border-b border-border',
+          readMode ? 'absolute inset-x-0 z-30 shadow-card' : 'sticky z-10',
+          readMode && !toolsOpen && 'hidden',
+        )}
+      >
         {readMode ? minimalToolbar : fullToolbar}
         {markUp && markUpToolbar}
         {tool === 'marker' && markerToolbar}
@@ -1176,47 +1254,18 @@ export function PdfViewer({
         onTouchMove={(e) => { onSwipeMove(e); onTwoTapMove(e); }}
         onTouchEnd={(e) => { onSwipeEnd(e); onTwoTapEnd(e); }}
         onTouchCancel={() => { swipeRef.current = null; twoTapRef.current = null; }}
+        onPointerDown={onStagePointerDown}
+        onPointerUp={onStagePointerUp}
+        onPointerCancel={() => { tapRef.current = null; }}
       >
-        {readMode && (
-          // Phone read mode: the score fills the screen; two floating buttons
-          // (tools, exit) sit over it so nothing is lost in a scrolling bar.
-          <div className="md:hidden absolute top-2 right-2 z-20 flex items-center gap-1.5">
-            {piece && onPlayerHiddenChange && (
-              <ListenButton piece={piece} playerHidden={playerHidden} onPlayerHiddenChange={onPlayerHiddenChange} floating />
-            )}
-            <button
-              type="button"
-              onClick={() => setToolsOpen((o) => !o)}
-              aria-label={toolsOpen ? 'Hide tools' : 'Show tools'}
-              aria-pressed={toolsOpen}
-              className={cn(
-                'inline-flex items-center justify-center w-10 h-10 rounded-full shadow-card backdrop-blur',
-                toolsOpen ? 'bg-primary text-primary-foreground' : 'bg-background/90 text-foreground',
-              )}
-            >
-              <Icon name="tune" className="text-xl" />
-            </button>
-            {onExitReadMode && (
-              <button
-                type="button"
-                onClick={onExitReadMode}
-                aria-label="Exit read mode"
-                className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-primary text-primary-foreground shadow-card"
-              >
-                <Icon name="close" className="text-xl" />
-              </button>
-            )}
-          </div>
-        )}
         {readMode && effectiveNavMode === 'page' && pageCount > 0 && (
-          <div className="md:hidden absolute bottom-2 left-1/2 -translate-x-1/2 z-20 px-2.5 h-7 rounded-full bg-background/90 text-xs tabular-nums shadow-card inline-flex items-center pointer-events-none">
+          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-20 px-2.5 h-7 rounded-full bg-background/90 text-xs tabular-nums shadow-card inline-flex items-center pointer-events-none">
             {currentPage} / {pageCount}
           </div>
         )}
         <div ref={scrollContainerRef} className="absolute inset-0 overflow-auto overscroll-contain bg-stage">
           <div
             ref={contentRef}
-            style={topReserve ? { paddingTop: topReserve + 8 } : undefined}
             className={cn(
               'flex flex-col items-center gap-6',
               readMode
@@ -1724,11 +1773,10 @@ const DOC_KINDS: FileKind[] = ['pdf', 'lyrics', 'score'];
  * hides the player bar; with nothing loaded it lists this piece's recordings
  * so one can be started without leaving the score.
  */
-function ListenButton({ piece, playerHidden, onPlayerHiddenChange, floating = false }: {
+function ListenButton({ piece, playerHidden, onPlayerHiddenChange }: {
   piece: Piece;
   playerHidden: boolean;
   onPlayerHiddenChange: (hidden: boolean) => void;
-  floating?: boolean;
 }) {
   const player = usePlayer();
   const [open, setOpen] = useState(false);
@@ -1749,9 +1797,7 @@ function ListenButton({ piece, playerHidden, onPlayerHiddenChange, floating = fa
         title={label}
         aria-pressed={loaded ? showing : undefined}
         aria-expanded={loaded ? undefined : open}
-        className={floating
-          ? cn('inline-flex items-center justify-center w-10 h-10 rounded-full shadow-card backdrop-blur', showing ? 'bg-primary text-primary-foreground' : 'bg-background/90 text-foreground')
-          : cn('inline-flex items-center justify-center w-9 h-9 rounded-md border border-border', showing ? 'bg-primary text-primary-foreground border-primary' : 'bg-background text-foreground hover:bg-accent')}
+        className={cn('inline-flex items-center justify-center w-9 h-9 rounded-md border border-border', showing ? 'bg-primary text-primary-foreground border-primary' : 'bg-background text-foreground hover:bg-accent')}
       >
         <Icon name="headphones" className="text-xl" />
       </button>

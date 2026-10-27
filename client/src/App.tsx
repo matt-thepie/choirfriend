@@ -9,7 +9,7 @@ import { SetListsScreen } from '@/components/SetListsScreen.tsx';
 import { SetListScreen } from '@/components/SetListScreen.tsx';
 import { SongScreen } from '@/components/SongScreen.tsx';
 import { PlayerBar } from '@/components/Player/PlayerBar.tsx';
-import { PlayerProvider } from '@/player/PlayerContext.tsx';
+import { PlayerProvider, usePlayer } from '@/player/PlayerContext.tsx';
 import { usePieces } from '@/hooks/usePieces.ts';
 import { useSections, saveMySection, saveMyPartLine } from '@/hooks/useSections.ts';
 import { useSetLists } from '@/hooks/useSetLists.ts';
@@ -194,6 +194,35 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
     // A song with no sheet music opens on its song page instead.
     navigate({ pieceId: id, viewerFileId: sheet?.id ?? null, readMode: sheet ? readMode : false });
   }
+
+  // When the player is playing the set list this score came from, the two move
+  // together: the player reaching the next song opens its score, and turning
+  // the score into the next song cues that song's track, paused, ready to play.
+  const player = usePlayer();
+  const linkedQueue = viewerFileId !== null && setListId !== null && player.queue?.setListId === setListId ? player.queue : null;
+  const playerPieceId = linkedQueue ? player.current?.pieceId ?? null : null;
+  const lastPlayerPieceRef = useRef(playerPieceId);
+  useEffect(() => {
+    const was = lastPlayerPieceRef.current;
+    lastPlayerPieceRef.current = playerPieceId;
+    if (playerPieceId === null || was === null || playerPieceId === was || playerPieceId === pieceId) return;
+    void openSongInViewer(playerPieceId);
+    // Only the player moving should open a score.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playerPieceId]);
+  // Opening a score isn't a turn, so only a song change while the linked score
+  // was already open counts.
+  const viewerPieceId = linkedQueue ? pieceId : null;
+  const lastViewerPieceRef = useRef(viewerPieceId);
+  useEffect(() => {
+    const was = lastViewerPieceRef.current;
+    lastViewerPieceRef.current = viewerPieceId;
+    if (!linkedQueue || viewerPieceId === null || was === null || viewerPieceId === was || player.current?.pieceId === viewerPieceId) return;
+    const i = linkedQueue.tracks.findIndex((t) => t.pieceId === viewerPieceId);
+    if (i >= 0) player.cue(i);
+    // Only the score moving should cue a track.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewerPieceId]);
 
   function closeViewer(): void {
     navigate({ viewerFileId: null, readMode: false });
