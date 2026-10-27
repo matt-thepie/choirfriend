@@ -27,10 +27,11 @@ interface UpdatePieceBody {
   composer?: string | null;
   arranger?: string | null;
   notes?: string | null;
+  lyrics?: string | null;
   isCurrent?: boolean;
 }
 
-const ALLOWED_PATCH_KEYS = new Set(['title', 'composer', 'arranger', 'notes', 'isCurrent']);
+const ALLOWED_PATCH_KEYS = new Set(['title', 'composer', 'arranger', 'notes', 'lyrics', 'isCurrent']);
 
 export const piecesRoutes: FastifyPluginAsync = async (app) => {
   /** Listing the repertoire requires a signed-in member. Matches the SGMC
@@ -170,7 +171,7 @@ export const piecesRoutes: FastifyPluginAsync = async (app) => {
       if (body.title !== undefined && (typeof body.title !== 'string' || body.title.trim() === '')) {
         return reply.code(400).send({ error: 'title must be a non-empty string' });
       }
-      for (const k of ['composer', 'arranger', 'notes'] as const) {
+      for (const k of ['composer', 'arranger', 'notes', 'lyrics'] as const) {
         if (body[k] !== undefined && body[k] !== null && typeof body[k] !== 'string') {
           return reply.code(400).send({ error: `${k} must be string or null` });
         }
@@ -184,6 +185,7 @@ export const piecesRoutes: FastifyPluginAsync = async (app) => {
         ...(body.composer !== undefined && { composer: body.composer?.trim() || null }),
         ...(body.arranger !== undefined && { arranger: body.arranger?.trim() || null }),
         ...(body.notes !== undefined && { notes: body.notes?.trim() || null }),
+        ...(body.lyrics !== undefined && { lyrics: body.lyrics?.trim() || null }),
         ...(body.isCurrent !== undefined && { isCurrent: body.isCurrent }),
       });
       if (!piece) return reply.code(404).send({ error: 'not found' });

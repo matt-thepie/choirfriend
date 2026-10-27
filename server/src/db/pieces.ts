@@ -13,6 +13,7 @@ export interface PieceRow {
   composer: string | null;
   arranger: string | null;
   notes: string | null;
+  lyrics?: string | null;
   is_current: number; // 0 | 1 — SQLite stores booleans as integers
   created_at: number;
   updated_at: number;
@@ -38,6 +39,7 @@ export interface FileRow {
   sort_order: number;
   created_at: number;
   created_by_user_id: number | null;
+  uploaded_by_name?: string | null;
   section_id: number | null;
   duration_ms: number | null;
 }
@@ -56,6 +58,7 @@ export interface PieceDTO {
   composer: string | null;
   arranger: string | null;
   notes: string | null;
+  lyrics: string | null;
   isCurrent: boolean;
   createdAt: number;
   updatedAt: number;
@@ -95,6 +98,7 @@ function toPieceDTO(row: PieceRow): PieceDTO {
     composer: row.composer,
     arranger: row.arranger,
     notes: row.notes,
+    lyrics: row.lyrics ?? null,
     isCurrent: row.is_current === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -126,7 +130,7 @@ function toFileDTO(row: FileRow | FileRowWithCreator): FileDTO {
     url: resolveFileUrl(row),
     createdAt: row.created_at,
     createdByUserId: row.created_by_user_id,
-    createdByName: 'created_by_name' in row ? row.created_by_name : null,
+    createdByName: ('created_by_name' in row ? row.created_by_name : null) ?? row.uploaded_by_name ?? null,
     sectionId: row.section_id ?? null,
     durationMs: row.duration_ms ?? null,
   };
@@ -134,7 +138,7 @@ function toFileDTO(row: FileRow | FileRowWithCreator): FileDTO {
 
 const listPiecesStmt = db.prepare(`
   SELECT p.*,
-    (SELECT COUNT(*) FROM files f WHERE f.piece_id = p.id AND f.kind = 'pdf') AS pdf_count,
+    (SELECT COUNT(*) FROM files f WHERE f.piece_id = p.id AND f.kind IN ('pdf', 'lyrics')) AS pdf_count,
     (SELECT COUNT(*) FROM files f WHERE f.piece_id = p.id AND f.kind = 'audio') AS audio_count
   FROM pieces p ORDER BY p.title COLLATE NOCASE, p.id
 `);
@@ -207,6 +211,7 @@ export interface UpdatePieceInput {
   composer?: string | null;
   arranger?: string | null;
   notes?: string | null;
+  lyrics?: string | null;
   isCurrent?: boolean;
 }
 
@@ -229,6 +234,10 @@ export function updatePiece(id: number, input: UpdatePieceInput): PieceDTO | nul
   if (input.arranger !== undefined) {
     sets.push('arranger = ?');
     params.push(input.arranger);
+  }
+  if (input.lyrics !== undefined) {
+    sets.push('lyrics = ?');
+    params.push(input.lyrics);
   }
   if (input.notes !== undefined) {
     sets.push('notes = ?');

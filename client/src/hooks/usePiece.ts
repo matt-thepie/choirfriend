@@ -78,6 +78,7 @@ export interface Piece {
   composer: string | null;
   arranger: string | null;
   notes: string | null;
+  lyrics: string | null;
   files: PieceFile[];
   remarks: Remark[];
   links: PieceLink[];

@@ -72,15 +72,14 @@ export function SongScreen({
 }: SongScreenProps) {
   const { piece, loading, error, refresh } = usePiece(pieceId, refreshTick);
 
-  // Section filter: the member's own part by default. null = "Any / full mix".
+  // Section filter: the member's own part by default. null = all parts.
   const [sectionId, setSectionId] = useState<number | null>(mySectionId);
   useEffect(() => setSectionId(mySectionId), [mySectionId]);
   const [panel, setPanel] = useState<'remarks' | 'lyrics' | 'links' | null>(null);
   const [onlyMine, setOnlyMine] = useState(false);
 
   const audio = useMemo(() => piece?.files.filter((f) => f.kind === 'audio') ?? [], [piece]);
-  const sheet = useMemo(() => piece?.files.filter((f) => f.kind === 'pdf') ?? [], [piece]);
-  const lyrics = useMemo(() => piece?.files.filter((f) => f.kind === 'lyrics') ?? [], [piece]);
+  const sheet = useMemo(() => piece?.files.filter((f) => f.kind === 'pdf' || f.kind === 'lyrics') ?? [], [piece]);
   const scores = useMemo(() => piece?.files.filter((f) => f.kind === 'score') ?? [], [piece]);
 
   const section = sections.find((s) => s.id === sectionId) ?? null;
@@ -126,7 +125,7 @@ export function SongScreen({
             Remarks{piece.remarks.length > 0 && <span className="ml-1 text-xs opacity-70">({piece.remarks.length})</span>}
           </Button>
           <Button size="sm" variant={panel === 'lyrics' ? 'default' : 'outline'} onClick={() => setPanel(panel === 'lyrics' ? null : 'lyrics')}>
-            Lyrics{lyrics.length > 0 && <span className="ml-1 text-xs opacity-70">({lyrics.length})</span>}
+            Lyrics
           </Button>
           {(piece.links.length > 0 || editing) && (
             <Button size="sm" variant={panel === 'links' ? 'default' : 'outline'} onClick={() => setPanel(panel === 'links' ? null : 'links')}>
@@ -140,7 +139,7 @@ export function SongScreen({
               aria-label="Section"
               className="ml-auto h-10 px-3 rounded-md border border-border bg-background text-base"
             >
-              <option value="">Any / full mix</option>
+              <option value="">All parts</option>
               {sections.map((s) => (
                 <option key={s.id} value={s.id}>{s.label}</option>
               ))}
@@ -151,17 +150,7 @@ export function SongScreen({
         {panel === 'remarks' && (
           <RemarksPanel piece={piece} sections={sections} editing={editing} onSaved={mutated} />
         )}
-        {panel === 'lyrics' && (
-          <DocumentList
-            title="Lyrics"
-            files={lyrics}
-            editing={editing}
-            onOpenViewer={onOpenViewer}
-            onMutated={mutated}
-            addButton={editing ? <UploadButton pieceId={pieceId} kind="lyrics" label="+ Add lyrics" onUploaded={mutated} /> : null}
-            empty="No lyrics yet."
-          />
-        )}
+        {panel === 'lyrics' && <LyricsPanel piece={piece} editing={editing} onSaved={mutated} />}
         {panel === 'links' && <LinksPanel piece={piece} editing={editing} onMutated={mutated} />}
 
         <DocumentList
@@ -202,15 +191,16 @@ export function SongScreen({
                 addButton={<UploadButton pieceId={pieceId} kind="audio" sectionId={s.id} label="Add audio" onUploaded={mutated} />}
               />
             ))}
-            <AudioBlock
-              heading="Any / full mix"
-              files={audio.filter((f) => f.sectionId === null)}
-              piece={piece}
-              sections={sections}
-              editing
-              onMutated={mutated}
-              addButton={<UploadButton pieceId={pieceId} kind="audio" sectionId={null} label="Add audio" onUploaded={mutated} />}
-            />
+            {audio.some((f) => f.sectionId === null) && (
+              <AudioBlock
+                heading="Needs a section"
+                files={audio.filter((f) => f.sectionId === null)}
+                piece={piece}
+                sections={sections}
+                editing
+                onMutated={mutated}
+              />
+            )}
           </section>
         ) : (
           <>
@@ -275,7 +265,7 @@ function DocumentList({
     <section className="space-y-2">
       <div className="flex items-end gap-2">
         <h2 className="text-lg font-semibold">{title}</h2>
-        {subtitle && <span className="text-xs text-muted-foreground">{subtitle}</span>}
+        {subtitle && <span className="text-sm text-muted-foreground">{subtitle}</span>}
       </div>
       {files.length === 0 ? (
         empty && <p className="text-sm text-muted-foreground">{empty}</p>
@@ -306,7 +296,7 @@ function DocumentRow({
   const name = file.label?.trim() || file.filename;
   return (
     <li className="inset-row flex items-center gap-3 px-4 py-2 hover:shadow-card hover:-translate-y-px">
-      <Icon name={file.kind === 'score' ? 'piano' : file.kind === 'lyrics' ? 'lyrics' : 'music_note'} className="text-muted-foreground shrink-0" />
+      <Icon name={file.kind === 'score' ? 'piano' : file.kind === 'lyrics' ? 'description' : 'music_note'} className="text-muted-foreground shrink-0" />
       {viewable ? (
         <button type="button" onClick={() => onOpenViewer(file.id)} className="flex-1 min-w-0 text-left hover:underline">
           <div className="text-base font-medium truncate">{name}</div>
@@ -401,7 +391,7 @@ function AudioBlock({
                     <span className="truncate">{f.label?.trim() || f.filename}</span>
                   </div>
                   <div className="text-sm text-muted-foreground truncate">
-                    {f.createdByName ? `Shared by ${f.createdByName}` : 'Shared'}
+                    {f.createdByName ? `Shared by ${shortName(f.createdByName)}` : 'Shared'}
                   </div>
                 </div>
                 <span className="text-sm text-muted-foreground shrink-0 hidden sm:block">{formatDate(f.createdAt)}</span>
@@ -541,21 +531,12 @@ function RowMenu({
                       onChange={(e) => void patch({ sectionId: e.target.value === '' ? null : Number(e.target.value) })}
                       className="mt-0.5 w-full h-7 px-1 rounded border border-border bg-background text-xs text-foreground"
                     >
-                      <option value="">Any / full mix</option>
+                      {file.sectionId === null && <option value="" disabled>Choose a section</option>}
                       {sections.map((s) => (
                         <option key={s.id} value={s.id}>{s.label}</option>
                       ))}
                     </select>
                   </label>
-                )}
-                {(file.kind === 'pdf' || file.kind === 'lyrics') && isPdfFile(file) && (
-                  <button
-                    type="button"
-                    className="block w-full text-left px-3 py-2 rounded hover:bg-accent"
-                    onClick={() => void patch({ kind: file.kind === 'pdf' ? 'lyrics' : 'pdf' })}
-                  >
-                    {file.kind === 'pdf' ? 'File as lyrics' : 'File as sheet music'}
-                  </button>
                 )}
                 <label className="block px-3 py-2 rounded hover:bg-accent cursor-pointer">
                   {busy === 'replace' ? 'Replacing…' : 'Replace file'}
@@ -853,4 +834,63 @@ function SongSettings({ piece, onSaved }: { piece: Piece; onSaved: () => void })
   );
 }
 
+/** "Steve Hunter" → "Steve H."; single names are left alone. */
+function shortName(full: string): string {
+  const parts = full.replace(/\([^)]*\)/g, ' ').trim().split(/\s+/).filter((w) => /^\p{L}/u.test(w));
+  if (parts.length === 0) return full.trim();
+  if (parts.length === 1) return parts[0]!;
+  return `${parts[0]} ${parts[parts.length - 1]![0]!.toUpperCase()}.`;
+}
 
+/** Lyrics are text on the song. Admins edit; everyone reads. */
+function LyricsPanel({ piece, editing, onSaved }: { piece: Piece; editing: boolean; onSaved: () => void }) {
+  const [text, setText] = useState(piece.lyrics ?? '');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => setText(piece.lyrics ?? ''), [piece.lyrics]);
+  const dirty = text.trim() !== (piece.lyrics ?? '').trim();
+
+  if (!editing) {
+    return (
+      <section className="space-y-2">
+        <h2 className="text-lg font-semibold">Lyrics</h2>
+        {piece.lyrics ? (
+          <div className="whitespace-pre-wrap text-base leading-relaxed">{piece.lyrics}</div>
+        ) : (
+          <p className="text-sm text-muted-foreground">No lyrics yet. Lyric sheets are listed under Sheet music.</p>
+        )}
+      </section>
+    );
+  }
+  return (
+    <section className="space-y-2">
+      <h2 className="text-lg font-semibold">Lyrics</h2>
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        rows={12}
+        placeholder="Paste or type the lyrics"
+        className="w-full p-3 rounded-md border border-border bg-background text-base leading-relaxed"
+      />
+      {error && <p className="text-sm text-destructive">{error}</p>}
+      <Button
+        size="sm"
+        disabled={!dirty || busy}
+        onClick={async () => {
+          setBusy(true);
+          setError(null);
+          try {
+            await patchPiece(piece.id, { lyrics: text.trim() || null });
+            onSaved();
+          } catch (e) {
+            setError(e instanceof Error ? e.message : String(e));
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        {busy ? 'Saving…' : 'Save lyrics'}
+      </Button>
+    </section>
+  );
+}

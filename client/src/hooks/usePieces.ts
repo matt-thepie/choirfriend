@@ -81,6 +81,7 @@ export interface UpdatePieceInput {
   composer?: string | null;
   arranger?: string | null;
   notes?: string | null;
+  lyrics?: string | null;
   isCurrent?: boolean;
 }
 

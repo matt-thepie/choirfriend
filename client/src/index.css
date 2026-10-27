@@ -73,6 +73,9 @@
 
 /* Map the tokens onto the Tailwind palette the components already use. */
 @theme inline {
+  /* Nothing on screen below 13px. */
+  --text-xs: 0.8125rem;
+  --text-xs--line-height: 1.125rem;
   --color-background: var(--card);
   --color-foreground: var(--ink);
   --color-card: var(--card);
@@ -154,14 +157,25 @@
 @layer base {
   html {
     font-size: 16px;
+    background: var(--field);
+  }
+  /* The field gradient is pinned to the viewport rather than the body, so it
+     never ends in a band: mobile browsers ignore background-attachment: fixed,
+     and the large viewport can be taller than 100dvh when toolbars retract. */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    height: 100lvh;
+    z-index: -1;
+    background-image: var(--field-gradient);
+    pointer-events: none;
   }
   body {
     font-family: var(--font);
     line-height: var(--lh);
     color: var(--ink);
     background: var(--field);
-    background-image: var(--field-gradient);
-    background-attachment: fixed;
     min-height: 100dvh;
     -webkit-font-smoothing: antialiased;
   }

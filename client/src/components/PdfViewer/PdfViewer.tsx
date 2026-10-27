@@ -1067,7 +1067,7 @@ function FileRow({
             title="Which part this track is for — used when playing a set list for a section"
             className="mt-0.5 ml-1 text-xs h-6 px-1 rounded border border-border bg-background"
           >
-            <option value="">Any / full mix</option>
+            {file.sectionId === null && <option value="" disabled>Choose a part</option>}
             {sections.map((sec) => (
               <option key={sec.id} value={sec.id}>{sec.label}</option>
             ))}

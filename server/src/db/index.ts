@@ -277,3 +277,18 @@ export function upsertUserByEmail(input: UpsertUserInput): number {
   if (!row) throw new Error('upsertUserByEmail: no row returned');
   return row.id;
 }
+
+// Who shared a file when it came from an import rather than a signed-in
+// member (ChoirMate migration); shown as "Shared by <name>".
+addColumnIfMissing('files', 'uploaded_by_name TEXT');
+// Lyrics are text on the song (ChoirMate's Lyrics panel), not a file bucket.
+addColumnIfMissing('pieces', 'lyrics TEXT');
+
+// Every PDF on a song is "Sheet music" (ChoirMate files lyric sheets there
+// too); the Lyrics panel is text. Re-file any lyric PDFs from earlier imports.
+{
+  const r = db.prepare(
+    "UPDATE files SET kind = 'pdf' WHERE kind = 'lyrics' AND (mime_type = 'application/pdf' OR lower(filename) LIKE '%.pdf')",
+  ).run();
+  if (Number(r.changes) > 0) console.log(`[db] re-filed ${r.changes} lyric PDFs as sheet music`);
+}

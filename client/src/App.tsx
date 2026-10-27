@@ -206,7 +206,7 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
             <button
               type="button"
               onClick={toggleEditMode}
-              className={`ml-auto shrink-0 h-10 px-3 rounded-md border text-sm font-medium transition-colors ${editing ? 'border-primary bg-accent text-accent-foreground' : 'border-border hover:bg-accent'}`}
+              className="ml-auto shrink-0 h-10 px-3 rounded-md border border-border bg-background text-foreground text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground"
               aria-pressed={editing}
             >
               {editing ? 'Switch to view mode' : 'Switch to edit mode'}
