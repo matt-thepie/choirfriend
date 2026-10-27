@@ -132,11 +132,11 @@ choirfriend uploads files directly from the browser to B2 via presigned URLs (th
 # Once
 b2 account authorize <YOUR_KEY_ID> <YOUR_APPLICATION_KEY>
 
-# Per bucket
-./scripts/apply-b2-cors.sh <BUCKET_NAME>
+# Per bucket: allow uploads from your live site and the Vite dev server
+./scripts/apply-b2-cors.sh <BUCKET_NAME> https://music.example.org http://localhost:5173
 ```
 
-The rules applied are in `scripts/b2-cors-rules.json` — edit the `allowedOrigins` of the uploads rule if you're deploying to a different host. Both files are checked into the repo so the configuration is version-controlled, not buried in a Backblaze admin tab.
+The origins you pass are the only sites allowed to upload; reads are allowed from anywhere. With no origins, the script uses `CLIENT_ORIGIN` from `.env` plus `http://localhost:5173`, which is right when you run it on the server but drops your live site if your local `.env` points at localhost. The rest of the rules are in `scripts/b2-cors-rules.json`. Both files are checked into the repo so the configuration is version-controlled, not buried in a Backblaze admin tab.
 
 ⚠️ The script replaces the bucket's entire CORS array. If you share the bucket with other services and they also have CORS rules, merge by hand.
 

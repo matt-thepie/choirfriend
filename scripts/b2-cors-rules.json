@@ -1,8 +1,8 @@
 [
   {
     "corsRuleName": "choirfriendUploads",
-    "_comment": "Browser PUTs from the app to presigned B2 URLs. Lock allowedOrigins to the dev origin and your prod app domain.",
-    "allowedOrigins": ["http://localhost:5173", "https://music.sgmc.org.uk"],
+    "_comment": "Browser PUTs from the app to presigned B2 URLs. allowedOrigins is filled in by apply-b2-cors.sh from CLIENT_ORIGIN (plus the Vite dev origin) or the origins you pass it.",
+    "allowedOrigins": [],
     "allowedOperations": ["s3_put"],
     "allowedHeaders": ["*"],
     "exposeHeaders": ["etag"],
