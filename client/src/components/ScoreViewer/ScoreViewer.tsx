@@ -17,7 +17,7 @@ import { cn } from '@/lib/utils.ts';
 import { usePiece } from '@/hooks/usePiece.ts';
 import { useSections } from '@/hooks/useSections.ts';
 import type { SetListFlow } from '@/hooks/useSetListFlow.ts';
-import { ListenButton, ToolButton } from '@/components/PdfViewer/PdfViewer.tsx';
+import { ListenButton, ToolButton, useDropStaleRecording } from '@/components/PdfViewer/PdfViewer.tsx';
 import { ViewSwitcher, type ViewTarget } from '@/components/ViewSwitcher.tsx';
 import { createToolkit } from '@/lib/flowing/verovio.ts';
 import { parseScore, type ScoreModel } from '@/lib/flowing/score.ts';
@@ -25,6 +25,8 @@ import { assignParts, voicesByStaff, type PartAssignment } from '@/lib/flowing/p
 import { BALANCE_MIN_WIDTH, engrave } from '@/lib/flowing/engrave.ts';
 import { buildPlayNotes, FlowPlayer, Timeline, type MixMode, type PlayNote } from '@/lib/flowing/playback.ts';
 import { SOUNDS, type SoundId } from '@/lib/flowing/sampler.ts';
+import { usePlayer } from '@/player/PlayerContext.tsx';
+import { FlowBar } from './FlowBar.tsx';
 
 interface ScoreViewerProps {
   pieceId: number;
@@ -98,6 +100,7 @@ export function ScoreViewer({
   canManage = false,
 }: ScoreViewerProps) {
   const { piece, loading: pieceLoading, error: pieceError, refresh: refreshPiece } = usePiece(pieceId, refreshTick);
+  useDropStaleRecording(pieceId);
   const { sections } = useSections();
   const flowing = piece?.flowing?.find((f) => f.fileId === fileId) ?? null;
 
@@ -410,6 +413,11 @@ export function ScoreViewer({
   const playerRef = useRef<FlowPlayer | null>(null);
   const [playState, setPlayState] = useState<'stopped' | 'loading' | 'playing' | 'error'>('stopped');
   const [fromMeasure, setFromMeasure] = useState<number | null>(null);
+  /** Bumped on every (re)start, so the highlighter re-reads where play is. */
+  const [run, setRun] = useState(0);
+  /** The bar sounding now, while playing. */
+  const [nowMeasure, setNowMeasure] = useState<number | null>(null);
+  const [loop, setLoop] = useState<{ start: number | null; end: number | null }>({ start: null, end: null });
   useEffect(() => () => playerRef.current?.dispose(), []);
   // Settings change the player in place for notes not yet scheduled.
   useEffect(() => {
@@ -430,23 +438,52 @@ export function ScoreViewer({
       const p = playerRef.current;
       p.update({ model, notes: perf.notes, timeline, sound, mix });
       p.onEnded = () => {
+        const l = loopRef.current;
+        if (l) return void startAtRef.current?.(l.startQ);
         setPlayState('stopped');
+        setNowMeasure(null);
         clearHighlight();
       };
       setPlayState('loading');
       try {
-        if (await p.play(q)) setPlayState('playing');
+        if (await p.play(q)) {
+          setPlayState('playing');
+          setRun((r) => r + 1);
+        }
       } catch {
         setPlayState('error');
       }
     },
     [perf, model, timeline, sound, mix],
   );
+  const startAtRef = useRef(startAt);
+  startAtRef.current = startAt;
   const stop = useCallback(() => {
     playerRef.current?.stop();
     setPlayState('stopped');
+    setNowMeasure(null);
     clearHighlight();
   }, []);
+
+  // A set loop, in score time: from the start of its first bar to the start
+  // of the bar after its last (first time through, if there are repeats).
+  const loopQ = useMemo(() => {
+    if (!perf || loop.start === null || loop.end === null) return null;
+    const startQ = perf.measureQ.get(loop.start);
+    if (startQ === undefined) return null;
+    const endQ = perf.measureQ.get(loop.end + 1) ?? perf.endQ;
+    return endQ > startQ ? { startQ, endQ } : null;
+  }, [perf, loop]);
+  const loopRef = useRef(loopQ);
+  loopRef.current = loopQ;
+
+  // The recording player and this one share the bottom of the screen: only
+  // one shows, and only one sounds.
+  const recordings = usePlayer();
+  const recordingShowing = !!recordings.queue && !playerHidden;
+  useEffect(() => {
+    if (recordingShowing || recordings.isPlaying) stop();
+  }, [recordingShowing, recordings.isPlaying, stop]);
 
   // A new tempo or sound restarts from where playback had got to.
   const restartRef = useRef<{ bpm: number; sound: SoundId }>({ bpm, sound });
@@ -462,6 +499,7 @@ export function ScoreViewer({
   // Light up what's sounding, and keep it in view.
   useEffect(() => {
     if (playState !== 'playing' || !perf) return;
+    clearHighlight();
     const root = scoreRef.current;
     const notes: PlayNote[] = perf.notes;
     const els = new Map<string, Element | null>();
@@ -473,11 +511,17 @@ export function ScoreViewer({
     if (idx < 0) idx = notes.length;
     const active: PlayNote[] = [];
     let lastSystem: Element | null = null;
+    let lastBar: Element | null = null;
     let raf = 0;
     const frame = () => {
       const p = playerRef.current;
       if (!p?.playing) return;
       const q = p.nowQ();
+      const l = loopRef.current;
+      if (l && q >= l.endQ - 1e-6) {
+        void startAtRef.current?.(l.startQ);
+        return;
+      }
       while (idx < notes.length && notes[idx]!.q <= q) {
         const n = notes[idx++]!;
         const el = elOf(n.baseId);
@@ -497,6 +541,12 @@ export function ScoreViewer({
           active.splice(i, 1);
         } else if (el) lead = el;
       }
+      const bar = lead?.closest('g.measure') ?? null;
+      if (bar && bar !== lastBar) {
+        lastBar = bar;
+        const i = measureEls.current.indexOf(bar as SVGGElement);
+        if (i >= 0) setNowMeasure(i);
+      }
       const sys = lead?.closest('g.system') ?? null;
       if (sys && sys !== lastSystem) {
         lastSystem = sys;
@@ -513,12 +563,26 @@ export function ScoreViewer({
     return () => cancelAnimationFrame(raf);
     // systemOf reads systems through state; re-run when the layout changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playState, perf, effectiveNavMode, showY, systems]);
+  }, [playState, run, perf, effectiveNavMode, showY, systems]);
 
+  const qOf = (i: number) => perf?.measureQ.get(i) ?? 0;
+  const play = (i: number | null) => {
+    if (recordings.isPlaying) recordings.pause();
+    if (recordings.queue && !playerHidden) onPlayerHiddenChange?.(true);
+    void startAt(i !== null ? qOf(i) : loopQ?.startQ ?? 0);
+  };
+  // Pause is a stop that remembers the bar, so Play carries on from there.
   const togglePlay = () => {
-    if (playState === 'playing' || playState === 'loading') return stop();
-    const q = fromMeasure !== null ? perf?.measureQ.get(fromMeasure) ?? 0 : 0;
-    void startAt(q);
+    if (playState === 'playing' || playState === 'loading') {
+      if (nowMeasure !== null) setFromMeasure(nowMeasure);
+      return stop();
+    }
+    play(fromMeasure);
+  };
+  const currentBar = nowMeasure ?? fromMeasure ?? 0;
+  const seekBar = (i: number) => {
+    if (playState === 'playing') play(i);
+    else setFromMeasure(i);
   };
 
   // ------- Read mode chrome ---------------------------------------------------
@@ -527,12 +591,11 @@ export function ScoreViewer({
   const [moreOpen, setMoreOpen] = useState(false);
   const [jumpOpen, setJumpOpen] = useState(false);
   const [partsOpen, setPartsOpen] = useState(false);
-  const [hearOpen, setHearOpen] = useState(false);
   const toolsTouchedRef = useRef(0);
   const touchTools = useCallback(() => {
     toolsTouchedRef.current = Date.now();
   }, []);
-  const toolsBusy = moreOpen || jumpOpen || partsOpen || hearOpen;
+  const toolsBusy = moreOpen || jumpOpen || partsOpen;
   useEffect(() => {
     if (!readMode || !toolsOpen || toolsBusy) return;
     touchTools();
@@ -664,30 +727,7 @@ export function ScoreViewer({
 
   const extra = cn('contents', !moreOpen && 'max-md:hidden');
   const current: ViewTarget = { kind: 'flow', id: fileId };
-  const fromLabel = fromMeasure !== null && model ? model.measures[fromMeasure]?.number : null;
-
-  const playButton = (
-    <button
-      type="button"
-      onClick={togglePlay}
-      disabled={!perf}
-      title={fromLabel ? `Play from bar ${fromLabel}` : 'Play the score'}
-      className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md bg-primary text-primary-foreground text-xs font-medium disabled:opacity-50"
-    >
-      <Icon name={playState === 'playing' || playState === 'loading' ? 'stop' : 'play_arrow'} className="text-lg" />
-      {playState === 'loading' ? 'Loading…' : playState === 'playing' ? 'Stop' : playState === 'error' ? 'Retry' : fromLabel ? `Play from ${fromLabel}` : 'Play'}
-    </button>
-  );
-
-  const tempoControl = (
-    <div className="flex items-center gap-1" title={model?.markedTempo ? 'Tempo (the score’s marking, adjusted)' : 'Tempo (the score has no marking)'}>
-      <Button size="sm" variant="outline" onClick={() => setBpm(bpm * 0.95)} aria-label="Slower">−</Button>
-      <button type="button" className="text-xs tabular-nums w-14 text-center hover:underline" onClick={() => { setBpmOverride(null); save(tempoKey, null); }} title="Back to the marked tempo">
-        ♩ = {bpm}
-      </button>
-      <Button size="sm" variant="outline" onClick={() => setBpm(bpm * 1.05)} aria-label="Faster">+</Button>
-    </div>
-  );
+  const barLabels = useMemo(() => model?.measures.map((m, i) => m.number || String(i + 1)) ?? [], [model]);
 
   const sizeControl = (
     <div className="flex items-center gap-1">
@@ -731,57 +771,6 @@ export function ScoreViewer({
               </label>
             );
           })}
-        </Popover>
-      )}
-    </div>
-  );
-
-  const hearAnchor = useRef<HTMLDivElement>(null);
-  const lineChoices = sections.filter((s) => assignments.has(s.id));
-  const hearMenu = (
-    <div ref={hearAnchor} className="relative">
-      <Button size="sm" variant="outline" onClick={() => setHearOpen((o) => !o)} aria-expanded={hearOpen} title="Which part to bring forward, and the sound">
-        <Icon name="tune" className="text-lg" />
-        <span className="max-md:hidden">Mix</span>
-      </Button>
-      {hearOpen && (
-        <Popover anchorRef={hearAnchor} align="right" onClose={() => setHearOpen(false)} className="w-64 p-3 flex flex-col gap-3 text-sm">
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-muted-foreground">Part to bring forward</span>
-            <select
-              value={lineSectionId ?? ''}
-              onChange={(e) => setLineSectionId(e.target.value === '' ? null : Number(e.target.value))}
-              className="h-9 rounded-md border border-border bg-background px-2"
-            >
-              <option value="">None: every part equally</option>
-              {lineChoices.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.label}
-                  {s.id === mySectionId ? ' (you)' : ''}
-                </option>
-              ))}
-            </select>
-          </label>
-          {hearLine && (
-            <div className="flex items-center rounded-md border border-border overflow-hidden self-start" role="group" aria-label="How the other parts sound">
-              <ToolButton active={mixMode !== 'solo'} onClick={() => { setMixModeState('mine'); save(MIX_KEY, 'mine'); }} title="Your part loud, the others quietly behind it">
-                Others quieter
-              </ToolButton>
-              <ToolButton active={mixMode === 'solo'} onClick={() => { setMixModeState('solo'); save(MIX_KEY, 'solo'); }} title="Only this part">
-                This part only
-              </ToolButton>
-            </div>
-          )}
-          <div className="flex flex-col gap-1">
-            <span className="text-xs text-muted-foreground">Sound</span>
-            <div className="flex items-center rounded-md border border-border overflow-hidden self-start">
-              {SOUNDS.map((s) => (
-                <ToolButton key={s.id} active={sound === s.id} onClick={() => { setSoundState(s.id); save(SOUND_KEY, s.id); }}>
-                  {s.label}
-                </ToolButton>
-              ))}
-            </div>
-          </div>
         </Popover>
       )}
     </div>
@@ -867,8 +856,6 @@ export function ScoreViewer({
       )}
       {sizeControl}
       {partsMenu}
-      {tempoControl}
-      {hearMenu}
     </>
   );
 
@@ -882,10 +869,14 @@ export function ScoreViewer({
         </Button>
       )}
       {viewSwitcher}
-      {playButton}
       {jumpMenu}
       {moreButton}
       <div className={extra}>{readingControls}</div>
+      {piece && onPlayerHiddenChange && (
+        <div className="ml-auto">
+          <ListenButton piece={piece} playerHidden={playerHidden} onPlayerHiddenChange={onPlayerHiddenChange} />
+        </div>
+      )}
     </div>
   );
 
@@ -893,7 +884,6 @@ export function ScoreViewer({
     <div className="px-3 py-1.5 flex flex-wrap items-center gap-2">
       {piece && <h2 className="hidden md:block text-sm font-semibold mr-1 truncate max-w-[12rem]" title={piece.title}>{piece.title}</h2>}
       {viewSwitcher}
-      {playButton}
       {pageNav}
       {moreButton}
       <div className={extra}>{readingControls}</div>
@@ -1086,6 +1076,38 @@ export function ScoreViewer({
           </>
         )}
       </div>
+
+      {!recordingShowing && model && (
+        <FlowBar
+          title={piece?.title || model.credits.title || 'Score'}
+          playState={playState}
+          canPlay={!!perf}
+          onToggle={togglePlay}
+          bars={barLabels}
+          bar={currentBar}
+          onSeek={seekBar}
+          bpm={bpm}
+          markedBpm={model.markedTempo ?? 120}
+          hasMarkedTempo={model.markedTempo != null}
+          onBpm={setBpm}
+          onResetBpm={() => { setBpmOverride(null); save(tempoKey, null); }}
+          loop={loop}
+          onLoopStart={() => setLoop((l) => ({ start: currentBar, end: l.end !== null && l.end >= currentBar ? l.end : null }))}
+          onLoopEnd={() => setLoop((l) => ({ start: l.start !== null && l.start <= currentBar ? l.start : 0, end: currentBar }))}
+          onClearLoop={() => setLoop({ start: null, end: null })}
+          lineChoices={sections.filter((s) => assignments.has(s.id)).map((s) => ({ id: s.id, label: s.label, mine: s.id === mySectionId }))}
+          lineSectionId={lineSectionId}
+          onLine={setLineSectionId}
+          lineLabel={lineSectionId !== null && hearLine ? sections.find((s) => s.id === lineSectionId)?.label ?? null : null}
+          mixMode={mixMode}
+          onMixMode={(m) => { setMixModeState(m); save(MIX_KEY, m); }}
+          sound={sound}
+          onSound={(id) => { setSoundState(id); save(SOUND_KEY, id); }}
+          listen={piece && onPlayerHiddenChange && (
+            <ListenButton piece={piece} playerHidden={playerHidden} onPlayerHiddenChange={onPlayerHiddenChange} />
+          )}
+        />
+      )}
     </div>
   );
 }

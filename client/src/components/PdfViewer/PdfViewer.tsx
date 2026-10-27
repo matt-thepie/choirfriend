@@ -222,6 +222,7 @@ export function PdfViewer({
   onOpenView,
 }: PdfViewerProps) {
   const { piece, loading: pieceLoading, error: pieceError, refresh: refreshPiece } = usePiece(pieceId, refreshTick);
+  useDropStaleRecording(pieceId);
 
   // A piece can carry several viewable PDFs — the score, extra parts, and any
   // lyric sheet that happens to be a PDF. Members pick which one to view; the
@@ -1793,6 +1794,21 @@ const DOC_KINDS: FileKind[] = ['pdf', 'lyrics', 'score'];
  * hides the player bar; with nothing loaded it lists this piece's recordings
  * so one can be started without leaving the score.
  */
+/** Opening a piece drops a paused recording of a different one, so the
+ *  player never sits over the new music with the old piece's track. A
+ *  recording that's playing, or a queue that includes this piece (a set
+ *  list), is left alone. */
+export function useDropStaleRecording(pieceId: number | null): void {
+  const player = usePlayer();
+  const { queue, isPlaying, clear } = player;
+  useEffect(() => {
+    if (pieceId === null || !queue || isPlaying) return;
+    if (!queue.tracks.some((t) => t.pieceId === pieceId)) clear();
+    // Only when the piece changes, not whenever the queue does.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pieceId]);
+}
+
 export function ListenButton({ piece, playerHidden, onPlayerHiddenChange }: {
   piece: Piece;
   playerHidden: boolean;
@@ -1802,7 +1818,9 @@ export function ListenButton({ piece, playerHidden, onPlayerHiddenChange }: {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
   const tracks = piece.files.filter((f) => f.kind === 'audio');
-  const loaded = !!player.queue;
+  // Only a recording of this piece counts: with another piece's loaded, the
+  // button offers this one's tracks instead of showing the old one.
+  const loaded = !!player.queue?.tracks.some((t) => t.pieceId === piece.id);
   if (!loaded && tracks.length === 0) return null;
 
   const showing = loaded && !playerHidden;

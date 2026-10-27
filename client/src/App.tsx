@@ -573,7 +573,8 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
         )}
       </main>
 
-      {!(readMode && readPlayerHidden) && <PlayerBar onOpenPiece={openPiece} />}
+      {/* A flowing score docks its own player here; the recording one swaps in via Listen. */}
+      {!((readMode || (flow && viewerFileId !== null)) && readPlayerHidden) && <PlayerBar onOpenPiece={openPiece} />}
     </div>
   );
 }

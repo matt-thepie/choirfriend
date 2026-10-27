@@ -42,12 +42,9 @@ export function PlayerBar({ onOpenPiece }: PlayerBarProps) {
 
         {open && (
           <div className="px-4 pt-5 pb-3 border-b border-border max-h-[50dvh] overflow-auto">
-            <div className="flex items-center justify-between mb-3">
-              <div className="text-base font-semibold">
-                {p.queue.name}
-                <span className="text-muted-foreground font-normal ml-2 text-sm">{p.index + 1} of {total}</span>
-              </div>
-              <IconButton icon="close" label="Close player" onClick={p.clear} size="sm" />
+            <div className="text-base font-semibold mb-3">
+              {p.queue.name}
+              <span className="text-muted-foreground font-normal ml-2 text-sm">{p.index + 1} of {total}</span>
             </div>
 
             <div className="flex flex-wrap items-center gap-x-5 gap-y-3 text-sm mb-4">
@@ -108,6 +105,10 @@ export function PlayerBar({ onOpenPiece }: PlayerBarProps) {
               ))}
             </ol>
 
+            <Button size="sm" variant="outline" onClick={p.clear} className="sm:hidden mt-2">
+              <Icon name="close" className="text-lg" />
+              Stop and close player
+            </Button>
           </div>
         )}
 
@@ -158,6 +159,8 @@ export function PlayerBar({ onOpenPiece }: PlayerBarProps) {
           <IconButton icon="forward_10" label="Forward 10 seconds" size="sm" onClick={() => p.skip(10)} />
           <IconButton icon="skip_next" label="Next" size="sm" onClick={p.next} disabled={p.index >= total - 1 && p.repeat !== 'all'} className="hidden sm:inline-flex" />
           <IconButton icon={open ? 'expand_more' : 'expand_less'} label={open ? 'Hide queue' : 'Show queue'} size="sm" onClick={() => setOpen((o) => !o)} />
+          {/* Stops and removes the player, so it sits in the bar, not the panel. */}
+          <IconButton icon="close" label="Stop and close the player" size="sm" onClick={p.clear} className="hidden sm:inline-flex" />
         </div>
       </div>
     </div>
