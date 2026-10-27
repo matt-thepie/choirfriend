@@ -172,11 +172,9 @@ It is resumable (progress in `<export>/.choirfriend-import.json`). Songs with
 the same title (ignoring case/punctuation) are merged; ChoirMate's free-text
 artist goes into `composer`; songs on the "Rehearsal" set list become current
 repertoire and the rest are archived; Word documents and lyric-named PDFs are
-filed as lyrics. A second pass fills in what the first import had no home for:
-
-    node --env-file=../.env src/tools/backfill-from-manifest.ts ~/sgmc-export [--dry-run]
-
-(audio durations, per-section remarks, links). `tools/merge-pieces.ts <survivor> <loser>`
+filed as lyrics. Audio durations, per-part remarks and links come across too;
+re-running over an earlier import fills in any of those that are missing
+without overwriting edits. `tools/merge-pieces.ts <survivor> <loser>`
 folds one duplicate piece into another and `tools/dedupe-files.ts` collapses
 exact duplicate files within a piece.
 

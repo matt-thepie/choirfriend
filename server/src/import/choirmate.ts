@@ -3,14 +3,16 @@
  *
  * Reads the manifest.json produced by the ChoirMate scrape (plus the files it
  * references, laid out as <export>/<song folder>/<file>) and loads everything
- * into choirfriend: pieces, PDFs, audio tagged with its voice part, section
- * remarks, and the set lists. Files go to B2 (or client/public when B2 isn't
+ * into choirfriend: pieces, PDFs and lyric sheets, audio tagged with its voice
+ * part and duration, section remarks, links, and the set lists. Files go to B2 (or client/public when B2 isn't
  * configured, same as the bulk importer).
  *
  *   node --env-file=../.env src/import/choirmate.ts <export dir> [--dry-run] [--limit N]
  *
  * Resumable: progress is written to <export dir>/.choirfriend-import.json
  * after every file, keyed by ChoirMate ids, so a re-run skips what's done.
+ * A re-run also fills in durations, remarks and links that are missing from
+ * pieces imported earlier, without overwriting anything already there.
  *
  * Choices (see README "ChoirMate migration"):
  *  - songs whose titles match case/punctuation-insensitively are merged into
@@ -18,7 +20,9 @@
  *  - ChoirMate's free-text "artist" lands in `composer` verbatim
  *  - songs on the "Rehearsal" set list are current repertoire, the rest are
  *    archived (is_current = 0)
- *  - .docx attachments are skipped and listed (files table is pdf|audio only)
+ *  - Word documents and lyric-named PDFs are filed as lyrics
+ *  - remarks for a voice part go to that part's remark; remarks for a part we
+ *    don't have go into the piece notes
  */
 
 import fs from 'node:fs';
@@ -27,6 +31,7 @@ import path from 'node:path';
 import { db } from '../db/index.ts';
 import { createFile, createPiece, listPieces, updatePiece, type FileKind } from '../db/pieces.ts';
 import { listSections, seedSectionsIfEmpty } from '../db/sections.ts';
+import { addLink, guessLinkType, listLinks, listRemarks, setRemark, type LinkType } from '../db/pieceExtras.ts';
 import { createSetList, listSetLists } from '../db/setlists.ts';
 import { storeImportedFile, storageMode } from './storage.ts';
 
@@ -106,6 +111,8 @@ function sectionLabelFor(cm: string[]): string | null {
   return cm.length === 1 ? (CM_SECTION_TO_LABEL[cm[0]!] ?? null) : null;
 }
 
+const LINK_TYPES: LinkType[] = ['spotify', 'youtube', 'appleMusic', 'other'];
+
 // ---- main -----------------------------------------------------------------
 
 async function main(): Promise<void> {
@@ -168,7 +175,8 @@ async function main(): Promise<void> {
   // -- 2. pieces + files -----------------------------------------------------
   const missing: string[] = [];
   const dirCache = new Map<string, Map<string, string>>();
-  let pieceCount = 0, fileCount = 0, bytes = 0;
+  let pieceCount = 0, fileCount = 0, bytes = 0, remarkCount = 0, linkCount = 0, durationCount = 0;
+  const fillDuration = db.prepare('UPDATE files SET duration_ms = ? WHERE id = ? AND duration_ms IS NULL');
   let processed = 0;
 
   for (const [key, songs] of groups) {
@@ -181,16 +189,23 @@ async function main(): Promise<void> {
     const composer = songs.map((s) => s.artist?.trim()).find(Boolean) ?? null;
     const createdAt = Math.min(...songs.map((s) => epoch(s.created_at) ?? Number.MAX_SAFE_INTEGER));
 
-    // Remarks → notes.
+    // Remarks for one of our voice parts become that part's remark; anything
+    // else (a ChoirMate section we have no equivalent for) goes into notes.
+    const remarks: Array<{ sectionId: number; label: string; text: string }> = [];
     const noteLines: string[] = [];
     for (const s of songs) {
       for (const [sec, r] of Object.entries(s.remarks ?? {})) {
         const text = r.text?.trim();
         if (!text) continue;
-        const who = [r.updated_by?.first_name, r.updated_by?.last_name].filter(Boolean).join(' ');
-        noteLines.push(`${CM_SECTION_TO_LABEL[sec] ?? sec} remark${who ? ` (${who})` : ''}: ${text}`);
+        const label = CM_SECTION_TO_LABEL[sec];
+        const sectionId = label ? sectionIdByLabel.get(label) : undefined;
+        if (label && sectionId !== undefined) {
+          remarks.push({ sectionId, label, text });
+        } else {
+          const who = [r.updated_by?.first_name, r.updated_by?.last_name].filter(Boolean).join(' ');
+          noteLines.push(`${label ?? sec} remark${who ? ` (${who})` : ''}: ${text}`);
+        }
       }
-      for (const l of s.links ?? []) if (l.url) noteLines.push(`${l.label ?? l.type ?? 'link'}: ${l.url}`);
     }
     const notes = noteLines.length ? noteLines.join('\n') : null;
 
@@ -225,6 +240,26 @@ async function main(): Promise<void> {
     await save();
 
     console.log(`\n[${pieceId}] ${primary.title}${composer ? ` — ${composer}` : ''}${isCurrent ? ' (current)' : ''}${songs.length > 1 ? ` [merged ${songs.length}]` : ''}`);
+
+    // Remarks and links: add what the piece doesn't have yet.
+    const haveRemarks = new Set(pieceId > 0 ? listRemarks(pieceId).map((r) => r.sectionId) : []);
+    for (const r of remarks) {
+      if (haveRemarks.has(r.sectionId)) continue;
+      haveRemarks.add(r.sectionId);
+      console.log(`  + remark [${r.label}] ${r.text.slice(0, 60)}`);
+      remarkCount++;
+      if (!dryRun) setRemark(pieceId, r.sectionId, r.text, null);
+    }
+    const haveUrls = new Set(pieceId > 0 ? listLinks(pieceId).map((l) => l.url) : []);
+    for (const l of songs.flatMap((s) => s.links ?? [])) {
+      const url = l.url?.trim();
+      if (!url || haveUrls.has(url)) continue;
+      haveUrls.add(url);
+      const type = LINK_TYPES.includes(l.type as LinkType) ? (l.type as LinkType) : guessLinkType(url);
+      console.log(`  + link ${type} ${url}`);
+      linkCount++;
+      if (!dryRun) addLink(pieceId, type, url, l.label?.trim() || null);
+    }
 
     // Sheet music: all songs in the group, scores before lyric sheets.
     const sheets = songs
@@ -270,6 +305,7 @@ async function main(): Promise<void> {
           relPath: f,
           createdAt: epoch(a.created_at),
           sortOrder: sortOrder++,
+          durationMs: a.duration_ms && a.duration_ms > 0 ? Math.round(a.duration_ms) : null,
         });
       }
     }
@@ -302,9 +338,13 @@ async function main(): Promise<void> {
     relPath: string;
     createdAt: number | null;
     sortOrder: number;
+    durationMs?: number | null;
   }): Promise<void> {
-    if (progress.files[opts.cmId] !== undefined) {
-      console.log(`  = ${opts.kind} ${path.basename(opts.relPath)} (already imported as #${progress.files[opts.cmId]})`);
+    const done = progress.files[opts.cmId];
+    if (done !== undefined) {
+      console.log(`  = ${opts.kind} ${path.basename(opts.relPath)} (already imported as #${done})`);
+      // Imports from before durations were copied over: fill the gap.
+      if (opts.durationMs && !dryRun && fillDuration.run(opts.durationMs, done).changes) durationCount++;
       return;
     }
     const abs = resolveCaseInsensitive(dir!, opts.relPath);
@@ -337,6 +377,7 @@ async function main(): Promise<void> {
       mimeType: contentType,
       sortOrder: opts.sortOrder,
       sectionId: opts.sectionId,
+      durationMs: opts.durationMs ?? null,
     });
     if (opts.createdAt) db.prepare('UPDATE files SET created_at = ? WHERE id = ?').run(opts.createdAt, row.id);
     progress.files[opts.cmId] = row.id;
@@ -375,7 +416,8 @@ async function main(): Promise<void> {
   }
 
   // -- 4. report --------------------------------------------------------------
-  console.log(`\n${dryRun ? 'would create' : 'created'}: ${pieceCount} pieces, ${fileCount} files, ${(bytes / 1024 / 1024).toFixed(0)}MB`);
+  console.log(`\n${dryRun ? 'would create' : 'created'}: ${pieceCount} pieces, ${fileCount} files, ${(bytes / 1024 / 1024).toFixed(0)}MB, ${remarkCount} remarks, ${linkCount} links`);
+  if (durationCount) console.log(`filled in ${durationCount} missing durations on earlier imports`);
   if (missing.length) {
     console.log(`\nMISSING ${missing.length} files:`);
     for (const f of missing) console.log(`  ${f}`);
