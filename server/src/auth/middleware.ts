@@ -50,6 +50,11 @@ export function isAdmin(user: { groups: string[] }): boolean {
   return adminRoles.some((r) => userGroups.has(r));
 }
 
+/** Admins manage every file; members manage only files they uploaded. */
+export function canManageFile(user: { groups: string[]; internalId: number }, file: { created_by_user_id: number | null }): boolean {
+  return isAdmin(user) || (file.created_by_user_id !== null && file.created_by_user_id === user.internalId);
+}
+
 /** May this user see editable scores (kind='score')? Admins always can; so can
  *  anyone holding a role in config.scoreRoles (the MD, section admins). */
 export function canSeeScores(user: { groups: string[] }): boolean {

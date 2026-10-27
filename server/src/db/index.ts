@@ -292,3 +292,7 @@ addColumnIfMissing('pieces', 'lyrics TEXT');
   ).run();
   if (Number(r.changes) > 0) console.log(`[db] re-filed ${r.changes} lyric PDFs as sheet music`);
 }
+
+// Member uploads are private to the uploader until they share them
+// (ChoirMate's Share / Unshare). Everything that existed before is shared.
+addColumnIfMissing('files', "visibility TEXT NOT NULL DEFAULT 'shared' CHECK(visibility IN ('private', 'shared'))");

@@ -8,7 +8,9 @@ interface PlayerBarProps {
   onOpenPiece?: (pieceId: number) => void;
 }
 
-const RATES = [0.5, 0.6, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1, 1.1, 1.25, 1.5];
+/** 0.5x to 1.5x in steps of 0.1 (pitch is preserved by the player). */
+const RATES = Array.from({ length: 11 }, (_, i) => Math.round((0.5 + i * 0.1) * 10) / 10);
+const rateLabel = (r: number) => `${r}x`;
 
 /**
  * The mini player: a white card docked to the bottom, 72px tall, with a thin
@@ -57,7 +59,7 @@ export function PlayerBar({ onOpenPiece }: PlayerBarProps) {
                   className="h-10 px-2 rounded-md border border-border bg-background text-sm"
                 >
                   {RATES.map((r) => (
-                    <option key={r} value={r}>{r}x</option>
+                    <option key={r} value={r}>{rateLabel(r)}</option>
                   ))}
                 </select>
               </label>
@@ -121,7 +123,6 @@ export function PlayerBar({ onOpenPiece }: PlayerBarProps) {
             <div className="text-sm text-muted-foreground truncate">
               {p.current.title}
               {total > 1 && <span className="ml-1.5">· {p.index + 1}/{total}</span>}
-              {p.rate !== 1 && <span className="ml-1.5">· {p.rate}x</span>}
               {p.error && <span className="ml-1.5 text-destructive">· {p.error}</span>}
             </div>
             <div className="text-xs text-muted-foreground tabular-nums">
@@ -130,6 +131,20 @@ export function PlayerBar({ onOpenPiece }: PlayerBarProps) {
           </button>
 
           <IconButton icon="skip_previous" label="Previous" size="sm" onClick={p.prev} disabled={total <= 1 && p.currentTime < 3} className="hidden sm:inline-flex" />
+          <select
+            value={p.rate}
+            onChange={(e) => p.setRate(Number(e.target.value))}
+            aria-label="Playback speed"
+            title="Playback speed"
+            className={cn(
+              'h-9 w-[3.75rem] px-1.5 rounded-full border text-sm font-semibold tabular-nums text-center shrink-0 appearance-none cursor-pointer',
+              p.rate !== 1 ? 'border-primary bg-accent text-accent-foreground' : 'border-border bg-background',
+            )}
+          >
+            {RATES.map((r) => (
+              <option key={r} value={r}>{rateLabel(r)}</option>
+            ))}
+          </select>
           <IconButton icon="replay_10" label="Back 10 seconds" size="sm" onClick={() => p.skip(-10)} />
           <button
             type="button"

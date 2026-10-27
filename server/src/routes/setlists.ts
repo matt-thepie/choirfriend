@@ -46,12 +46,12 @@ export const setListsRoutes: FastifyPluginAsync = async (app) => {
   app.get('/setlists', { preHandler: requireAuth }, async () => listSetLists());
 
   /** Virtual "All songs" list — the whole repertoire, title order. */
-  app.get('/setlists/all', { preHandler: requireAuth }, async () => getAllSongsSetList());
+  app.get('/setlists/all', { preHandler: requireAuth }, async (req) => getAllSongsSetList(req.user!.internalId));
 
   app.get<{ Params: { id: string } }>('/setlists/:id', { preHandler: requireAuth }, async (req, reply) => {
     const id = parseId(req.params.id);
     if (id === null) return reply.code(400).send({ error: 'invalid id' });
-    const sl = getSetList(id);
+    const sl = getSetList(id, req.user!.internalId);
     if (!sl) return reply.code(404).send({ error: 'not found' });
     return sl;
   });

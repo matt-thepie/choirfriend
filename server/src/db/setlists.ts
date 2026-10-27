@@ -98,7 +98,7 @@ export function listSetLists(): SetListSummaryDTO[] {
   return (listStmt.all() as Array<SetListRow & { song_count: number }>).map(toSummary);
 }
 
-export function getSetList(id: number): SetListDTO | null {
+export function getSetList(id: number, viewerUserId?: number): SetListDTO | null {
   const row = getStmt.get(id) as (SetListRow & { song_count: number }) | undefined;
   if (!row) return null;
   const items = itemsStmt.all(id) as Array<{
@@ -110,7 +110,7 @@ export function getSetList(id: number): SetListDTO | null {
   }>;
   const songs: SetListSongDTO[] = items.map((it) => ({
     ...it,
-    audio: getPieceWithFiles(it.id)?.files.filter((f) => f.kind === 'audio') ?? [],
+    audio: getPieceWithFiles(it.id, viewerUserId)?.files.filter((f) => f.kind === 'audio') ?? [],
   }));
   return { ...toSummary(row), songs };
 }
@@ -119,12 +119,12 @@ const allPiecesStmt = db.prepare(`SELECT id, title, composer, arranger FROM piec
 
 /** The virtual "All songs" set list: the whole repertoire in title order.
  *  Never stored; id 0 marks it as virtual. */
-export function getAllSongsSetList(): SetListDTO {
+export function getAllSongsSetList(viewerUserId?: number): SetListDTO {
   const items = allPiecesStmt.all() as Array<{ id: number; title: string; composer: string | null; arranger: string | null }>;
   const songs: SetListSongDTO[] = items.map((it, position) => ({
     position,
     ...it,
-    audio: getPieceWithFiles(it.id)?.files.filter((f) => f.kind === 'audio') ?? [],
+    audio: getPieceWithFiles(it.id, viewerUserId)?.files.filter((f) => f.kind === 'audio') ?? [],
   }));
   return {
     id: 0,

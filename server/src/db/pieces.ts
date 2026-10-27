@@ -21,6 +21,7 @@ export interface PieceRow {
 
 /** See the files table comment in db/index.ts. */
 export type FileKind = 'pdf' | 'audio' | 'lyrics' | 'score';
+export type FileVisibility = 'private' | 'shared';
 export const FILE_KINDS: readonly FileKind[] = ['pdf', 'audio', 'lyrics', 'score'];
 export function isFileKind(v: unknown): v is FileKind {
   return typeof v === 'string' && (FILE_KINDS as readonly string[]).includes(v);
@@ -40,6 +41,7 @@ export interface FileRow {
   created_at: number;
   created_by_user_id: number | null;
   uploaded_by_name?: string | null;
+  visibility?: FileVisibility;
   section_id: number | null;
   duration_ms: number | null;
 }
@@ -65,6 +67,7 @@ export interface PieceDTO {
 }
 
 export interface FileDTO {
+  visibility: FileVisibility;
   id: number;
   pieceId: number;
   kind: FileKind;
@@ -132,6 +135,7 @@ function toFileDTO(row: FileRow | FileRowWithCreator): FileDTO {
     createdByUserId: row.created_by_user_id,
     createdByName: ('created_by_name' in row ? row.created_by_name : null) ?? row.uploaded_by_name ?? null,
     sectionId: row.section_id ?? null,
+    visibility: row.visibility ?? 'shared',
     durationMs: row.duration_ms ?? null,
   };
 }
@@ -139,7 +143,7 @@ function toFileDTO(row: FileRow | FileRowWithCreator): FileDTO {
 const listPiecesStmt = db.prepare(`
   SELECT p.*,
     (SELECT COUNT(*) FROM files f WHERE f.piece_id = p.id AND f.kind IN ('pdf', 'lyrics')) AS pdf_count,
-    (SELECT COUNT(*) FROM files f WHERE f.piece_id = p.id AND f.kind = 'audio') AS audio_count
+    (SELECT COUNT(*) FROM files f WHERE f.piece_id = p.id AND f.kind = 'audio' AND f.visibility = 'shared') AS audio_count
   FROM pieces p ORDER BY p.title COLLATE NOCASE, p.id
 `);
 const getPieceStmt = db.prepare(`SELECT * FROM pieces WHERE id = ?`);
@@ -156,8 +160,8 @@ const insertPieceStmt = db.prepare(`
   RETURNING *
 `);
 const insertFileStmt = db.prepare(`
-  INSERT INTO files (piece_id, kind, label, storage, storage_key, filename, size_bytes, mime_type, sort_order, created_by_user_id, section_id, duration_ms)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  INSERT INTO files (piece_id, kind, label, storage, storage_key, filename, size_bytes, mime_type, sort_order, created_by_user_id, section_id, duration_ms, visibility)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   RETURNING *
 `);
 const countPiecesStmt = db.prepare(`SELECT COUNT(*) AS n FROM pieces`);
@@ -178,10 +182,16 @@ export function listPieces(): PieceSummaryDTO[] {
   }));
 }
 
-export function getPieceWithFiles(id: number): PieceWithFiles | null {
+/**
+ * A piece and its files. Pass the viewer's user id to hide other members'
+ * private uploads; omit it only for internal checks that need every row.
+ */
+export function getPieceWithFiles(id: number, viewerUserId?: number): PieceWithFiles | null {
   const piece = getPieceStmt.get(id) as PieceRow | undefined;
   if (!piece) return null;
-  const files = (listFilesForPieceStmt.all(piece.id) as FileRow[]).map(toFileDTO);
+  const files = (listFilesForPieceStmt.all(piece.id) as FileRow[])
+    .filter((f) => viewerUserId === undefined || (f.visibility ?? 'shared') === 'shared' || f.created_by_user_id === viewerUserId)
+    .map(toFileDTO);
   return { ...toPieceDTO(piece), files };
 }
 
@@ -276,6 +286,8 @@ export interface CreateFileInput {
   /** Voice part (audio only). */
   sectionId?: number | null;
   durationMs?: number | null;
+  /** Default 'shared'; member uploads come in 'private'. */
+  visibility?: FileVisibility;
 }
 
 export function createFile(input: CreateFileInput): FileDTO {
@@ -292,6 +304,7 @@ export function createFile(input: CreateFileInput): FileDTO {
     input.createdByUserId ?? null,
     input.sectionId ?? null,
     input.durationMs ?? null,
+    input.visibility ?? 'shared',
   ) as FileRow;
   touchPieceStmt.run(input.pieceId);
   return toFileDTO(row);
@@ -315,6 +328,7 @@ export interface UpdateFileInput {
    *  annotations stay valid). Routes enforce that; this just writes it. */
   kind?: FileKind;
   durationMs?: number | null;
+  visibility?: FileVisibility;
 }
 
 /** Patch a file's label, section, kind and/or duration. Only provided keys change. */
@@ -324,6 +338,10 @@ export function updateFile(id: number, input: UpdateFileInput): FileDTO | null {
   if (input.label !== undefined) {
     sets.push('label = ?');
     params.push(input.label);
+  }
+  if (input.visibility !== undefined) {
+    sets.push('visibility = ?');
+    params.push(input.visibility);
   }
   if (input.kind !== undefined) {
     sets.push('kind = ?');

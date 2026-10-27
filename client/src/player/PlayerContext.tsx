@@ -261,9 +261,27 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       title: current.title,
       artist: current.subtitle,
       album: queue?.name ?? 'choirfriend',
+      artwork: [
+        { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
+        { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' },
+      ],
     });
     ms.playbackState = isPlaying ? 'playing' : 'paused';
   }, [current, queue?.name, isPlaying]);
+
+  // Lock-screen scrubber: keep the OS's position and speed in step.
+  useEffect(() => {
+    if (!('mediaSession' in navigator) || !current || !Number.isFinite(duration) || duration <= 0) return;
+    try {
+      navigator.mediaSession.setPositionState({
+        duration,
+        playbackRate: rate,
+        position: Math.min(Math.max(0, currentTime), duration),
+      });
+    } catch {
+      // Some browsers reject transient states (e.g. position past duration).
+    }
+  }, [current, duration, rate, currentTime]);
 
   useEffect(() => {
     if (!('mediaSession' in navigator)) return;

@@ -207,7 +207,7 @@ export function SongScreen({
             <AudioBlock
               heading={section ? `Audio files for ${lower(section.label)}` : 'Audio files'}
               files={(section ? audio.filter((f) => f.sectionId === section.id || f.sectionId === null) : audio).filter(
-                (f) => !onlyMine || f.createdByUserId !== null,
+                (f) => !onlyMine || f.mine === true,
               )}
               piece={piece}
               sections={sections}
@@ -221,6 +221,7 @@ export function SongScreen({
                 </label>
               }
               empty={section ? `No audio for ${lower(section.label)} yet.` : 'No audio yet.'}
+              addButton={<UploadButton pieceId={pieceId} kind="audio" sectionId={section?.id ?? null} label="Add audio" onUploaded={mutated} />}
             />
           </>
         )}
@@ -391,11 +392,11 @@ function AudioBlock({
                     <span className="truncate">{f.label?.trim() || f.filename}</span>
                   </div>
                   <div className="text-sm text-muted-foreground truncate">
-                    {f.createdByName ? `Shared by ${shortName(f.createdByName)}` : 'Shared'}
+                    {f.visibility === 'private' ? 'Private · only you can see this' : f.createdByName ? `Shared by ${shortName(f.createdByName)}` : 'Shared'}
                   </div>
                 </div>
                 <span className="text-sm text-muted-foreground shrink-0 hidden sm:block">{formatDate(f.createdAt)}</span>
-                <RowMenu file={f} editing={editing} onMutated={onMutated} sections={editing ? sections : undefined} />
+                <RowMenu file={f} editing={editing} onMutated={onMutated} sections={editing || f.canManage ? sections : undefined} />
               </li>
             );
           })}
@@ -494,7 +495,17 @@ function RowMenu({
             <a href={file.url} download={file.filename} target="_blank" rel="noreferrer" className="block px-3 py-2 rounded hover:bg-accent">
               Download
             </a>
-            {editing && (
+            {file.kind === 'audio' && file.canManage && (
+              <button
+                type="button"
+                className="block w-full text-left px-3 py-2 rounded hover:bg-accent"
+                disabled={busy !== null}
+                onClick={() => void patch({ visibility: file.visibility === 'private' ? 'shared' : 'private' })}
+              >
+                {file.visibility === 'private' ? 'Share with the choir' : 'Unshare (make private)'}
+              </button>
+            )}
+            {(editing || file.canManage) && (
               <>
                 <div className="h-px bg-border my-1" />
                 {renaming ? (

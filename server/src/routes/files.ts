@@ -23,8 +23,9 @@ import {
   replaceFileStorage,
   updateFile,
   type FileKind,
+  type FileVisibility,
 } from '../db/pieces.ts';
-import { requireAdmin } from '../auth/middleware.ts';
+import { canManageFile, isAdmin, requireAuth } from '../auth/middleware.ts';
 import { guessSectionId, sectionExists } from '../db/sections.ts';
 import { deleteObject, isB2Configured, presignPut } from '../storage/b2.ts';
 import { deleteLocalFile, readableStoredName } from '../import/storage.ts';
@@ -105,6 +106,8 @@ interface CompleteUploadBody {
   sortOrder?: number;
   /** Measured in the browser for audio. */
   durationMs?: number | null;
+  /** Members' uploads default to 'private'; admins' to 'shared'. */
+  visibility?: FileVisibility;
 }
 
 /** Max file size we'll accept a sign for. Large enough for ~25min audio
@@ -118,7 +121,7 @@ export const filesRoutes: FastifyPluginAsync = async (app) => {
    *  shared B2 bucket. */
   app.post<{ Params: { id: string }; Body: SignUploadBody }>(
     '/pieces/:id/files/sign-upload',
-    { preHandler: requireAdmin },
+    { preHandler: requireAuth },
     async (req, reply) => {
       if (!isB2Configured()) {
         return reply.code(503).send({
@@ -142,6 +145,9 @@ export const filesRoutes: FastifyPluginAsync = async (app) => {
         typeof body.mimeType !== 'string'
       ) {
         return reply.code(400).send({ error: 'invalid payload' });
+      }
+      if (!isAdmin(req.user!) && body.kind !== 'audio') {
+        return reply.code(403).send({ error: 'members can only upload audio' });
       }
       if (!mimeMatchesKind(body.kind, body.mimeType, body.filename)) {
         return reply.code(415).send({
@@ -170,7 +176,7 @@ export const filesRoutes: FastifyPluginAsync = async (app) => {
    *  a DB row that references an orphan some attacker dropped into B2. */
   app.post<{ Params: { id: string }; Body: CompleteUploadBody }>(
     '/pieces/:id/files/complete-upload',
-    { preHandler: requireAdmin },
+    { preHandler: requireAuth },
     async (req, reply) => {
       const pieceId = Number(req.params.id);
       if (!Number.isFinite(pieceId)) return reply.code(400).send({ error: 'invalid piece id' });
@@ -187,6 +193,9 @@ export const filesRoutes: FastifyPluginAsync = async (app) => {
         typeof body.mimeType !== 'string'
       ) {
         return reply.code(400).send({ error: 'invalid payload' });
+      }
+      if (!isAdmin(req.user!) && body.kind !== 'audio') {
+        return reply.code(403).send({ error: 'members can only upload audio' });
       }
       if (!mimeMatchesKind(body.kind, body.mimeType, body.filename)) {
         return reply.code(415).send({ error: 'unsupported_media_type' });
@@ -214,8 +223,11 @@ export const filesRoutes: FastifyPluginAsync = async (app) => {
         sizeBytes: body.sizeBytes ?? null,
         sortOrder: body.sortOrder ?? 0,
         durationMs: body.kind === 'audio' && Number.isFinite(body.durationMs) && (body.durationMs as number) > 0 ? Math.round(body.durationMs as number) : null,
-        // requireAdmin guarantees req.user is set.
         createdByUserId: req.user!.internalId,
+        visibility:
+          body.visibility === 'shared' || body.visibility === 'private'
+            ? body.visibility
+            : isAdmin(req.user!) ? 'shared' : 'private',
       });
       return reply.code(201).send(fileDto);
     },
@@ -225,14 +237,25 @@ export const filesRoutes: FastifyPluginAsync = async (app) => {
    * Rename a file's label (admin) — e.g. an imported track from "Tenor 1" to
    * "Tenor 1 (with piano)". Send { label: string } or { label: null } to clear.
    */
-  app.patch<{ Params: { id: string }; Body: { label?: string | null; sectionId?: number | null; kind?: FileKind; durationMs?: number | null } }>(
+  app.patch<{ Params: { id: string }; Body: { label?: string | null; sectionId?: number | null; kind?: FileKind; durationMs?: number | null; visibility?: FileVisibility } }>(
     '/files/:id',
-    { preHandler: requireAdmin },
+    { preHandler: requireAuth },
     async (req, reply) => {
       const id = Number(req.params.id);
       if (!Number.isFinite(id)) return reply.code(400).send({ error: 'invalid file id' });
+      const existing = getFileRowById(id);
+      if (!existing) return reply.code(404).send({ error: 'not found' });
+      const user = req.user!;
       const body = req.body ?? {};
-      const patch: { label?: string | null; sectionId?: number | null; kind?: FileKind; durationMs?: number | null } = {};
+      if (!canManageFile(user, existing)) return reply.code(403).send({ error: 'forbidden' });
+      if ('kind' in body && !isAdmin(user)) return reply.code(403).send({ error: 'forbidden' });
+      const patch: { label?: string | null; sectionId?: number | null; kind?: FileKind; durationMs?: number | null; visibility?: FileVisibility } = {};
+      if ('visibility' in body) {
+        if (body.visibility !== 'private' && body.visibility !== 'shared') {
+          return reply.code(400).send({ error: 'visibility must be private or shared' });
+        }
+        patch.visibility = body.visibility;
+      }
       if ('durationMs' in body) {
         const d = body.durationMs;
         if (d !== null && (typeof d !== 'number' || !Number.isFinite(d) || d <= 0)) {
@@ -283,7 +306,7 @@ export const filesRoutes: FastifyPluginAsync = async (app) => {
    */
   app.post<{ Params: { id: string }; Body: { filename: string; mimeType: string; sizeBytes?: number } }>(
     '/files/:id/sign-replace',
-    { preHandler: requireAdmin },
+    { preHandler: requireAuth },
     async (req, reply) => {
       if (!isB2Configured()) {
         return reply.code(503).send({
@@ -298,6 +321,7 @@ export const filesRoutes: FastifyPluginAsync = async (app) => {
 
       const row = getFileRowById(id);
       if (!row) return reply.code(404).send({ error: 'not found' });
+      if (!canManageFile(req.user!, row)) return reply.code(403).send({ error: 'forbidden' });
 
       const body = req.body;
       if (!body || typeof body.filename !== 'string' || typeof body.mimeType !== 'string') {
@@ -325,13 +349,14 @@ export const filesRoutes: FastifyPluginAsync = async (app) => {
    *  new object and best-effort delete the old one. */
   app.post<{ Params: { id: string }; Body: { storageKey: string; filename: string; mimeType: string; sizeBytes?: number } }>(
     '/files/:id/complete-replace',
-    { preHandler: requireAdmin },
+    { preHandler: requireAuth },
     async (req, reply) => {
       const id = Number(req.params.id);
       if (!Number.isFinite(id)) return reply.code(400).send({ error: 'invalid file id' });
 
       const row = getFileRowById(id);
       if (!row) return reply.code(404).send({ error: 'not found' });
+      if (!canManageFile(req.user!, row)) return reply.code(403).send({ error: 'forbidden' });
 
       const body = req.body;
       if (
@@ -383,13 +408,14 @@ export const filesRoutes: FastifyPluginAsync = async (app) => {
    */
   app.delete<{ Params: { fileId: string } }>(
     '/files/:fileId',
-    { preHandler: requireAdmin },
+    { preHandler: requireAuth },
     async (req, reply) => {
       const id = Number(req.params.fileId);
       if (!Number.isFinite(id)) return reply.code(400).send({ error: 'invalid file id' });
 
       const row = getFileRowById(id);
       if (!row) return reply.code(404).send({ error: 'not found' });
+      if (!canManageFile(req.user!, row)) return reply.code(403).send({ error: 'forbidden' });
 
       // Remove the DB row first so a failed object delete doesn't strand an
       // unreferenced file. Both object deletes are best-effort.

@@ -42,6 +42,12 @@ export interface PieceFile {
   sectionId: number | null;
   /** Track length in ms (audio). Null = unknown. */
   durationMs: number | null;
+  /** Private files are only returned to their uploader. */
+  visibility: 'private' | 'shared';
+  /** Uploaded by the signed-in member. */
+  mine?: boolean;
+  /** The signed-in member may rename, share, replace or delete it. */
+  canManage?: boolean;
 }
 
 export interface Remark {

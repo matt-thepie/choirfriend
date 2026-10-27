@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { createPiece, getPieceWithFiles, listPieces, updatePiece } from '../db/pieces.ts';
-import { canSeeScores, requireAdmin, requireAuth } from '../auth/middleware.ts';
+import { canSeeScores, isAdmin, requireAdmin, requireAuth } from '../auth/middleware.ts';
 import { sectionExists } from '../db/sections.ts';
 import {
   addLink,
@@ -47,13 +47,16 @@ export const piecesRoutes: FastifyPluginAsync = async (app) => {
     async (req, reply) => {
       const id = Number(req.params.id);
       if (!Number.isFinite(id)) return reply.code(400).send({ error: 'invalid id' });
-      const piece = getPieceWithFiles(id);
-      if (!piece) return reply.code(404).send({ error: 'not found' });
       const user = req.user!;
+      const piece = getPieceWithFiles(id, user.internalId);
+      if (!piece) return reply.code(404).send({ error: 'not found' });
       return {
         ...piece,
         // Editable scores are for the MD / committee / section admins only.
-        files: canSeeScores(user) ? piece.files : piece.files.filter((f) => f.kind !== 'score'),
+        files: (canSeeScores(user) ? piece.files : piece.files.filter((f) => f.kind !== 'score')).map((f) => {
+          const mine = f.createdByUserId === user.internalId;
+          return { ...f, mine, canManage: mine || isAdmin(user) };
+        }),
         remarks: listRemarks(id),
         links: listLinks(id),
         me: getMemberPieceState(user.internalId, id),
