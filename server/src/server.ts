@@ -11,6 +11,7 @@ import { importRoutes } from './routes/import.ts';
 import { sectionsRoutes } from './routes/sections.ts';
 import { setListsRoutes } from './routes/setlists.ts';
 import { meRoutes } from './routes/me.ts';
+import { offlineRoutes } from './routes/offline.ts';
 import { backfillAudioSections, seedSectionsIfEmpty } from './db/sections.ts';
 import { getConfig } from './config.ts';
 import { seedIfEmpty } from './seed.ts';
@@ -46,6 +47,7 @@ await app.register(importRoutes, { prefix: '/api' });
 await app.register(sectionsRoutes, { prefix: '/api' });
 await app.register(setListsRoutes, { prefix: '/api' });
 await app.register(meRoutes, { prefix: '/api' });
+await app.register(offlineRoutes, { prefix: '/api' });
 await app.register(authRoutes, { prefix: '/auth' });
 
 // First-boot seed (no-op if pieces already exist).

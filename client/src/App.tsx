@@ -14,6 +14,9 @@ import { usePieces } from '@/hooks/usePieces.ts';
 import { useSections, saveMySection } from '@/hooks/useSections.ts';
 import { useSetLists } from '@/hooks/useSetLists.ts';
 import { Icon } from '@/components/ui/button.tsx';
+import { useOfflineScores } from '@/hooks/useOfflineScores.ts';
+import { useInstallPrompt } from '@/hooks/useInstallPrompt.ts';
+import { formatMB, type OfflineScope } from '@/lib/offline.ts';
 
 interface HealthResponse {
   status: string;
@@ -131,6 +134,26 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
   const [importing, setImporting] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [partMenuOpen, setPartMenuOpen] = useState(false);
+  const offline = useOfflineScores(true);
+  const installer = useInstallPrompt();
+  const [offlineOpen, setOfflineOpen] = useState(false);
+  const [installHelp, setInstallHelp] = useState(false);
+  const [installBannerHidden, setInstallBannerHidden] = useState(() => {
+    try {
+      return localStorage.getItem('choirfriend.installBanner') === 'dismissed';
+    } catch {
+      return false;
+    }
+  });
+  function dismissInstallBanner(): void {
+    setInstallBannerHidden(true);
+    try {
+      localStorage.setItem('choirfriend.installBanner', 'dismissed');
+    } catch {
+      /* storage blocked */
+    }
+  }
+  const offerInstall = installer.canPrompt || installer.iosInstructions;
   const [mySectionId, setMySectionId] = useState<number | null>(me.sectionId ?? null);
   const isAdmin = me.isAdmin === true;
   // Admin controls only render in edit mode — view mode is exactly what members get.
@@ -264,6 +287,72 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
                   )}
                   <div className="h-px bg-border my-1" />
 
+                  {offline.status?.supported && (
+                    <>
+                      <MenuItem
+                        icon={<Icon name={offline.progress ? 'sync' : 'download_for_offline'} className="text-xl" />}
+                        label={
+                          offline.progress
+                            ? `Saving scores ${offline.progress.done} of ${offline.progress.total}`
+                            : offline.status.scope === 'off'
+                              ? 'Offline scores: off'
+                              : `Offline scores: ${offline.status.saved} of ${offline.status.wanted}`
+                        }
+                        onClick={() => {
+                          setOfflineOpen((o) => !o);
+                          void offline.refresh();
+                        }}
+                      />
+                      {offlineOpen && (
+                        <div className="ml-6 mb-1 border-l border-border pl-1">
+                          {([
+                            ['setlists', offline.status.scope === 'setlists' ? `Songs on set lists (${formatMB(offline.status.wantedBytes)})` : 'Songs on set lists'],
+                            ['all', `All repertoire (${formatMB(offline.status.allBytes)})`],
+                            ['off', 'Off'],
+                          ] as [OfflineScope, string][]).map(([scope, label]) => (
+                            <MenuItem
+                              key={scope}
+                              icon={<span className="w-4" />}
+                              label={label}
+                              active={offline.status?.scope === scope}
+                              onClick={() => void offline.chooseScope(scope)}
+                            />
+                          ))}
+                          <div className="px-3 py-1.5 text-xs text-muted-foreground">
+                            Sheet music is kept on this device so it opens without signal. Learning tracks still need a connection.
+                          </div>
+                          {offline.status.scope !== 'off' && (
+                            <MenuItem
+                              icon={<Icon name="sync" className="text-xl" />}
+                              label={offline.progress ? 'Syncing…' : 'Sync now'}
+                              onClick={() => void offline.sync()}
+                            />
+                          )}
+                        </div>
+                      )}
+                    </>
+                  )}
+                  {offerInstall && (
+                    <>
+                      <MenuItem
+                        icon={<Icon name="install_mobile" className="text-xl" />}
+                        label="Install app"
+                        onClick={() => {
+                          if (installer.canPrompt) {
+                            setMenuOpen(false);
+                            void installer.install();
+                          } else setInstallHelp((o) => !o);
+                        }}
+                      />
+                      {installHelp && (
+                        <div className="ml-6 mb-1 px-3 py-1.5 text-sm text-muted-foreground">
+                          In Safari, tap Share, then Add to Home Screen.
+                        </div>
+                      )}
+                    </>
+                  )}
+                  {(offline.status?.supported || offerInstall) && <div className="h-px bg-border my-1" />}
+
                   <div className="px-3 py-1.5 text-xs text-muted-foreground">
                     Signed in as {me.displayName ?? me.email}
                     {isAdmin && <span className="ml-1 uppercase tracking-wide font-semibold text-accent-foreground">admin</span>}
@@ -279,7 +368,37 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
         </header>
       )}
 
+      {!offline.online && !readMode && (
+        <div className="shrink-0 bg-muted text-foreground text-sm text-center px-4 py-1.5" role="status">
+          Offline. Saved set lists and scores still open; learning tracks need a connection.
+        </div>
+      )}
       <main className="flex-1 min-h-0 flex flex-col">
+        {view === 'setlists' && !importing && offerInstall && !installBannerHidden && (
+          <div className="max-w-(--max) w-full mx-auto px-4 sm:px-6 pt-5">
+            <div className="card p-4 flex flex-wrap items-center gap-3">
+              <Icon name="install_mobile" className="text-2xl text-primary" />
+              <div className="flex-1 min-w-48">
+                <div className="font-semibold">Install choirfriend</div>
+                <div className="text-sm text-muted-foreground">
+                  {installer.canPrompt
+                    ? 'Open it from your home screen, with your scores saved for when there is no signal.'
+                    : 'In Safari, tap Share, then Add to Home Screen. Your scores are saved for when there is no signal.'}
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button type="button" onClick={dismissInstallBanner} className="h-10 px-3 rounded-md border border-border text-sm font-medium hover:bg-accent">
+                  Not now
+                </button>
+                {installer.canPrompt && (
+                  <button type="button" onClick={() => void installer.install()} className="h-10 px-4 rounded-md bg-primary text-primary-foreground text-sm font-semibold">
+                    Install
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
         {!readMode && (view === 'home' || view === 'setlists') && !importing && (
           <div className="max-w-(--max) w-full mx-auto px-4 sm:px-6 pt-5">
             <nav className="inline-flex items-center rounded-full bg-black/20 p-1" aria-label="Set lists and repertoire">

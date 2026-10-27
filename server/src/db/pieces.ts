@@ -108,7 +108,7 @@ function toPieceDTO(row: PieceRow): PieceDTO {
   };
 }
 
-function resolveFileUrl(row: FileRow): string {
+export function resolveFileUrl(row: FileRow): string {
   if (row.storage === 'local') {
     // Served by the client (Vite dev server in dev, the static-served
     // bundle in prod). Always rooted at /.

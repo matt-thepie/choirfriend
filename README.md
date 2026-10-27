@@ -136,7 +136,7 @@ The Fastify server serves `client/dist/` as static assets in production. nginx f
 ## Open design questions
 
 - **Annotation sync model:** push-on-save, or CRDT for offline-friendly merging?
-- **Offline support:** service worker + IndexedDB caching of opened pieces is on the roadmap, not built yet.
+- **Offline learning tracks:** scores sync for offline use; audio still needs a connection. Annotations made offline are not queued for upload.
 - **Mobile:** the UI must be tablet/phone-first since most choristers use those at rehearsals.
 
 ## ChoirMate migration
@@ -173,7 +173,7 @@ Built:
 - PDF viewer with pen annotations and navigation markers on private and shared layers; read/perform mode; fit-to-width on phones.
 - Set lists: picture tiles, create / rename / drag reorder / archive / copy / delete / Order, one list pinned as "this week"; **Practice list** panel ("Viewing content for" + section) queues one track per song; the virtual **All songs** list.
 - Persistent mini player (72px card, seek bar, 48px play) with speed 0.5–1.5x, A-B loop, repeat and Media Session for lock-screen controls.
-- Design system: deep teal field (the logo's palette), white cards, Inter, Material Symbols, 16px base, 44px tap targets, dark mode via `prefers-color-scheme`; installable PWA (manifest + icons, no offline caching yet).
+- Design system: deep teal field (the logo's palette), white cards, Inter, Material Symbols, 16px base, 44px tap targets, dark mode via `prefers-color-scheme`; installable PWA (manifest with screenshots, in-app Install button and iOS instructions).
 - Piano widget (sampled grand piano, 2–5 octaves depending on screen width); bulk importer (Claude reads title/composer off PDFs); ChoirMate migration importer and backfill tools.
 - Admin gate on all write routes (members of any `ADMIN_ROLES` group).
 - URLs for every screen (`/`, `/repertoire`, `/setlists/:id`, `/songs/:id`, `/songs/:id/view/:fileId`) so the back button, reloads and shared links work.
@@ -188,6 +188,6 @@ Not built (from the ChoirMate brief):
 
 Not built (other):
 
-- Offline support (service worker is registered but caches nothing yet).
+- Offline: the service worker (`client/sw/sw.js`, emitted with a per-build precache list by a Vite plugin) keeps the app shell, fonts and piano offline; API reads are network-first with the last response as fallback; sheet music PDFs are cache-first. The menu's Offline scores setting syncs scores for songs on active set lists (default), all repertoire, or none, and also caches those songs' pages. Background sync skips mobile data and Save-Data; Sync now works anywhere. Learning tracks are online-only.
 - Generic OIDC auth provider (stub only; sgmc-identity is the one real provider).
 - Any of ChoirMate's non-music features (members, messages, polls, events, documents). Out of scope unless a choir asks for them.

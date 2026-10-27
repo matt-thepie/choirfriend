@@ -244,7 +244,7 @@ export function PdfViewer({
     setPdf(null);
     setIntrinsicPageSize(null);
     setPdfLoadError(null);
-    const task = pdfjsLib.getDocument(pdfFile.url);
+    const task = pdfjsLib.getDocument({ url: pdfFile.url, disableRange: true }); // whole file, so the service worker can cache it
     task.promise.then(
       async (loaded) => {
         if (cancelled) return;
