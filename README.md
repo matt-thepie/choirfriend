@@ -4,8 +4,10 @@ A self-hosted, open-source web app for choirs. It does what Choirmate does — s
 
 ## What it does
 
-- PDF viewer for sheet music with two annotation layers: per-user private notes and a shared layer the whole choir can edit.
-- Repeat / coda / D.S. markers you can drop on the score, and a "follow" mode that jumps between them.
+- PDF viewer for sheet music that opens in a distraction-free read mode, with private marks and shared marks that can be limited to chosen voice parts.
+- Repeat / coda / D.S. markers you can drop on the score and tap to follow.
+- "Shade my part": a pale band behind the member's own stave, guessed from the stave labels.
+- Set lists that flow from one song's last page to the next song, with the music player following along.
 - Learning tracks (audio) attached to each piece, with tempo slowdown that preserves pitch.
 - A piano widget for notebashing.
 - Pieces bundle PDFs + tracks + notes together; auth + roles come from a pluggable identity provider.
@@ -55,14 +57,21 @@ Open <http://localhost:5173>. The client calls `/api/health` on the server and s
 ```
 choirfriend/
 ├── .env.example
+├── .github/workflows/deploy.yml   Push to main → deploy to the VPS
+├── scripts/                B2 CORS rules + apply script
 ├── server/                 Fastify backend (Node 24 native TS — no build step)
 │   ├── src/
 │   │   ├── server.ts       Entry point
 │   │   ├── config.ts       Env-driven config
-│   │   ├── routes/
-│   │   │   └── health.ts
-│   │   ├── db/
-│   │   │   └── index.ts    node:sqlite + schema + user upsert
+│   │   ├── seed.ts
+│   │   ├── routes/         health, pieces, files, annotations, setlists,
+│   │   │                   sections, me, offline, import
+│   │   ├── db/             node:sqlite schema + migrations (index.ts), and one
+│   │   │                   module per area: pieces, pieceExtras, annotations,
+│   │   │                   sections, setlists
+│   │   ├── storage/b2.ts   Presigned B2 uploads/downloads
+│   │   ├── import/         ChoirMate importer, PDF analysis for bulk import
+│   │   ├── tools/          One-off maintenance scripts (backfills, merge, dedupe)
 │   │   └── auth/
 │   │       ├── types.ts        AuthProvider interface
 │   │       ├── index.ts        Provider registry (env-driven)
@@ -74,10 +83,21 @@ choirfriend/
 │   ├── data/               (gitignored — runtime SQLite file)
 │   └── package.json
 └── client/                 Vite + React 19 + Tailwind v4 + shadcn/ui
+    ├── sw/sw.js            Service worker (precache list injected at build)
     ├── src/
-    │   ├── main.tsx, App.tsx
-    │   ├── components/ui/  shadcn primitives (run `npx shadcn add` to extend)
-    │   ├── lib/utils.ts    shadcn cn() helper
+    │   ├── main.tsx, App.tsx, router.ts
+    │   ├── components/
+    │   │   ├── *Screen.tsx     Set lists, set list, repertoire, song, import, sign-in
+    │   │   ├── PdfViewer/      Viewer, page canvas + ink, marker badges, uploads
+    │   │   ├── Player/         Persistent mini player bar
+    │   │   ├── AudioPlayer/, Piano/
+    │   │   └── ui/             button, popover (renders into body so toolbars can't clip it)
+    │   ├── player/PlayerContext.tsx   Queue + playback shared across screens
+    │   ├── hooks/          Data hooks (pieces, set lists, annotations, sections,
+    │   │                   set list flow, offline scores, install prompt…)
+    │   ├── lib/            pdfjs setup, offline cache, pageLayout (stave/system
+    │   │                   detection), partLine (which stave is "my part")
+    │   ├── types/annotations.ts
     │   └── index.css       Tailwind v4 entry with @theme tokens
     └── package.json
 ```
@@ -122,16 +142,18 @@ The rules applied are in `scripts/b2-cors-rules.json` — edit the `allowedOrigi
 
 ## Deployment
 
-The server has no build step. On the VPS, GitHub Actions runs:
+Pushing to `main` deploys: `.github/workflows/deploy.yml` SSHes to the VPS and runs
 
 ```bash
-git pull
-cd server && npm ci --omit=dev
+git pull origin main
+cd server && npm ci
 cd ../client && npm ci && npm run build
-pm2 restart choirfriend
+pm2 restart choirfriend --update-env
 ```
 
-The Fastify server serves `client/dist/` as static assets in production. nginx fronts everything and handles TLS.
+The server has no build step and runs under Node 24 via pm2. nginx serves `client/dist/` statically, proxies `/api` and `/auth` to Fastify, and handles TLS. Schema changes are applied by `server/src/db/index.ts` on start-up, so there is no separate migration step. The client and server deploy together, so a change that adds a field on both sides is safe to push in one go.
+
+Home-screen (PWA) installs pick up a new build only after the app is fully closed and reopened; a service-worker change needs that twice.
 
 ## Open design questions
 
@@ -165,19 +187,35 @@ The SGMC repertoire (101 songs, ~640 files) is imported from ChoirMate.
 
 Built:
 
-- Information architecture, labels and flows match ChoirMate so members need no retraining: **Set lists | Repertoire** toggle (Set lists is the landing page), admins get **Switch to edit mode / view mode**, and members never see admin controls.
+- Information architecture, labels and flows match ChoirMate so members need no retraining: **Set lists | Repertoire** toggle (Set lists is the landing page), admins get an **Edit mode** toggle (solid when on), and members never see admin controls.
 - Repertoire: one flat table (Title, Artist/Arranger, Sheet music tick + count), search, sort, letter groups with an A–Z strip, "Add new song".
 - Song page, audio-first: breadcrumb, **Remarks / Lyrics / Links**, section dropdown defaulting to the member's own part, **Sheet music** list (open in the annotating viewer, print, download), **Audio files for <section>** rows with round play button, duration, "Shared by", date, kebab; **How confident are you performing this song?** faces; **Private notes**.
 - Edit mode on a song: Repertoire settings (Title, Artist/Arranger), one audio block per section with its own **Add audio** that pre-assigns the part, Edit / Replace file / Delete per file, remark text areas per section, add/remove links, Add sheet music / lyrics / score.
 - File kinds: sheet music (PDF), audio, **lyrics** (pdf/docx/rtf/txt/odt/md) and **scores** (MuseScore / MusicXML, only shown to admins and `SCORE_ROLES`).
-- PDF viewer with pen annotations and navigation markers on private and shared layers; read/perform mode; fit-to-width on phones.
-- Set lists: picture tiles, create / rename / drag reorder / archive / copy / delete / Order, one list pinned as "this week"; **Practice list** panel ("Viewing content for" + section) queues one track per song; the virtual **All songs** list.
-- Persistent mini player (72px card, seek bar, 48px play) with speed 0.5–1.5x, A-B loop, repeat and Media Session for lock-screen controls.
-- Design system: deep teal field (the logo's palette), white cards, Inter, Material Symbols, 16px base, 44px tap targets, dark mode via `prefers-color-scheme`; installable PWA (manifest with screenshots, in-app Install button and iOS instructions).
+- PDF viewer:
+  - Opens in **read mode** by default (a link without `?read=1` opens the normal view). The read-mode toolbar floats over the score, appears on a tap in the middle of the page and hides after 4 seconds untouched (not while marking up or with a menu open). Edge taps and swipes turn pages. The screen is kept awake (Wake Lock API) while a score is open in read mode.
+  - **Scroll / Pages** layout, remembered per device; fit-to-width on phones; loading spinner with download progress.
+  - Toolbar is one **Mark up** toggle: reading controls (Jump to, Scroll/Pages, zoom, Shade my part, Listen) on the main row, and while marking up a second row with a large **Undo**, **Pen | Highlighter | Marker**, colour, **Private | Shared** with **For:** parts, and **Clear my private…**. Two-finger tap undoes. On phones rows wrap and less-used controls sit behind **More**; there is no horizontally scrolling toolbar.
+  - Highlighter strokes multiply under pen strokes; six pen and five highlighter colours, chosen per device. New marks default to **Private** (the last choice is remembered per device).
+  - Shared marks can be limited to one or more voice parts; they are visible only to members of those parts and the author. Older shared marks (no parts set) are visible to everyone.
+  - Markers: tapping an end-repeat goes back to the nearest start-repeat (or the top), a 1st-time bar goes back the same way, and D.S. / D.C. / To Coda go to their targets. Start-repeat, 2nd-time bar, segno, coda and fine are landing points only. Tappable markers show a →.
+  - **Shade my part**: `lib/pageLayout.ts` finds five-line staves and joins them into systems; `lib/partLine.ts` picks the member's stave from the printed labels and carries it forward by stave position. **Adjust** lets a member tap the right stave per system (saved per member per file); the on/off switch is per member.
+  - Safe-area padding for iPad / iPhone home-screen installs.
+- Set lists: picture tiles, create / rename / drag reorder / archive / copy / delete / Order, one list pinned as "this week"; in-list search (title, composer, arranger); **Practice list** panel ("Viewing content for" + section) queues one track per song; the virtual **All songs** list.
+  - Opening a score from a set list makes it flow: turning past the last page opens the next song's default sheet (prefetched in the background if under 8 MB), with **Next: title** / previous-song buttons and an end-of-list card in Scroll view.
+  - When the player is playing that same set list, the two stay linked: the player moving on opens the next score, and turning the score into the next song cues its track paused.
+- Persistent mini player (72px card, seek bar, 48px play) with back-to-start, ±10s, speed 0.5–1.5x, A-B loop, repeat and Media Session for lock-screen controls. In read mode it stays visible if a track is loaded; otherwise **Listen** lists the song's recordings.
+- Design system: deep teal field (the logo's palette), white cards, Inter, Material Symbols, 16px base, 44px tap targets, dark mode via `prefers-color-scheme`; toggle buttons show "on" by fill, not by changing their label; installable PWA (manifest with screenshots, in-app Install button and iOS instructions).
 - Piano widget (sampled grand piano, 2–5 octaves depending on screen width); bulk importer (Claude reads title/composer off PDFs); ChoirMate migration importer and backfill tools.
 - Admin gate on all write routes (members of any `ADMIN_ROLES` group).
 - URLs for every screen (`/`, `/repertoire`, `/setlists/:id`, `/songs/:id`, `/songs/:id/view/:fileId`) so the back button, reloads and shared links work.
 - Optional features: the confidence rating can be hidden with `FEATURE_CONFIDENCE=false` (SGMC runs with it off).
+
+Known limitations:
+
+- Uploads classify lyrics by filename only (`lyric|crib|words`), so a lyric sheet uploaded under another name is filed as sheet music. On 27 Oct 2026, 30 sheet-music files with no staves were moved to Lyrics on the live database (backup: `server/data/choirfriend-before-lyrics-move-20261027.db`).
+- Shade my part needs a text layer for labels: on scanned PDFs the first tap in Adjust sets the line. Photo scans of curved pages (e.g. the second Carol of the Bells) defeat the stave finder.
+- While marking up, one finger draws, so Scroll view needs **Done** to scroll. MD / section leaders cannot see other parts' part-only marks unless they drew them.
 
 Not built (from the ChoirMate brief):
 
