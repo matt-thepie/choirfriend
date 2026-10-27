@@ -369,6 +369,55 @@ export function PdfViewer({
     if (chunked) return goToChunk(chunks[chunkIndex - 1]);
     setCurrentPage((p) => Math.max(1, p - 1));
   }, [chunked, chunks, chunkIndex, goToChunk]);
+  // Swipe to turn pages (or step systems) in page view. One finger, a clear
+  // horizontal flick; in a system view a vertical flick steps too. Ignored
+  // while drawing, while pinch-zoomed, and when the content can still scroll
+  // in the swipe's direction, so panning a zoomed page never flips it.
+  const swipeRef = useRef<{ x: number; y: number; t: number } | null>(null);
+  function onSwipeStart(e: React.TouchEvent): void {
+    swipeRef.current = e.touches.length === 1 ? { x: e.touches[0]!.clientX, y: e.touches[0]!.clientY, t: Date.now() } : null;
+  }
+  function onSwipeMove(e: React.TouchEvent): void {
+    if (e.touches.length > 1) swipeRef.current = null;
+  }
+  function onSwipeEnd(e: React.TouchEvent): void {
+    const start = swipeRef.current;
+    swipeRef.current = null;
+    if (!start || tool !== 'pan') return;
+    if ((window.visualViewport?.scale ?? 1) > 1.05) return;
+    const t = e.changedTouches[0];
+    if (!t) return;
+    const dx = t.clientX - start.x;
+    const dy = t.clientY - start.y;
+    if (Date.now() - start.t > 800) return;
+    const sc = scrollContainerRef.current;
+    const MIN = 50;
+    if (effectiveNavMode === 'scroll') {
+      // Scroll view already scrolls vertically; a sideways flick jumps to the
+      // top of the next / previous page instead.
+      if (!sc || Math.abs(dx) <= MIN || Math.abs(dx) <= 1.5 * Math.abs(dy)) return;
+      if (dx < 0 && sc.scrollLeft + sc.clientWidth < sc.scrollWidth - 2) return;
+      if (dx > 0 && sc.scrollLeft > 2) return;
+      const pages = Array.from(sc.querySelectorAll<HTMLElement>('[data-page]'));
+      const top = sc.getBoundingClientRect().top;
+      // The page whose top is at or above the viewport top is "current".
+      let cur = 0;
+      pages.forEach((el, i) => { if (el.getBoundingClientRect().top - top <= 8) cur = i; });
+      const target = pages[dx < 0 ? cur + 1 : (pages[cur]!.getBoundingClientRect().top - top < -8 ? cur : cur - 1)];
+      if (target) sc.scrollTo({ top: sc.scrollTop + target.getBoundingClientRect().top - top - 4, behavior: 'smooth' });
+      return;
+    }
+    if (Math.abs(dx) > MIN && Math.abs(dx) > 1.5 * Math.abs(dy)) {
+      if (sc && dx < 0 && sc.scrollLeft + sc.clientWidth < sc.scrollWidth - 2) return;
+      if (sc && dx > 0 && sc.scrollLeft > 2) return;
+      if (dx < 0) nextPage(); else prevPage();
+    } else if (chunked && Math.abs(dy) > MIN && Math.abs(dy) > 1.5 * Math.abs(dx)) {
+      if (sc && dy < 0 && sc.scrollTop + sc.clientHeight < sc.scrollHeight - 2) return;
+      if (sc && dy > 0 && sc.scrollTop > 2) return;
+      if (dy < 0) nextPage(); else prevPage();
+    }
+  }
+
   const canPrev = chunked ? chunkIndex > 0 : currentPage > 1;
   const canNext = chunked ? chunkIndex < chunks.length - 1 : currentPage < pageCount;
 
@@ -796,7 +845,14 @@ export function PdfViewer({
         )}
       </header>
 
-      <div ref={stageRef} className="flex-1 relative min-h-0">
+      <div
+        ref={stageRef}
+        className="flex-1 relative min-h-0"
+        onTouchStart={onSwipeStart}
+        onTouchMove={onSwipeMove}
+        onTouchEnd={onSwipeEnd}
+        onTouchCancel={() => { swipeRef.current = null; }}
+      >
         {readMode && (
           // Phone read mode: the score fills the screen; two floating buttons
           // (tools, exit) sit over it so nothing is lost in a scrolling bar.
