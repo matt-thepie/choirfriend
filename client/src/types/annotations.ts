@@ -113,6 +113,8 @@ interface AnnotationCommon {
   fileId?: number;
   authorEmail?: string;
   isMine?: boolean;
+  /** Shared layer only: the voice parts it's for. Null/absent = everyone. */
+  sectionIds?: number[] | null;
   createdAt?: number;
   updatedAt?: number;
 }

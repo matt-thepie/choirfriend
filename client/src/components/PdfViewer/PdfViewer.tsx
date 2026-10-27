@@ -46,6 +46,8 @@ interface PdfViewerProps {
   /** Whether the current user holds an admin role. Gates the upload and
    *  delete UI so we don't show buttons that 403 on click. */
   isAdmin?: boolean;
+  /** The member's own voice part; offered first when sharing with a part. */
+  mySectionId?: number | null;
   /** Which PDF to open first (from a sheet-music row). Defaults to the first. */
   initialFileId?: number | null;
   /** Read mode only: whether the user has tucked the player bar away. */
@@ -82,6 +84,15 @@ const FIT_OPTIONS: Array<{ value: FitMode; label: string; title: string }> = [
 ];
 const FIT_KEY = 'choirfriend.readFit';
 const INK_COLORS_KEY = 'choirfriend.inkColors';
+const SHARE_WITH_KEY = 'choirfriend.shareWith';
+function loadShareWith(): number[] {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SHARE_WITH_KEY) ?? '[]') as unknown;
+    return Array.isArray(saved) ? saved.filter((n): n is number => Number.isInteger(n)) : [];
+  } catch {
+    return [];
+  }
+}
 function loadInkColors(): Record<InkPen, string> {
   const colors: Record<InkPen, string> = { pen: INK_COLORS.pen[1]!, highlighter: INK_COLORS.highlighter[0]! };
   try {
@@ -156,6 +167,7 @@ export function PdfViewer({
   onExitReadMode,
   onEnterReadMode,
   isAdmin = false,
+  mySectionId = null,
   initialFileId = null,
   playerHidden = false,
   onPlayerHiddenChange,
@@ -191,6 +203,21 @@ export function PdfViewer({
   // balloon).
   const [zoom, setZoom] = useState(1);
   const [drawTarget, setDrawTarget] = useState<AnnotationLayer>('shared');
+  /** Which parts new shared marks are for; empty = everyone. */
+  const { sections, byId: sectionsById } = useSections();
+  const [shareWith, setShareWithState] = useState<number[]>(loadShareWith);
+  const setShareWith = (ids: number[]): void => {
+    setShareWithState(ids);
+    try {
+      localStorage.setItem(SHARE_WITH_KEY, JSON.stringify(ids));
+    } catch {
+      // storage unavailable
+    }
+  };
+  // Forget parts that no longer exist (renamed/deleted by an admin).
+  const shareWithIds = shareWith.filter((id) => sectionsById.has(id));
+  const sectionIdsFor = (layer: AnnotationLayer): number[] | null =>
+    layer === 'shared' && shareWithIds.length ? shareWithIds : null;
   const [tool, setTool] = useState<AnnotationTool>('pan');
   // Entering read mode drops the marker tool — you're performing, not placing
   // marks, so taps should jump/navigate rather than drop new markers.
@@ -540,6 +567,7 @@ export function PdfViewer({
     const annotation: NewAnnotationInput = {
       fileId: pdfFile.id,
       kind: 'ink',
+      sectionIds: sectionIdsFor(input.layer),
       ...input,
     };
     void add(annotation);
@@ -556,6 +584,7 @@ export function PdfViewer({
     void add({
       fileId: pdfFile.id,
       kind: 'marker',
+      sectionIds: sectionIdsFor(input.layer),
       ...input,
     });
     if (KIND_TAKES_LABEL[input.markerKind]) {
@@ -729,6 +758,10 @@ export function PdfViewer({
         </ToolButton>
       </div>
 
+      {tool !== 'pan' && drawTarget === 'shared' && (
+        <ShareWithPicker sections={sections} mySectionId={mySectionId} value={shareWithIds} onChange={setShareWith} />
+      )}
+
       <div className="h-6 w-px bg-border mx-1" />
 
       <label className="text-xs flex items-center gap-1 select-none cursor-pointer">
@@ -747,6 +780,7 @@ export function PdfViewer({
       <div className="ml-auto flex items-center gap-2">
         <JumpToDropdown
           markers={markersInOrder}
+          sectionsById={sectionsById}
           open={jumpOpen}
           onOpenChange={setJumpOpen}
           onJump={jumpToMarker}
@@ -791,6 +825,10 @@ export function PdfViewer({
         </div>
       )}
 
+      {inkTool && drawTarget === 'shared' && (
+        <ShareWithPicker sections={sections} mySectionId={mySectionId} value={shareWithIds} onChange={setShareWith} />
+      )}
+
       <div className="h-5 w-px bg-border mx-1" />
 
       {/* Scroll / Pages toggle */}
@@ -828,6 +866,7 @@ export function PdfViewer({
         )}
         <JumpToDropdown
           markers={markersInOrder}
+          sectionsById={sectionsById}
           open={jumpOpen}
           onOpenChange={setJumpOpen}
           onJump={jumpToMarker}
@@ -1063,6 +1102,71 @@ function ToolButton({
   );
 }
 
+/**
+ * Who new shared marks are for: everyone, or one or more voice parts. Part
+ * marks are only shown to members of those parts (and whoever drew them), so
+ * each section can mark up its own line without cluttering everyone else's.
+ */
+function ShareWithPicker({
+  sections,
+  mySectionId,
+  value,
+  onChange,
+}: {
+  sections: Section[];
+  mySectionId: number | null;
+  value: number[];
+  onChange: (ids: number[]) => void;
+}) {
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const chosen = sections.filter((s) => value.includes(s.id));
+  const summary = chosen.length ? chosen.map((s) => s.badge).join(', ') : 'Everyone';
+  const toggle = (id: number) => onChange(value.includes(id) ? value.filter((v) => v !== id) : [...value, id]);
+  const row = 'w-full text-left px-3 py-2 text-sm rounded hover:bg-accent flex items-center gap-2';
+  return (
+    <div ref={anchorRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        title="Who sees new shared marks"
+        className="h-8 px-2 rounded-md border border-border bg-background hover:bg-accent flex items-center gap-1 text-xs"
+      >
+        <span className="text-muted-foreground">For</span>
+        <span className="font-semibold">{summary}</span>
+        <span>▾</span>
+      </button>
+      {open && (
+        <Popover anchorRef={anchorRef} onClose={() => setOpen(false)} className="p-1 min-w-[12rem]">
+          <button
+            type="button"
+            className={row}
+            onClick={() => {
+              onChange([]);
+              setOpen(false);
+            }}
+          >
+            <input type="radio" readOnly checked={value.length === 0} tabIndex={-1} />
+            Everyone
+          </button>
+          <div className="h-px bg-border my-1" />
+          {sections.map((s) => (
+            <button key={s.id} type="button" className={row} onClick={() => toggle(s.id)}>
+              <input type="checkbox" readOnly checked={value.includes(s.id)} tabIndex={-1} />
+              {s.label}
+              {s.id === mySectionId && <span className="ml-auto text-xs text-muted-foreground">you</span>}
+            </button>
+          ))}
+          <p className="px-3 pt-1 pb-2 text-xs text-muted-foreground max-w-[14rem]">
+            Part marks are only shown to members of those parts.
+          </p>
+        </Popover>
+      )}
+    </div>
+  );
+}
+
 /** Colour swatch for the active pen; opens a row of colours to pick from. */
 function InkColorPicker({ pen, color, onChange }: { pen: InkPen; color: string; onChange: (c: string) => void }) {
   const anchorRef = useRef<HTMLDivElement>(null);
@@ -1157,12 +1261,13 @@ function ZoomControls({ zoom, onZoom }: { zoom: number; onZoom: (z: number) => v
 
 interface JumpToDropdownProps {
   markers: MarkerAnnotation[];
+  sectionsById: Map<number, Section>;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onJump: (m: MarkerAnnotation) => void;
 }
 
-function JumpToDropdown({ markers, open, onOpenChange, onJump }: JumpToDropdownProps) {
+function JumpToDropdown({ markers, sectionsById, open, onOpenChange, onJump }: JumpToDropdownProps) {
   const anchorRef = useRef<HTMLDivElement>(null);
   return (
     <div ref={anchorRef} className="relative">
@@ -1189,7 +1294,9 @@ function JumpToDropdown({ markers, open, onOpenChange, onJump }: JumpToDropdownP
                 <span className="ml-2 text-muted-foreground">{m.label}</span>
               )}
               <span className={cn('ml-2 text-xs uppercase', m.layer === 'shared' ? 'text-amber-700' : 'text-blue-700')}>
-                {m.layer}
+                {m.layer === 'shared' && m.sectionIds?.length
+                  ? m.sectionIds.map((id) => sectionsById.get(id)?.badge ?? '?').join(', ')
+                  : m.layer}
               </span>
             </button>
           ))}

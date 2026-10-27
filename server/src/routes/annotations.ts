@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import {
+  canSeeAnnotation,
   createAnnotation,
   deleteAnnotation,
   getAnnotationById,
@@ -10,6 +11,8 @@ import {
   type MarkerKind,
 } from '../db/annotations.ts';
 import { getPieceWithFiles } from '../db/pieces.ts';
+import { getUserSectionIdByEmail } from '../db/index.ts';
+import { sectionExists } from '../db/sections.ts';
 import { requireAuth } from '../auth/middleware.ts';
 
 const MARKER_KINDS: readonly MarkerKind[] = [
@@ -32,6 +35,7 @@ interface CreateBodyCommon {
   fileId: number;
   layer: AnnotationLayer;
   page: number;
+  sectionIds?: number[] | null;
 }
 
 type CreateBody =
@@ -62,6 +66,11 @@ function validateBody(body: unknown): { ok: true; value: CreateBody } | { ok: fa
   if (typeof b.fileId !== 'number') return { ok: false, reason: 'fileId missing' };
   if (b.layer !== 'private' && b.layer !== 'shared') return { ok: false, reason: 'invalid layer' };
   if (typeof b.page !== 'number') return { ok: false, reason: 'page missing' };
+  if (b.sectionIds != null) {
+    if (!Array.isArray(b.sectionIds) || !b.sectionIds.every((id) => Number.isInteger(id) && sectionExists(id as number))) {
+      return { ok: false, reason: 'invalid sectionIds' };
+    }
+  }
 
   if (b.kind === 'ink') {
     if (b.pen !== undefined && b.pen !== 'pen' && b.pen !== 'highlighter') return { ok: false, reason: 'invalid pen' };
@@ -137,6 +146,7 @@ export const annotationRoutes: FastifyPluginAsync = async (app) => {
         userId: user.internalId,
         layer: body.layer,
         page: body.page,
+        sectionIds: body.sectionIds ?? null,
       };
 
       const input: CreateAnnotationInput =
@@ -168,7 +178,9 @@ export const annotationRoutes: FastifyPluginAsync = async (app) => {
     async (req, reply) => {
       const user = req.user!;
       const existing = getAnnotationById(req.params.annotationId, user.internalId);
-      if (!existing) return reply.code(404).send({ error: 'not found' });
+      if (!existing || !canSeeAnnotation(existing, getUserSectionIdByEmail(user.email))) {
+        return reply.code(404).send({ error: 'not found' });
+      }
 
       if (existing.layer === 'private' && !existing.isMine) {
         return reply.code(403).send({ error: 'forbidden' });

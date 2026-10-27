@@ -481,6 +481,7 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
                 onExitReadMode={() => setReadMode(false)}
                 onEnterReadMode={() => setReadMode(true)}
                 isAdmin={editing}
+                mySectionId={mySectionId}
                 playerHidden={readPlayerHidden}
                 onPlayerHiddenChange={setReadPlayerHidden}
               />

@@ -160,6 +160,10 @@ addColumnIfMissing('files', 'section_id INTEGER REFERENCES sections(id)');
 // they pick one from the menu.
 addColumnIfMissing('users', 'section_id INTEGER REFERENCES sections(id)');
 
+// Which voice parts a shared annotation is for, as a JSON array of section
+// ids. NULL = everyone. Only members of those parts (and the author) see it.
+addColumnIfMissing('annotations', 'section_ids TEXT');
+
 // Track length, shown under the play button on audio rows. Imported from
 // ChoirMate's metadata; measured in the browser for new uploads. NULL = unknown.
 addColumnIfMissing('files', 'duration_ms INTEGER');

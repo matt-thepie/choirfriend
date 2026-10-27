@@ -45,6 +45,8 @@ interface AnnotationCommon {
   authorEmail: string;
   /** Whether the requesting user owns this annotation. Server-computed. */
   isMine: boolean;
+  /** Shared layer only: the voice parts it's for. Null = everyone. */
+  sectionIds: number[] | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -80,6 +82,7 @@ interface AnnotationRow {
   page: number;
   kind: string;
   payload: string;
+  section_ids: string | null;
   created_at: number;
   updated_at: number;
   author_email: string;
@@ -95,6 +98,7 @@ function rowToDTO(row: AnnotationRow, requesterId: number): AnnotationDTO {
     page: row.page,
     authorEmail: row.author_email,
     isMine: row.user_id === requesterId,
+    sectionIds: row.section_ids ? (JSON.parse(row.section_ids) as number[]) : null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -125,13 +129,16 @@ const listForPieceStmt = db.prepare(`
   FROM annotations a
   JOIN users u ON u.id = a.user_id
   WHERE a.piece_id = ?
-    AND (a.layer = 'shared' OR (a.layer = 'private' AND a.user_id = ?))
+    AND (a.user_id = ? OR (a.layer = 'shared' AND (
+      a.section_ids IS NULL
+      OR EXISTS (SELECT 1 FROM json_each(a.section_ids) WHERE value = (SELECT section_id FROM users WHERE id = ?))
+    )))
   ORDER BY a.created_at, a.id
 `);
 
 const insertStmt = db.prepare(`
-  INSERT INTO annotations (id, piece_id, file_id, user_id, layer, page, kind, payload)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  INSERT INTO annotations (id, piece_id, file_id, user_id, layer, page, kind, payload, section_ids)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
 const getByIdStmt = db.prepare(`
@@ -144,7 +151,7 @@ const getByIdStmt = db.prepare(`
 const deleteStmt = db.prepare(`DELETE FROM annotations WHERE id = ?`);
 
 export function listAnnotationsForPiece(pieceId: number, requesterId: number): AnnotationDTO[] {
-  return (listForPieceStmt.all(pieceId, requesterId) as AnnotationRow[]).map((r) => rowToDTO(r, requesterId));
+  return (listForPieceStmt.all(pieceId, requesterId, requesterId) as AnnotationRow[]).map((r) => rowToDTO(r, requesterId));
 }
 
 interface CreateCommon {
@@ -154,6 +161,8 @@ interface CreateCommon {
   userId: number;
   layer: AnnotationLayer;
   page: number;
+  /** Shared layer only; null or empty = everyone. */
+  sectionIds: number[] | null;
 }
 
 export type CreateAnnotationInput =
@@ -186,9 +195,17 @@ export function createAnnotation(input: CreateAnnotationInput): AnnotationDTO {
     input.page,
     input.kind,
     payload,
+    input.layer === 'shared' && input.sectionIds?.length ? JSON.stringify(input.sectionIds) : null,
   );
   const row = getByIdStmt.get(input.id) as AnnotationRow;
   return rowToDTO(row, input.userId);
+}
+
+/** Whether a member in `sectionId` can see this annotation (see the list query). */
+export function canSeeAnnotation(a: AnnotationDTO, sectionId: number | null): boolean {
+  if (a.isMine) return true;
+  if (a.layer === 'private') return false;
+  return a.sectionIds === null || (sectionId !== null && a.sectionIds.includes(sectionId));
 }
 
 export function getAnnotationById(id: string, requesterId: number): AnnotationDTO | null {

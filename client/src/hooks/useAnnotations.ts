@@ -15,6 +15,7 @@ interface NewInkInput {
   fileId: number;
   layer: AnnotationLayer;
   page: number;
+  sectionIds?: number[] | null;
   kind: 'ink';
   pen: InkPen;
   color: string;
@@ -26,6 +27,7 @@ interface NewMarkerInput {
   fileId: number;
   layer: AnnotationLayer;
   page: number;
+  sectionIds?: number[] | null;
   kind: 'marker';
   markerKind: MarkerKind;
   label: string | null;
@@ -50,6 +52,7 @@ function makeOptimistic(id: string, pieceId: number, input: NewAnnotationInput):
     pieceId,
     fileId: input.fileId,
     isMine: true,
+    sectionIds: input.layer === 'shared' && input.sectionIds?.length ? input.sectionIds : null,
   };
   if (input.kind === 'ink') {
     return {
