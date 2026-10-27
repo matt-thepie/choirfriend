@@ -1,5 +1,5 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { getUserSectionIdByEmail } from '../db/index.ts';
+import { getUserPartLineByEmail, getUserSectionIdByEmail } from '../db/index.ts';
 import { getProvider, listProviders } from './index.ts';
 import { canSeeScores, isAdmin, partFromIdentity, requireAuth, resolveUser, syncUser } from './middleware.ts';
 import { getConfig } from '../config.ts';
@@ -74,6 +74,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       sectionId: getUserSectionIdByEmail(user.email),
       // Part is managed in the SGMC identity service; the picker is read-only.
       sectionFromIdentity: partFromIdentity(user),
+      partLine: getUserPartLineByEmail(user.email),
       features: config.features,
     };
   });

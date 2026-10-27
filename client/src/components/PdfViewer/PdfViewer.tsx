@@ -25,6 +25,8 @@ import { replaceFile } from '@/hooks/useUploadFile.ts';
 import { useAnnotations, type NewAnnotationInput } from '@/hooks/useAnnotations.ts';
 import { PdfPage } from './PdfPage.tsx';
 import { analysePage, type Box, type PageLayout } from '@/lib/pageLayout.ts';
+import { overrideKey, partFromSection, resolvePartLine, type PartLineOverrides } from '@/lib/partLine.ts';
+import type { StaveTarget } from './PdfPage.tsx';
 import { UploadButton } from './UploadButton.tsx';
 import { MarkerGlyph } from './markerIcons.tsx';
 
@@ -48,6 +50,9 @@ interface PdfViewerProps {
   isAdmin?: boolean;
   /** The member's own voice part; offered first when sharing with a part. */
   mySectionId?: number | null;
+  /** "My line": highlight the member's own stave. A member-wide setting. */
+  partLineOn?: boolean;
+  onPartLineChange?: (on: boolean) => void;
   /** Which PDF to open first (from a sheet-music row). Defaults to the first. */
   initialFileId?: number | null;
   /** Read mode only: whether the user has tucked the player bar away. */
@@ -168,6 +173,8 @@ export function PdfViewer({
   onEnterReadMode,
   isAdmin = false,
   mySectionId = null,
+  partLineOn = false,
+  onPartLineChange,
   initialFileId = null,
   playerHidden = false,
   onPlayerHiddenChange,
@@ -331,11 +338,12 @@ export function PdfViewer({
     };
   }, [pdfFile]);
 
-  // Read mode crops margins and can step by system, so analyse each page
-  // once (cached per file) as soon as the score is open in read mode.
+  // Read mode crops margins and can step by system, and "My line" needs the
+  // staves, so analyse each page once (cached per file) when either is on.
+  const needLayouts = readMode || partLineOn;
   useEffect(() => {
     setLayouts(new Map());
-    if (!pdf || !readMode || !pdfFile) return;
+    if (!pdf || !needLayouts || !pdfFile) return;
     const fileId = pdfFile.id;
     let cancelled = false;
     (async () => {
@@ -348,7 +356,98 @@ export function PdfViewer({
     return () => {
       cancelled = true;
     };
-  }, [pdf, readMode, pdfFile?.id]);
+  }, [pdf, needLayouts, pdfFile?.id]);
+
+  // --- My line -------------------------------------------------------------
+  const [lineOverrides, setLineOverrides] = useState<PartLineOverrides>({});
+  const [adjustingLine, setAdjustingLine] = useState(false);
+  useEffect(() => {
+    setLineOverrides({});
+    if (!partLineOn || !pdfFile) return;
+    let cancelled = false;
+    fetch(`/api/me/part-lines/${pdfFile.id}`, { credentials: 'include' })
+      .then((r) => (r.ok ? (r.json() as Promise<PartLineOverrides>) : {}))
+      .then((o) => {
+        if (!cancelled) setLineOverrides(o);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [partLineOn, pdfFile?.id]);
+  useEffect(() => {
+    if (!partLineOn) setAdjustingLine(false);
+  }, [partLineOn]);
+  const saveLineOverrides = (next: PartLineOverrides): void => {
+    setLineOverrides(next);
+    if (!pdfFile) return;
+    void fetch(`/api/me/part-lines/${pdfFile.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(next),
+    });
+  };
+  const mySection = mySectionId !== null ? sectionsById.get(mySectionId) ?? null : null;
+  const myPart = useMemo(() => (mySection ? partFromSection(mySection.label, mySection.badge) : null), [mySection]);
+  const linePicks = useMemo(
+    () => (partLineOn && pdf ? resolvePartLine(layouts, pdf.numPages, myPart, lineOverrides) : []),
+    [partLineOn, pdf, layouts, myPart, lineOverrides],
+  );
+  /** Bands to draw, by page: the picked stave, padded to take in notes and
+   *  words just above and below it without reaching the next stave. */
+  const lineBandsByPage = useMemo(() => {
+    const m = new Map<number, Box[]>();
+    for (const { page, system, stave } of linePicks) {
+      const L = layouts.get(page);
+      const sys = L?.systems[system];
+      const st = sys?.staves[stave];
+      if (!L || !sys || !st) continue;
+      const pad = (st.y1 - st.y0) * 0.7;
+      const prev = sys.staves[stave - 1];
+      const next = sys.staves[stave + 1];
+      const box: Box = {
+        x0: st.x0 - 0.008,
+        x1: L.content.x1 - 0.004,
+        y0: Math.max(st.y0 - pad, prev ? (prev.y1 + st.y0) / 2 : sys.y0),
+        y1: Math.min(st.y1 + pad, next ? (st.y1 + next.y0) / 2 : sys.y1),
+      };
+      m.set(page, [...(m.get(page) ?? []), box]);
+    }
+    return m;
+  }, [linePicks, layouts]);
+  const staveTargetsFor = (page: number): StaveTarget[] | undefined => {
+    if (!adjustingLine) return undefined;
+    const L = layouts.get(page);
+    if (!L) return [];
+    const picked = new Set(linePicks.filter((p) => p.page === page).map((p) => `${p.system}:${p.stave}`));
+    return L.systems.flatMap((sys, system) =>
+      sys.staves.map((st, stave) => ({
+        system,
+        stave,
+        picked: picked.has(`${system}:${stave}`),
+        box: { x0: st.x0 - 0.008, x1: L.content.x1 - 0.004, y0: st.y0 - 0.004, y1: st.y1 + 0.004 },
+      })),
+    );
+  };
+  /** Tap a stave: it becomes my line for that system (and, by carry-over,
+   *  the systems after it); tap my line again to clear that system. */
+  const pickStave = (page: number, system: number, stave: number): void => {
+    const already = linePicks.some((p) => p.page === page && p.system === system && p.stave === stave);
+    saveLineOverrides({ ...lineOverrides, [overrideKey(page, system)]: already ? -1 : stave });
+  };
+  const myLineControl = onPartLineChange && (
+    <MyLineControl
+      on={partLineOn}
+      onChange={onPartLineChange}
+      partName={mySection?.label ?? null}
+      guessable={!!myPart}
+      adjusting={adjustingLine}
+      onAdjustingChange={setAdjustingLine}
+      hasCorrections={Object.keys(lineOverrides).length > 0}
+      onReset={() => saveLineOverrides({})}
+    />
+  );
 
   // Page-turn always re-renders one page; in edit mode we always scroll.
   const effectiveNavMode: NavMode = readMode ? navMode : 'scroll';
@@ -773,6 +872,8 @@ export function PdfViewer({
         Show shared
       </label>
 
+      {myLineControl}
+
       <div className="h-6 w-px bg-border mx-1" />
 
       <ZoomControls zoom={zoom} onZoom={setZoom} />
@@ -828,6 +929,8 @@ export function PdfViewer({
       {inkTool && drawTarget === 'shared' && (
         <ShareWithPicker sections={sections} mySectionId={mySectionId} value={shareWithIds} onChange={setShareWith} />
       )}
+
+      {myLineControl}
 
       <div className="h-5 w-px bg-border mx-1" />
 
@@ -1005,6 +1108,9 @@ export function PdfViewer({
                 key={`page-${currentPage}`}
                 pdf={pdf}
                 pageNumber={currentPage}
+                partBands={lineBandsByPage.get(currentPage)}
+                staveTargets={staveTargetsFor(currentPage)}
+                onPickStave={(system, stave) => pickStave(currentPage, system, stave)}
                 scale={effectiveScale}
                 clip={chunk?.clip ?? null}
                 bare={readMode}
@@ -1028,6 +1134,9 @@ export function PdfViewer({
                   key={pageNumber}
                   pdf={pdf}
                   pageNumber={pageNumber}
+                  partBands={lineBandsByPage.get(pageNumber)}
+                  staveTargets={staveTargetsFor(pageNumber)}
+                  onPickStave={(system, stave) => pickStave(pageNumber, system, stave)}
                   scale={readMode ? readScrollScale(pageNumber) : effectiveScale}
                   clip={readMode ? layouts.get(pageNumber)?.content ?? null : null}
                   bare={readMode}
@@ -1099,6 +1208,91 @@ function ToolButton({
     >
       {children}
     </button>
+  );
+}
+
+/**
+ * "My line" switch, with Adjust (tap staves to fix the guess) and Reset.
+ * While adjusting, the button itself becomes Done so it's easy to find.
+ */
+function MyLineControl({
+  on,
+  onChange,
+  partName,
+  guessable,
+  adjusting,
+  onAdjustingChange,
+  hasCorrections,
+  onReset,
+}: {
+  on: boolean;
+  onChange: (on: boolean) => void;
+  partName: string | null;
+  guessable: boolean;
+  adjusting: boolean;
+  onAdjustingChange: (adjusting: boolean) => void;
+  hasCorrections: boolean;
+  onReset: () => void;
+}) {
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  if (adjusting) {
+    return (
+      <div className="flex items-center gap-2">
+        <span className="hidden md:inline text-xs text-muted-foreground">Tap your stave in any system that's wrong</span>
+        <Button size="sm" onClick={() => onAdjustingChange(false)}>Done adjusting</Button>
+      </div>
+    );
+  }
+  const row = 'w-full text-left px-3 py-2 text-sm rounded hover:bg-accent flex items-center gap-2 disabled:opacity-50';
+  return (
+    <div ref={anchorRef} className="relative">
+      <div className="flex items-center rounded-md border border-border overflow-hidden">
+        <ToolButton active={on} onClick={() => onChange(!on)} title="Highlight my part's stave">My line</ToolButton>
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-label="My line options"
+          aria-expanded={open}
+          className="h-8 px-1.5 text-xs border-l border-border hover:bg-accent"
+        >
+          ▾
+        </button>
+      </div>
+      {open && (
+        <Popover anchorRef={anchorRef} onClose={() => setOpen(false)} className="p-1 min-w-[14rem]">
+          <p className="px-3 pt-2 pb-1 text-xs text-muted-foreground max-w-[16rem]">
+            {guessable
+              ? `Guessed from the part names printed on the score (${partName}). Fix any system it gets wrong with Adjust.`
+              : partName
+                ? `Can't guess ${partName} from part names. Use Adjust to pick your stave; it carries on to later systems.`
+                : 'Set your voice part in the menu so this can guess, or pick your stave with Adjust.'}
+          </p>
+          <button
+            type="button"
+            className={row}
+            onClick={() => {
+              if (!on) onChange(true);
+              onAdjustingChange(true);
+              setOpen(false);
+            }}
+          >
+            Adjust…
+          </button>
+          <button
+            type="button"
+            className={row}
+            disabled={!hasCorrections}
+            onClick={() => {
+              onReset();
+              setOpen(false);
+            }}
+          >
+            Reset my corrections
+          </button>
+        </Popover>
+      )}
+    </div>
   );
 }
 

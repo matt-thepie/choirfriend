@@ -51,3 +51,14 @@ export async function saveMySection(sectionId: number | null): Promise<void> {
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 }
+
+/** Switch "My line" (highlight my own stave) on or off for this member. */
+export async function saveMyPartLine(on: boolean): Promise<void> {
+  const res = await fetch('/api/me', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ partLine: on }),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+}

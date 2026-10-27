@@ -168,6 +168,19 @@ addColumnIfMissing('annotations', 'section_ids TEXT');
 // ChoirMate's metadata; measured in the browser for new uploads. NULL = unknown.
 addColumnIfMissing('files', 'duration_ms INTEGER');
 
+// "My line": a soft band behind the member's own stave. One on/off switch per
+// member (it follows them round every score) plus their per-file corrections.
+addColumnIfMissing('users', 'part_line INTEGER NOT NULL DEFAULT 0');
+db.exec(`
+  CREATE TABLE IF NOT EXISTS part_lines (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+    -- JSON { "page:system": staveIndex | -1 }, see client lib/partLine.ts.
+    overrides TEXT NOT NULL,
+    PRIMARY KEY (user_id, file_id)
+  );
+`);
+
 db.exec(`
   -- Per-section notes from the MD / section leader ("Remarks for tenors 2").
   CREATE TABLE IF NOT EXISTS piece_remarks (
@@ -254,6 +267,32 @@ export function getUserSectionIdByEmail(email: string): number | null {
 
 export function setUserSectionId(userId: number, sectionId: number | null): void {
   setUserSectionStmt.run(sectionId, userId);
+}
+
+const getPartLineStmt = db.prepare(`SELECT part_line FROM users WHERE email = ?`);
+const setPartLineStmt = db.prepare(`UPDATE users SET part_line = ? WHERE id = ?`);
+const getOverridesStmt = db.prepare(`SELECT overrides FROM part_lines WHERE user_id = ? AND file_id = ?`);
+const setOverridesStmt = db.prepare(`
+  INSERT INTO part_lines (user_id, file_id, overrides) VALUES (?, ?, ?)
+  ON CONFLICT (user_id, file_id) DO UPDATE SET overrides = excluded.overrides
+`);
+
+export function getUserPartLineByEmail(email: string): boolean {
+  const row = getPartLineStmt.get(email) as { part_line: number } | undefined;
+  return !!row?.part_line;
+}
+
+export function setUserPartLine(userId: number, on: boolean): void {
+  setPartLineStmt.run(on ? 1 : 0, userId);
+}
+
+export function getPartLineOverrides(userId: number, fileId: number): Record<string, number> {
+  const row = getOverridesStmt.get(userId, fileId) as { overrides: string } | undefined;
+  return row ? (JSON.parse(row.overrides) as Record<string, number>) : {};
+}
+
+export function setPartLineOverrides(userId: number, fileId: number, overrides: Record<string, number>): void {
+  setOverridesStmt.run(userId, fileId, JSON.stringify(overrides));
 }
 
 // --- User upsert (used by auth middleware) --------------------------------

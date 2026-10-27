@@ -38,6 +38,18 @@ interface PdfPageProps {
   clip?: Box | null;
   /** Hide the frame and page number (read mode). */
   bare?: boolean;
+  /** "My line": soft bands behind the member's own stave (page fractions). */
+  partBands?: Box[];
+  /** Adjusting "My line": every stave on the page, tappable. */
+  staveTargets?: StaveTarget[];
+  onPickStave?: (system: number, stave: number) => void;
+}
+
+export interface StaveTarget {
+  system: number;
+  stave: number;
+  box: Box;
+  picked: boolean;
 }
 
 /**
@@ -65,6 +77,9 @@ export function PdfPage({
   markerFollow,
   clip = null,
   bare = false,
+  partBands = [],
+  staveTargets,
+  onPickStave,
 }: PdfPageProps) {
   const pdfCanvasRef = useRef<HTMLCanvasElement>(null);
   const annotationCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -247,6 +262,16 @@ export function PdfPage({
       data-page={pageNumber}
     >
       <canvas ref={pdfCanvasRef} className="block" />
+      {renderedSize && partBands.length > 0 && (
+        <div
+          className="absolute pointer-events-none"
+          style={{ left: -renderedSize.offX, top: -renderedSize.offY, width: renderedSize.width, height: renderedSize.height, mixBlendMode: 'multiply' }}
+        >
+          {partBands.map((b, i) => (
+            <div key={i} className="absolute rounded-sm bg-sky-200/70" style={pageRect(b, renderedSize)} />
+          ))}
+        </div>
+      )}
       <canvas
         ref={annotationCanvasRef}
         className="absolute inset-0 block"
@@ -281,9 +306,34 @@ export function PdfPage({
             />
           ))}
       </div>
+      {renderedSize && staveTargets && (
+        <div
+          className="absolute"
+          style={{ left: -renderedSize.offX, top: -renderedSize.offY, width: renderedSize.width, height: renderedSize.height }}
+        >
+          {staveTargets.map((t) => (
+            <button
+              key={`${t.system}:${t.stave}`}
+              type="button"
+              aria-label={t.picked ? 'Not my line here' : 'My line'}
+              aria-pressed={t.picked}
+              onClick={() => onPickStave?.(t.system, t.stave)}
+              className={cn(
+                'absolute rounded-sm border-2 border-dashed',
+                t.picked ? 'border-sky-600 bg-sky-400/20' : 'border-sky-400/60 hover:bg-sky-400/10',
+              )}
+              style={pageRect(t.box, renderedSize)}
+            />
+          ))}
+        </div>
+      )}
       {!bare && <div className="absolute -left-10 top-2 text-xs text-muted-foreground select-none tabular-nums">
         {pageNumber}
       </div>}
     </div>
   );
+}
+
+function pageRect(b: Box, size: { width: number; height: number }): React.CSSProperties {
+  return { left: b.x0 * size.width, top: b.y0 * size.height, width: (b.x1 - b.x0) * size.width, height: (b.y1 - b.y0) * size.height };
 }

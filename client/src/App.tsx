@@ -11,7 +11,7 @@ import { SongScreen } from '@/components/SongScreen.tsx';
 import { PlayerBar } from '@/components/Player/PlayerBar.tsx';
 import { PlayerProvider } from '@/player/PlayerContext.tsx';
 import { usePieces } from '@/hooks/usePieces.ts';
-import { useSections, saveMySection } from '@/hooks/useSections.ts';
+import { useSections, saveMySection, saveMyPartLine } from '@/hooks/useSections.ts';
 import { useSetLists } from '@/hooks/useSetLists.ts';
 import { Icon } from '@/components/ui/button.tsx';
 import { useOfflineScores } from '@/hooks/useOfflineScores.ts';
@@ -34,6 +34,8 @@ interface MeResponse {
   sectionId?: number | null;
   /** Part comes from the SGMC identity profile; not editable here. */
   sectionFromIdentity?: boolean;
+  /** "My line" highlighting is switched on. */
+  partLine?: boolean;
 }
 
 /**
@@ -159,6 +161,11 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
   }
   const offerInstall = installer.canPrompt || installer.iosInstructions;
   const [mySectionId, setMySectionId] = useState<number | null>(me.sectionId ?? null);
+  const [partLine, setPartLineState] = useState(me.partLine === true);
+  const setPartLine = (on: boolean): void => {
+    setPartLineState(on);
+    void saveMyPartLine(on).catch(() => setPartLineState(!on));
+  };
   const isAdmin = me.isAdmin === true;
   // Admin controls only render in edit mode — view mode is exactly what members get.
   const editing = isAdmin && editMode;
@@ -482,6 +489,8 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
                 onEnterReadMode={() => setReadMode(true)}
                 isAdmin={editing}
                 mySectionId={mySectionId}
+                partLineOn={partLine}
+                onPartLineChange={setPartLine}
                 playerHidden={readPlayerHidden}
                 onPlayerHiddenChange={setReadPlayerHidden}
               />
