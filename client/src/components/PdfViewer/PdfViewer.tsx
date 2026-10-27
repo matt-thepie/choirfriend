@@ -276,6 +276,18 @@ export function PdfViewer({
     return () => ro.disconnect();
   }, []);
 
+  // Phone read mode floats its buttons over the top-right of the score, so the
+  // music starts below them; otherwise a mark at the top of a system can't be
+  // tapped. Wider screens show the toolbar instead and need no gap.
+  const [isPhone, setIsPhone] = useState(() => typeof window !== 'undefined' && !window.matchMedia('(min-width: 768px)').matches);
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 768px)');
+    const onChange = () => setIsPhone(!mq.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  const topReserve = readMode && isPhone ? 48 : 0;
+
   // Width available to a page in scroll mode (the content box of the padded
   // column, so padding is already excluded). Drives fit-to-width.
   const [contentWidth, setContentWidth] = useState(0);
@@ -464,9 +476,9 @@ export function PdfViewer({
     if (!intrinsicPageSize || containerSize.w === 0 || containerSize.h === 0) return 1.25;
     const margin = 32;
     const w = (containerSize.w - margin * 2) / intrinsicPageSize.w;
-    const h = (containerSize.h - margin * 2) / intrinsicPageSize.h;
+    const h = (containerSize.h - topReserve - margin * 2) / intrinsicPageSize.h;
     return Math.max(0.3, Math.min(4, Math.min(w, h)));
-  }, [containerSize, intrinsicPageSize]);
+  }, [containerSize, intrinsicPageSize, topReserve]);
 
   // Scroll-mode base: fit the page to the available width (phones), but no
   // larger than the old fixed 125% (desktops). Zoom multiplies this.
@@ -496,9 +508,9 @@ export function PdfViewer({
     if (!chunk?.clip || !intrinsicPageSize || containerSize.w === 0) return null;
     const margin = 8;
     const w = (containerSize.w - margin * 2) / ((chunk.clip.x1 - chunk.clip.x0) * intrinsicPageSize.w);
-    const h = (containerSize.h - margin * 2) / ((chunk.clip.y1 - chunk.clip.y0) * intrinsicPageSize.h);
+    const h = (containerSize.h - topReserve - margin * 2) / ((chunk.clip.y1 - chunk.clip.y0) * intrinsicPageSize.h);
     return Math.max(0.3, Math.min(8, w, h));
-  }, [chunk, intrinsicPageSize, containerSize]);
+  }, [chunk, intrinsicPageSize, containerSize, topReserve]);
 
   // Read-mode scroll: crop each page's margins and fit the music to the width.
   const readScrollScale = useCallback(
@@ -1145,6 +1157,7 @@ export function PdfViewer({
         <div ref={scrollContainerRef} className="absolute inset-0 overflow-auto overscroll-contain bg-stage">
           <div
             ref={contentRef}
+            style={topReserve ? { paddingTop: topReserve + 8 } : undefined}
             className={cn(
               'flex flex-col items-center gap-6',
               readMode
