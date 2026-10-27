@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { formatRoute, parseRoute, type Route } from '@/router.ts';
 import { PdfViewer } from '@/components/PdfViewer/index.ts';
 import { Piano } from '@/components/Piano/index.ts';
 import { RepertoireScreen } from '@/components/RepertoireScreen.tsx';
@@ -26,6 +27,7 @@ interface MeResponse {
   groups?: string[];
   isAdmin?: boolean;
   canSeeScores?: boolean;
+  features?: { confidence?: boolean };
   sectionId?: number | null;
 }
 
@@ -89,13 +91,29 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
   const { pieces, loading: piecesLoading, refresh: refreshPieces } = usePieces();
   const { sections } = useSections();
   const { setLists, loading: setListsLoading, refresh: refreshSetLists } = useSetLists();
-  const [pieceId, setPieceId] = useState<number | null>(null);
-  /** A PDF open in the annotating viewer (null = the song page). */
-  const [viewerFileId, setViewerFileId] = useState<number | null>(null);
-  /** null = not in set list area; 0 = virtual "All songs"; >0 = a stored list. */
-  const [setListId, setSetListId] = useState<number | null>(null);
-  // ChoirMate lands members on Set lists; Repertoire is the other view.
-  const [tab, setTab] = useState<'songs' | 'setlists'>('setlists');
+  // Where we are is URL state (see router.ts) so back/forward, reload and
+  // shared links work. ChoirMate lands members on Set lists.
+  const [route, setRouteState] = useState<Route>(() => parseRoute(window.location));
+  const routeRef = useRef(route);
+  routeRef.current = route;
+  const { pieceId, viewerFileId, setListId, tab, readMode } = route;
+  function navigate(patch: Partial<Route>, replace = false): void {
+    const next: Route = { ...routeRef.current, ...patch };
+    const url = formatRoute(next);
+    if (url !== formatRoute(routeRef.current)) window.history[replace ? 'replaceState' : 'pushState']({}, '', url);
+    routeRef.current = next;
+    setRouteState(next);
+  }
+  useEffect(() => {
+    // Normalise whatever URL we loaded on, then follow back/forward.
+    window.history.replaceState({}, '', formatRoute(routeRef.current));
+    const onPop = () => setRouteState(parseRoute(window.location));
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+  const setSetListId = (id: number | null) => navigate({ setListId: id });
+  const setViewerFileId = (id: number | null) => navigate({ viewerFileId: id, readMode: false });
+  const setReadMode = (on: boolean) => navigate({ readMode: on });
   // Admins flip between the member layout (view mode) and the admin layout
   // (edit mode). Members never see the toggle. Remembered for the session.
   const [editMode, setEditMode] = useState<boolean>(() => {
@@ -108,7 +126,6 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
     });
   }
   const [pianoOpen, setPianoOpen] = useState(false);
-  const [readMode, setReadMode] = useState(false);
   const [importing, setImporting] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [partMenuOpen, setPartMenuOpen] = useState(false);
@@ -125,22 +142,16 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
   }
 
   function goHome(): void {
-    setPieceId(null);
-    setViewerFileId(null);
-    setReadMode(false);
     setImporting(false);
-    if (tab === 'songs') setSetListId(null);
+    navigate({ pieceId: null, viewerFileId: null, readMode: false, setListId: tab === 'songs' ? null : setListId });
   }
 
   function openPiece(id: number): void {
-    setPieceId(id);
-    setViewerFileId(null);
-    setReadMode(false);
+    navigate({ pieceId: id, viewerFileId: null, readMode: false });
   }
 
   function closeViewer(): void {
-    setViewerFileId(null);
-    setReadMode(false);
+    navigate({ viewerFileId: null, readMode: false });
   }
 
   async function chooseSection(id: number | null): Promise<void> {
@@ -264,8 +275,8 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
         {!readMode && (view === 'home' || view === 'setlists') && !importing && (
           <div className="max-w-(--max) w-full mx-auto px-4 sm:px-6 pt-5">
             <nav className="inline-flex items-center rounded-full bg-black/20 p-1" aria-label="Set lists and repertoire">
-              <TabButton active={tab === 'setlists'} onClick={() => { setTab('setlists'); setSetListId(null); }}>Set lists</TabButton>
-              <TabButton active={tab === 'songs'} onClick={() => { setTab('songs'); setSetListId(null); }}>Repertoire</TabButton>
+              <TabButton active={tab === 'setlists'} onClick={() => navigate({ tab: 'setlists', setListId: null })}>Set lists</TabButton>
+              <TabButton active={tab === 'songs'} onClick={() => navigate({ tab: 'songs', setListId: null })}>Repertoire</TabButton>
             </nav>
           </div>
         )}
@@ -315,10 +326,11 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
                 sections={sections}
                 mySectionId={mySectionId}
                 editing={editing}
+                showConfidence={me.features?.confidence !== false}
                 fromSetList={currentSetList ? { id: currentSetList.id, name: currentSetList.name } : setListId === 0 ? { id: 0, name: 'All songs' } : null}
-                onGoSetLists={() => { setPieceId(null); setTab('setlists'); setSetListId(null); }}
-                onGoRepertoire={() => { setPieceId(null); setTab('songs'); setSetListId(null); }}
-                onGoSetList={(id) => { setPieceId(null); setTab('setlists'); setSetListId(id); }}
+                onGoSetLists={() => navigate({ pieceId: null, viewerFileId: null, readMode: false, tab: 'setlists', setListId: null })}
+                onGoRepertoire={() => navigate({ pieceId: null, viewerFileId: null, readMode: false, tab: 'songs', setListId: null })}
+                onGoSetList={(id) => navigate({ pieceId: null, viewerFileId: null, readMode: false, tab: 'setlists', setListId: id })}
                 onOpenViewer={setViewerFileId}
                 onPieceMutated={bumpPieceRefresh}
               />

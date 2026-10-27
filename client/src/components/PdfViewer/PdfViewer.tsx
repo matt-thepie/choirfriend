@@ -88,6 +88,8 @@ export function PdfViewer({
     [piece],
   );
   const [selectedPdfId, setSelectedPdfId] = useState<number | null>(initialFileId);
+  /** Phones in read mode hide the toolbar; this shows it on demand. */
+  const [toolsOpen, setToolsOpen] = useState(false);
   const pdfFile = useMemo(
     () => pdfFiles.find((f) => f.id === selectedPdfId) ?? pdfFiles[0] ?? null,
     [pdfFiles, selectedPdfId],
@@ -112,6 +114,7 @@ export function PdfViewer({
   // marks, so taps should jump/navigate rather than drop new markers.
   useEffect(() => {
     if (readMode) setTool((t) => (t === 'marker' ? 'pan' : t));
+    if (!readMode) setToolsOpen(false);
   }, [readMode]);
   const [showPrivate, setShowPrivate] = useState(true);
   const [showShared, setShowShared] = useState(true);
@@ -527,7 +530,7 @@ export function PdfViewer({
    *    pen on/off, layer, page nav (page mode), zoom (scroll mode), jump-to, scroll/pages toggle, exit. */
   const minimalToolbar = (
     <div className="px-3 py-1.5 flex items-center gap-2 flex-nowrap overflow-x-auto [&>*]:shrink-0 md:flex-wrap md:overflow-visible">
-      {piece && <h2 className="text-sm font-semibold mr-1 truncate max-w-[12rem]" title={piece.title}>{piece.title}</h2>}
+      {piece && <h2 className="hidden md:block text-sm font-semibold mr-1 truncate max-w-[12rem]" title={piece.title}>{piece.title}</h2>}
 
       <PdfSwitcher files={pdfFiles} selectedId={pdfFile?.id ?? null} onSelect={setSelectedPdfId} />
 
@@ -635,7 +638,7 @@ export function PdfViewer({
 
   return (
     <div className="flex flex-col h-full">
-      <header className="sticky top-0 z-10 bg-background/95 backdrop-blur border-b border-border">
+      <header className={cn('sticky top-0 z-10 bg-background/95 backdrop-blur border-b border-border', readMode && !toolsOpen && 'hidden md:block')}>
         {readMode ? minimalToolbar : fullToolbar}
         {!readMode && tool === 'marker' && markerToolbar}
         {annotationsError && (
@@ -644,6 +647,36 @@ export function PdfViewer({
       </header>
 
       <div ref={stageRef} className="flex-1 relative min-h-0">
+        {readMode && (
+          // Phone read mode: the score fills the screen; two floating buttons
+          // (tools, exit) sit over it so nothing is lost in a scrolling bar.
+          <div className="md:hidden absolute top-2 right-2 z-20 flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setToolsOpen((o) => !o)}
+              aria-label={toolsOpen ? 'Hide tools' : 'Show tools'}
+              aria-pressed={toolsOpen}
+              className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-background/90 text-foreground shadow-card backdrop-blur"
+            >
+              <Icon name="tune" className="text-xl" />
+            </button>
+            {onExitReadMode && (
+              <button
+                type="button"
+                onClick={onExitReadMode}
+                aria-label="Exit read mode"
+                className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-primary text-primary-foreground shadow-card"
+              >
+                <Icon name="close" className="text-xl" />
+              </button>
+            )}
+          </div>
+        )}
+        {readMode && effectiveNavMode === 'page' && pageCount > 0 && (
+          <div className="md:hidden absolute bottom-2 left-1/2 -translate-x-1/2 z-20 px-2.5 h-7 rounded-full bg-background/90 text-xs tabular-nums shadow-card inline-flex items-center pointer-events-none">
+            {currentPage} / {pageCount}
+          </div>
+        )}
         <div ref={scrollContainerRef} className="absolute inset-0 overflow-auto bg-stage">
           <div
             ref={contentRef}

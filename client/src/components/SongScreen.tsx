@@ -23,6 +23,8 @@ import { KindBadge } from '@/components/PdfViewer/KindBadge.tsx';
 import { artistArranger } from '@/components/RepertoireScreen.tsx';
 
 interface SongScreenProps {
+  /** The "How confident are you performing this song?" faces. Off via FEATURE_CONFIDENCE=false. */
+  showConfidence?: boolean;
   pieceId: number;
   refreshTick: number;
   sections: Section[];
@@ -55,6 +57,7 @@ function lower(label: string): string {
  * block per section, each with its own "Add audio" that pre-assigns the part.
  */
 export function SongScreen({
+  showConfidence = true,
   pieceId,
   refreshTick,
   sections,
@@ -236,7 +239,7 @@ export function SongScreen({
 
         <div className="space-y-6">
           {editing && <SongSettings piece={piece} onSaved={mutated} />}
-          <ConfidencePanel piece={piece} />
+          {showConfidence && <ConfidencePanel piece={piece} />}
           <PrivateNotes piece={piece} />
         </div>
         </div>

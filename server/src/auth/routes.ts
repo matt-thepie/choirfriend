@@ -71,6 +71,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       isAdmin: isAdmin(user),
       canSeeScores: canSeeScores(user),
       sectionId: getUserSectionIdByEmail(user.email),
+      features: config.features,
     };
   });
 

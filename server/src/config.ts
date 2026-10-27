@@ -44,6 +44,8 @@ export interface Config {
    *  adminRoles. Default covers the MD and section admins; override with
    *  SCORE_ROLES. */
   scoreRoles: readonly string[];
+  /** Optional member-facing features a choir may not want. */
+  features: { confidence: boolean };
   b2: {
     keyId: string;
     applicationKey: string;
@@ -69,6 +71,7 @@ export function getConfig(): Config {
     clientOrigin: optional('CLIENT_ORIGIN', 'http://localhost:5173'),
     adminRoles: parseRoleList(optional('ADMIN_ROLES', 'committee,trustee,admin')),
     scoreRoles: parseRoleList(optional('SCORE_ROLES', 'md,musical-director,music-director,section-admin,section-leader')),
+    features: { confidence: optional('FEATURE_CONFIDENCE', 'true') !== 'false' },
     b2: {
       keyId: optional('B2_KEY_ID', ''),
       applicationKey: optional('B2_APPLICATION_KEY', ''),
