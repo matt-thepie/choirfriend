@@ -78,6 +78,11 @@ brew install poppler imagemagick            # pdftoppm, magick
    and bridge of Only You were NOT the vocal parts stacked, and the LH voices
    came out swapped (rests under the staff, stems wrong) until fix_jumps.py
    re-ordered them. Don't hand over until all systems have been looked at.
+   Look at stem directions and beam groups too, not just pitches: an empty
+   `<voice/>` left the LH lower part in MS voice 3 (stems up), and music21's
+   per-beat beams gave quaver pairs where the print beams in fours. fix_jumps.py
+   now handles both; pairs the print leaves flagged go in `--flag 6:BAR,BAR`
+   (Only You: `--flag 6:19,35`).
 8. **Hand over** — alongside the `.mscz` and `.musicxml`, always export a PDF
    (`mscore -o out.pdf out_fixed.mscz`) into the song folder so Matt can check
    it without opening MuseScore.

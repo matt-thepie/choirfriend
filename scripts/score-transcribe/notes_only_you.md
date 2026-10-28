@@ -34,3 +34,9 @@ Lyric verses: 1 Look-ing.. 2 Some-times.. 3 This is.. (see PDF). v2/v3 have an 8
 - Verified 2026-10-28: all 10 piano systems compared side by side with the scan (cmp-<page>-<y>.png crops).
 - Bar 18 (and 34): the "knew" tie carries over the half note AND the first eighth of the bar; "on-ly you" starts on the 2nd eighth (T1 E5, T2 C5, B1 F#3, B2 D3). Was wrongly one note early.
 - 28 Oct, later: piano reduction rebuilt bar by bar from the scan (bridge 21-28 was wrong: RH is one beamed line with the held D4 in 26/28 as a stemmed-down 2nd voice). All 10 piano systems checked render-over-scan (cmp_pno.py) and head-diffed (checkpno.py) before handover.
+
+## Stems and beaming (28 Oct)
+- Piano LH lower voice (B2 line, figure A onwards) stems down as printed; it had been
+  imported into MS voice 3 behind an empty `<voice/>`.
+- Piano beams in half-bar groups of four, as printed. Bars 19/35 LH open with two
+  flagged quavers: run `fix_jumps.py only_you.mscz only_you_fixed.mscz --flag 6:19,35`.
