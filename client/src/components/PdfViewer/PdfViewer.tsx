@@ -1267,7 +1267,7 @@ export function PdfViewer({
     <div className="relative flex flex-col h-full">
       {/* In read mode the toolbar floats over the score, so showing it doesn't
           shift the music, and the score gets the whole screen while it's hidden. */}
-      {readMode && <ReadModeControls toolsOpen={toolsOpen} onExit={onExitReadMode} onShow={() => {
+      {readMode && <ReadModeControls toolsOpen={toolsOpen} onShow={() => {
         setToolsOpen(true);
         requestAnimationFrame(() => headerRef.current?.querySelector<HTMLElement>('button, select, input')?.focus());
       }} />}
