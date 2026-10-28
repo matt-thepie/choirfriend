@@ -1,3 +1,4 @@
+import { ReadModeControls } from '@/components/ReadModeControls.tsx';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { openPdf, type PDFDocumentProxy } from '@/lib/pdfjs.ts';
 import { Button, Icon } from '@/components/ui/button.tsx';
@@ -52,6 +53,7 @@ interface PdfViewerProps {
   isAdmin?: boolean;
   /** The member's own voice part; offered first when sharing with a part. */
   mySectionId?: number | null;
+  selectedSectionId?: number | null;
   /** "My line": highlight the member's own stave. A member-wide setting. */
   partLineOn?: boolean;
   onPartLineChange?: (on: boolean) => void;
@@ -212,6 +214,7 @@ export function PdfViewer({
   onEnterReadMode,
   isAdmin = false,
   mySectionId = null,
+  selectedSectionId = mySectionId,
   partLineOn = false,
   onPartLineChange,
   initialFileId = null,
@@ -250,7 +253,7 @@ export function PdfViewer({
     onPieceMutated?.();
   }
 
-  const { annotations, error: annotationsError, add, remove } = useAnnotations(pieceId);
+  const { annotations, error: annotationsError, add, remove, redo, canRedo, saving, updateMarker } = useAnnotations(pieceId);
 
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
   const [pdfLoadError, setPdfLoadError] = useState<string | null>(null);
@@ -295,6 +298,7 @@ export function PdfViewer({
   // Reading is the default; Mark up switches to drawing with the chosen pen.
   // Only while marking up do fingers draw, so reading never leaves stray ink.
   const [markUp, setMarkUp] = useState(false);
+  const [selectedMarker, setSelectedMarker] = useState<MarkerAnnotation | null>(null);
   const [markTool, setMarkTool] = useState<Exclude<AnnotationTool, 'pan'>>('pen');
   const tool: AnnotationTool = markUp ? markTool : 'pan';
   useEffect(() => {
@@ -454,6 +458,7 @@ export function PdfViewer({
 
   // The read-mode toolbar hides itself after a few seconds untouched, unless
   // it's in use: marking up, adjusting the shaded part, or a menu open.
+  const headerRef = useRef<HTMLElement>(null);
   const toolsTouchedRef = useRef(0);
   const touchTools = useCallback(() => { toolsTouchedRef.current = Date.now(); }, []);
   const toolsBusy = markUp || adjustingLine || jumpOpen || phoneJumpOpen || moreOpen;
@@ -461,7 +466,7 @@ export function PdfViewer({
     if (!readMode || !toolsOpen || toolsBusy) return;
     touchTools();
     const id = setInterval(() => {
-      if (document.querySelector('[data-popover]')) return touchTools();
+      if (headerRef.current?.contains(document.activeElement) || document.querySelector('[data-popover]')) return touchTools();
       if (Date.now() - toolsTouchedRef.current > TOOLS_HIDE_MS) setToolsOpen(false);
     }, 500);
     return () => clearInterval(id);
@@ -535,7 +540,7 @@ export function PdfViewer({
       body: JSON.stringify(next),
     });
   };
-  const mySection = mySectionId !== null ? sectionsById.get(mySectionId) ?? null : null;
+  const mySection = selectedSectionId !== null ? sectionsById.get(selectedSectionId) ?? null : null;
   const myPart = useMemo(() => (mySection ? partFromSection(mySection.label, mySection.badge) : null), [mySection]);
   const linePicks = useMemo(
     () => (partLineOn && pdf ? resolvePartLine(layouts, pdf.numPages, myPart, lineOverrides) : []),
@@ -883,6 +888,8 @@ export function PdfViewer({
   }
 
   function handleUndo(): void {
+    if (saving) return;
+    setSelectedMarker(null);
     for (let i = annotations.length - 1; i >= 0; i--) {
       const a = annotations[i]!;
       if (a.isMine !== false && belongsToActivePdf(a)) {
@@ -1021,7 +1028,7 @@ export function PdfViewer({
   const markUpButton = (
     <button
       type="button"
-      onClick={() => setMarkUp((m) => !m)}
+      onClick={() => { setAdjustingLine(false); setSelectedMarker(null); setMarkUp((m) => !m); }}
       aria-pressed={markUp}
       title="Draw, highlight and place markers"
       className={cn(
@@ -1173,7 +1180,7 @@ export function PdfViewer({
     <div className="px-3 md:px-4 py-1.5 flex flex-wrap items-center gap-2 border-t border-border bg-muted/40">
       <Button
         onClick={handleUndo}
-        disabled={myAnnotationCount === 0}
+        disabled={myAnnotationCount === 0 || saving}
         title="Undo your last mark (or tap the score with two fingers)"
         className="h-9 px-4"
       >
@@ -1181,9 +1188,12 @@ export function PdfViewer({
         Undo
       </Button>
 
-      <div className="flex items-center rounded-md border border-border overflow-hidden">
+      <Button size="sm" variant="outline" disabled={!canRedo || saving} onClick={() => void redo()}>Redo</Button>
+      <div role="group" aria-label="Markup tool" className="flex flex-wrap max-w-full items-center rounded-md border border-border overflow-hidden">
         <ToolButton active={markTool === 'pen'} onClick={() => setMarkTool('pen')}>Pen</ToolButton>
         <ToolButton active={markTool === 'highlighter'} onClick={() => setMarkTool('highlighter')}>Highlighter</ToolButton>
+        <ToolButton active={markTool === 'erase'} onClick={() => { setMarkTool('erase'); setSelectedMarker(null); }}>Erase</ToolButton>
+        <ToolButton active={markTool === 'select'} onClick={() => { setMarkTool('select'); setSelectedMarker(null); }}>Edit markers</ToolButton>
         <ToolButton active={markTool === 'marker'} onClick={() => setMarkTool('marker')} title="Repeats, D.S., Coda and other signs you can tap to jump">
           Marker
         </ToolButton>
@@ -1218,6 +1228,8 @@ export function PdfViewer({
           type="button"
           onClick={() => setMarkerKind(k)}
           title={MARKER_PICKER_LABEL[k]}
+          aria-label={MARKER_PICKER_LABEL[k]}
+          aria-pressed={markerKind === k}
           className={cn(
             'inline-flex items-center justify-center gap-1 h-8 min-w-[2rem] px-2 rounded-md border text-xs font-medium',
             markerKind === k
@@ -1251,18 +1263,37 @@ export function PdfViewer({
     <div className="relative flex flex-col h-full">
       {/* In read mode the toolbar floats over the score, so showing it doesn't
           shift the music, and the score gets the whole screen while it's hidden. */}
+      {readMode && <ReadModeControls toolsOpen={toolsOpen} onExit={onExitReadMode} onShow={() => {
+        setToolsOpen(true);
+        requestAnimationFrame(() => headerRef.current?.querySelector<HTMLElement>('button, select, input')?.focus());
+      }} />}
       <header
+        ref={headerRef}
         onPointerDown={touchTools}
         onKeyDown={touchTools}
         className={cn(
           'top-0 bg-background/95 backdrop-blur border-b border-border',
-          readMode ? 'absolute inset-x-0 z-30 shadow-card' : 'sticky z-10',
+          readMode && !markUp && !adjustingLine ? 'absolute inset-x-0 z-30 shadow-card' : 'sticky z-30 shrink-0',
           readMode && !toolsOpen && 'hidden',
         )}
       >
         {readMode ? minimalToolbar : fullToolbar}
         {markUp && markUpToolbar}
         {tool === 'marker' && markerToolbar}
+        {markUp && <div className="px-3 py-2 text-xs text-muted-foreground" role="status">
+          {saving ? 'Saving…' : annotationsError ? 'Changes could not be saved. Check your connection.' : 'Marks save automatically. Done returns to reading.'}
+          {tool === 'erase' && ' Tap one of your strokes or markers to erase it from the selected Private / Shared layer. Redo restores erased marks.'}
+          {tool === 'select' && ' Select a marker to edit it, then tap a new position to move it. Move the start-repeat, Segno or Coda sign to change its jump destination. These signs navigate the PDF; they do not change audio playback or loops.'}
+        </div>}
+        {tool === 'select' && selectedMarker && <div className="px-3 py-2 flex flex-wrap gap-2 items-center border-t border-border">
+          <label className="text-xs">Marker type <select aria-label="Marker type" value={selectedMarker.markerKind} className="h-11 bg-background border border-border rounded px-2" onChange={(e) => setSelectedMarker({ ...selectedMarker, markerKind: e.target.value as MarkerKind })}>
+            {MARKER_KIND_ORDER.map((k) => <option key={k} value={k}>{MARKER_PICKER_LABEL[k]}</option>)}
+          </select></label>
+          <input aria-label="Marker label" placeholder="Label" className="h-11 border border-border rounded bg-background px-2" value={selectedMarker.label ?? ''} onChange={(e) => setSelectedMarker({ ...selectedMarker, label: e.target.value || null })} />
+          <Button size="sm" disabled={saving} onClick={() => { void updateMarker(selectedMarker); setSelectedMarker(null); }}>Save marker</Button>
+          <Button size="sm" variant="outline" disabled={saving} onClick={() => { void remove(selectedMarker.id); setSelectedMarker(null); }}>Delete marker</Button>
+          <Button size="sm" variant="ghost" onClick={() => setSelectedMarker(null)}>Cancel</Button>
+        </div>}
         {annotationsError && (
           <div className="px-4 pb-2 text-xs text-destructive">Annotation sync issue: {annotationsError}</div>
         )}
@@ -1336,7 +1367,15 @@ export function PdfViewer({
                 markerLabelInput={markerLabelInput}
                 onStrokeFinished={handleStrokeFinished}
                 onMarkerPlaced={handleMarkerPlaced}
-                onDeleteAnnotation={(id) => void remove(id)}
+                onDeleteAnnotation={(id) => { if (!saving) { setSelectedMarker(null); void remove(id); } }}
+                onSelectMarker={(marker) => setSelectedMarker(marker)}
+                selectedMarkerId={tool === 'select' ? selectedMarker?.id : null}
+                onMoveMarker={(page, position) => {
+                  if (selectedMarker && !saving) {
+                    void updateMarker({ ...selectedMarker, page, position });
+                    setSelectedMarker(null);
+                  }
+                }}
                 markerFollow={markerFollow}
               />
             )}
@@ -1362,7 +1401,15 @@ export function PdfViewer({
                   markerLabelInput={markerLabelInput}
                   onStrokeFinished={handleStrokeFinished}
                   onMarkerPlaced={handleMarkerPlaced}
-                  onDeleteAnnotation={(id) => void remove(id)}
+                  onDeleteAnnotation={(id) => { if (!saving) { setSelectedMarker(null); void remove(id); } }}
+                  onSelectMarker={(marker) => setSelectedMarker(marker)}
+                  selectedMarkerId={tool === 'select' ? selectedMarker?.id : null}
+                  onMoveMarker={(page, position) => {
+                    if (selectedMarker && !saving) {
+                      void updateMarker({ ...selectedMarker, page, position });
+                      setSelectedMarker(null);
+                    }
+                  }}
                   markerFollow={markerFollow}
                 />
               ))}
@@ -1841,13 +1888,13 @@ export function ListenButton({ piece, playerHidden, onPlayerHiddenChange }: {
       </button>
       {open && !loaded && (
         <Popover anchorRef={anchorRef} align="right" onClose={() => setOpen(false)} className="min-w-56 max-h-72 overflow-auto p-1">
-          {tracks.map((f, i) => (
+          {tracks.map((f) => (
             <button
               key={f.id}
               type="button"
               className="block w-full text-left px-3 py-2 text-sm rounded hover:bg-accent"
               onClick={() => {
-                player.playQueue({ name: piece.title, tracks: tracks.map((t) => toQueueTrack(piece, t)) }, i);
+                player.playQueue({ name: piece.title, tracks: [toQueueTrack(piece, f)] }, 0);
                 onPlayerHiddenChange(false);
                 setOpen(false);
               }}

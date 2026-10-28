@@ -218,3 +218,12 @@ export function deleteAnnotation(id: string): boolean {
   const info = deleteStmt.run(id);
   return (info.changes as number) > 0;
 }
+
+/** Move or change a navigation marker without changing its author or audience. */
+export function updateMarker(id: string, requesterId: number, marker: {
+  markerKind: MarkerKind; label: string | null; position: { x: number; y: number }; page: number;
+}): AnnotationDTO | null {
+  db.prepare(`UPDATE annotations SET page = ?, payload = ?, updated_at = unixepoch() WHERE id = ? AND kind = 'marker'`)
+    .run(marker.page, JSON.stringify({ markerKind: marker.markerKind, label: marker.label, position: marker.position }), id);
+  return getAnnotationById(id, requesterId);
+}

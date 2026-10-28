@@ -195,21 +195,21 @@ Built:
 - Edit mode on a song: Repertoire settings (Title, Artist/Arranger), one audio block per section with its own **Add audio** that pre-assigns the part, Edit / Replace file / Delete per file, remark text areas per section, add/remove links, Add sheet music / lyrics / score.
 - File kinds: sheet music (PDF), audio, **lyrics** (pdf/docx/rtf/txt/odt/md) and **scores** (MuseScore / MusicXML, only shown to admins and `SCORE_ROLES`).
 - PDF viewer:
-  - Opens in **read mode** by default (a link without `?read=1` opens the normal view). The read-mode toolbar floats over the score, appears on a tap in the middle of the page and hides after 4 seconds untouched (not while marking up or with a menu open). Edge taps and swipes turn pages. The screen is kept awake (Wake Lock API) while a score is open in read mode.
+  - Opens in **read mode** by default (a link without `?read=1` opens the normal view). The read-mode toolbar floats over the score, appears on a tap in the middle of the page and hides after 4 seconds untouched (not while marking up or with a menu open). A persistent Read mode / Show controls / Exit affordance and first-use guidance keep the tools discoverable. Keyboard focus keeps the toolbar visible. Edge taps and swipes turn pages. The screen is kept awake (Wake Lock API) while a score is open in read mode.
   - **Scroll / Pages** layout, remembered per device; fit-to-width on phones; loading spinner with download progress.
-  - Toolbar is one **Mark up** toggle: reading controls (Jump to, Scroll/Pages, zoom, Shade my part, Listen) on the main row, and while marking up a second row with a large **Undo**, **Pen | Highlighter | Marker**, colour, **Private | Shared** with **For:** parts, and **Clear my private…**. Two-finger tap undoes. On phones rows wrap and less-used controls sit behind **More**; there is no horizontally scrolling toolbar.
+  - Toolbar is one **Mark up** toggle: reading controls (Jump to, Scroll/Pages, zoom, Shade my part, Listen) on the main row, and while marking up a second row with a large **Undo**, **Pen | Highlighter | Marker**, colour, **Private | Shared** with **For:** parts, and **Clear my private…**. Erase removes an individual stroke from the selected layer; Redo restores erased or undone marks. Edit markers selects a sign to move it or change its type and label. Marks autosave, and Done returns to reading. Two-finger tap undoes. On phones rows wrap and less-used controls sit behind **More**; there is no horizontally scrolling toolbar.
   - Highlighter strokes multiply under pen strokes; six pen and five highlighter colours, chosen per device. New marks default to **Private** (the last choice is remembered per device).
   - Shared marks can be limited to one or more voice parts; they are visible only to members of those parts and the author. Older shared marks (no parts set) are visible to everyone.
-  - Markers: tapping an end-repeat goes back to the nearest start-repeat (or the top), a 1st-time bar goes back the same way, and D.S. / D.C. / To Coda go to their targets. Start-repeat, 2nd-time bar, segno, coda and fine are landing points only. Tappable markers show a →.
+  - Markers: tapping an end-repeat goes back to the nearest start-repeat (or the top), a 1st-time bar goes back the same way, and D.S. / D.C. / To Coda go to their targets. Start-repeat, 2nd-time bar, segno, coda and fine are landing points only. Tappable markers show a →. Delete controls appear only in Edit markers; these signs navigate PDFs and do not alter recording playback or audio loops.
   - **Shade my part**: `lib/pageLayout.ts` finds five-line staves and joins them into systems; `lib/partLine.ts` picks the member's stave from the printed labels and carries it forward by stave position. **Adjust** lets a member tap the right stave per system (saved per member per file); the on/off switch is per member.
   - Safe-area padding for iPad / iPhone home-screen installs.
 - Flowing scores (`server/src/scores/`, `client/src/lib/flowing/`, `components/ScoreViewer/`):
   - Each uploaded score (kind `score`) is converted on the server to MusicXML and tidied: duplicate lyrics on one note are merged, and parts with no notes at all (e.g. an unfilled rehearsal-piano stave) are dropped. The `.mscz` stays restricted to `SCORE_ROLES`; the flowing view is for every member. Opened from the song page's **Flowing score** row, or **View** in either viewer (`/songs/:id/flow/:fileId`); a set list keeps to whichever kind the member last chose.
   - Engraved in the browser by Verovio (loaded on first use, cached by the service worker in its own cache). On screens 640px and wider the line breaks are balanced so no line is left with a bar or two, and every line, the last too, is justified. Pages mode shows screenfuls of whole lines.
   - Same reading controls as the PDF viewer (read mode, Scroll / Pages, Shade my part, Listen, Jump to bar or rehearsal mark, set-list flow, wake lock), plus music size, which parts to show, and playback.
-  - Playback follows dynamics, hairpins and cresc./dim., accents, staccato/tenuto, breath marks, fermatas, tempo marks and rit./a tempo; ties sound once; repeats are played out. **Mix** brings one section's line forward with the others quieter behind it (or that line alone), in piano, oohs or trumpet. Tempo is adjustable and remembered per score; tap a bar to play from it.
+  - Playback follows dynamics, hairpins and cresc./dim., accents, staccato/tenuto, breath marks, fermatas, tempo marks and rit./a tempo; ties sound once; repeats are played out. **Mix** brings one section's line forward with the others quieter behind it (or that line alone), in piano, oohs or trumpet. Tempo is adjustable and remembered per score; an unmarked introduction is distinguished from later tempo markings and the player shows the current tempo. Tap a bar to play from it.
   - Parts are matched to sections by name (`lib/flowing/parts.ts`): Unison/Melody/Voice is everyone; Tenors or Tenor 1 & 2 is both tenor sections; Bass 1 is the baritones; in a two-part score Basses is baritones and basses. Two sections on one stave split it by voice, upper voice to the higher section.
-- Set lists: picture tiles, create / rename / drag reorder / archive / copy / delete / Order, one list pinned as "this week"; in-list search (title, composer, arranger); **Practice list** panel ("Viewing content for" + section) queues one track per song; the virtual **All songs** list.
+- Set lists: picture tiles, create / rename / drag reorder / archive / copy / delete / Order, one list pinned as "this week"; in-list search (title, composer, arranger); **Practice list** panel ("Viewing content for" + section) queues a matching-section or full-mix track per song, explaining skipped songs; the selected section follows navigation into songs and scores; the virtual **All songs** list.
   - Opening a score from a set list makes it flow: turning past the last page opens the next song's default sheet (prefetched in the background if under 8 MB), with **Next: title** / previous-song buttons and an end-of-list card in Scroll view.
   - When the player is playing that same set list, the two stay linked: the player moving on opens the next score, and turning the score into the next song cues its track paused.
 - Persistent mini player (72px card, seek bar, 48px play) with back-to-start, ±10s, speed 0.5–1.5x, A-B loop, repeat and Media Session for lock-screen controls. In read mode it stays visible if a track is loaded; otherwise **Listen** lists the song's recordings.
@@ -223,7 +223,7 @@ Known limitations:
 
 - Uploads classify lyrics by filename only (`lyric|crib|words`), so a lyric sheet uploaded under another name is filed as sheet music. On 27 Oct 2026, 30 sheet-music files with no staves were moved to Lyrics on the live database (backup: `server/data/choirfriend-before-lyrics-move-20261027.db`).
 - Shade my part needs a text layer for labels: on scanned PDFs the first tap in Adjust sets the line. Photo scans of curved pages (e.g. the second Carol of the Bells) defeat the stave finder.
-- Flowing scores have no marks yet (pen, highlighter, markers need anchoring to bars rather than page positions); the PDF is a tap away in **View**. A score with no tempo marking plays at ♩ = 120 until someone sets it.
+- Flowing scores have no marks yet (pen, highlighter, markers need anchoring to bars rather than page positions); the PDF is a tap away in **View**. The flowing viewer explains this and offers Annotate the PDF when one is attached. A score with no initial tempo marking starts at ♩ = 120 until a later marking or reader speed setting changes it.
 - While marking up, one finger draws, so Scroll view needs **Done** to scroll. MD / section leaders cannot see other parts' part-only marks unless they drew them.
 
 Not built (from the ChoirMate brief):
@@ -238,3 +238,13 @@ Not built (other):
 - Offline: the service worker (`client/sw/sw.js`, emitted with a per-build precache list by a Vite plugin) keeps the app shell, fonts and piano offline; API reads are network-first with the last response as fallback; sheet music PDFs are cache-first. The menu's Offline scores setting syncs scores for songs on active set lists (default), all repertoire, or none, and also caches those songs' pages. Background sync skips mobile data and Save-Data; Sync now works anywhere. Learning tracks are online-only.
 - Generic OIDC auth provider (stub only; sgmc-identity is the one real provider).
 - Any of ChoirMate's non-music features (members, messages, polls, events, documents). Out of scope unless a choir asks for them.
+
+## Regression checks
+
+Run the client checks with `npm --prefix client run lint` and
+`npm --prefix client run build`. Annotation persistence, marker editing,
+validation and private-access checks use an isolated temporary SQLite database:
+
+```bash
+node --test server/tests/annotations.test.ts
+```

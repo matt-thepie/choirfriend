@@ -21,3 +21,6 @@ Music/
 
 # Local importer storage (B2 emulation in dev) — runtime data, never commit
 /client/public/imported/
+
+# Generated TypeScript incremental build cache
+*.tsbuildinfo

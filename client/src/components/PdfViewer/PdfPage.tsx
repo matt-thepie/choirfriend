@@ -32,6 +32,9 @@ interface PdfPageProps {
   onStrokeFinished: (input: { layer: AnnotationLayer; page: number; pen: InkPen; color: string; width: number; points: Array<{ x: number; y: number }> }) => void;
   onMarkerPlaced: (input: { layer: AnnotationLayer; page: number; markerKind: MarkerKind; label: string | null; position: { x: number; y: number } }) => void;
   onDeleteAnnotation: (id: string) => void;
+  onSelectMarker?: (marker: MarkerAnnotation) => void;
+  selectedMarkerId?: string | null;
+  onMoveMarker?: (page: number, position: { x: number; y: number }) => void;
   /** Resolves a marker's "follow" action (e.g. D.S. → Segno), or null. */
   markerFollow?: (m: MarkerAnnotation) => { label: string; run: () => void } | null;
   /** Show only this part of the page (fractions 0..1); the rest is cropped. */
@@ -74,6 +77,9 @@ export function PdfPage({
   onStrokeFinished,
   onMarkerPlaced,
   onDeleteAnnotation,
+  onSelectMarker,
+  selectedMarkerId,
+  onMoveMarker,
   markerFollow,
   clip = null,
   bare = false,
@@ -88,6 +94,7 @@ export function PdfPage({
   const activeStrokeRef = useRef<{ pointerId: number; points: Array<{ x: number; y: number }> } | null>(null);
   // A marker goes down when the finger lifts, so a two-finger tap (undo) never places one.
   const pendingMarkerRef = useRef<{ pointerId: number; position: { x: number; y: number } } | null>(null);
+  const pendingEditRef = useRef<{ pointerId: number; x: number; y: number; eraseId?: string; move?: { x: number; y: number } } | null>(null);
   // Bumped to wipe a stroke that a second finger cancelled.
   const [redrawTick, setRedrawTick] = useState(0);
 
@@ -216,7 +223,7 @@ export function PdfPage({
 
   const inkEnabled = inkPen !== null && drawTarget !== null;
   const markerEnabled = tool === 'marker' && drawTarget !== null && markerKind !== null;
-  const canvasInteractive = inkEnabled || markerEnabled;
+  const canvasInteractive = inkEnabled || markerEnabled || tool === 'erase' || tool === 'select';
 
   function handlePointerDown(e: React.PointerEvent<HTMLCanvasElement>): void {
     if (!e.isPrimary) {
@@ -226,6 +233,17 @@ export function PdfPage({
         setRedrawTick((n) => n + 1);
       }
       pendingMarkerRef.current = null;
+      pendingEditRef.current = null;
+      return;
+    }
+    if (tool === 'erase' && renderedSize) {
+      const point = getNormalisedPoint(e);
+      const hit = hitInk(inkAnnotations.filter((a) => a.isMine !== false && a.layer === drawTarget), point, renderedSize.width, renderedSize.height, scale);
+      if (hit) pendingEditRef.current = { pointerId: e.pointerId, x: e.clientX, y: e.clientY, eraseId: hit.id };
+      return;
+    }
+    if (tool === 'select' && selectedMarkerId) {
+      pendingEditRef.current = { pointerId: e.pointerId, x: e.clientX, y: e.clientY, move: getNormalisedPoint(e) };
       return;
     }
     if (inkEnabled) {
@@ -237,12 +255,23 @@ export function PdfPage({
   }
 
   function handlePointerMove(e: React.PointerEvent<HTMLCanvasElement>): void {
+    const edit = pendingEditRef.current;
+    if (edit && Math.hypot(e.clientX - edit.x, e.clientY - edit.y) > 10) pendingEditRef.current = null;
     if (!inkEnabled || !activeStrokeRef.current || activeStrokeRef.current.pointerId !== e.pointerId) return;
     activeStrokeRef.current.points.push(getNormalisedPoint(e));
     drawLiveStroke();
   }
 
   function handlePointerUp(e: React.PointerEvent<HTMLCanvasElement>): void {
+    const edit = pendingEditRef.current;
+    if (edit?.pointerId === e.pointerId) {
+      pendingEditRef.current = null;
+      if (e.type === 'pointerup') {
+        if (edit.eraseId) onDeleteAnnotation(edit.eraseId);
+        if (edit.move) onMoveMarker?.(pageNumber, edit.move);
+      }
+      return;
+    }
     const pending = pendingMarkerRef.current;
     if (pending && pending.pointerId === e.pointerId) {
       pendingMarkerRef.current = null;
@@ -312,7 +341,11 @@ export function PdfPage({
               marker={m}
               pageWidth={renderedSize.width}
               pageHeight={renderedSize.height}
-              interactive={tool === 'pan'}
+              interactive={tool === 'pan' || (tool === 'select' && (m.isMine !== false || m.layer === 'shared')) || (tool === 'erase' && m.isMine !== false && m.layer === drawTarget)}
+              editing={tool === 'select'}
+              selected={selectedMarkerId === m.id}
+              erasing={tool === 'erase' && m.layer === drawTarget}
+              onSelect={onSelectMarker}
               follow={markerFollow?.(m) ?? null}
               onDelete={onDeleteAnnotation}
             />
@@ -348,4 +381,21 @@ export function PdfPage({
 
 function pageRect(b: Box, size: { width: number; height: number }): React.CSSProperties {
   return { left: b.x0 * size.width, top: b.y0 * size.height, width: (b.x1 - b.x0) * size.width, height: (b.y1 - b.y0) * size.height };
+}
+
+/** Distance to whole stroke segments, in CSS pixels, including single-point marks. */
+export function hitInk(ink: InkAnnotation[], p: { x: number; y: number }, width: number, height: number, scale: number): InkAnnotation | null {
+  for (let i = ink.length - 1; i >= 0; i--) {
+    const a = ink[i]!;
+    const radius = Math.max(10, a.width * scale / 2 + 5);
+    for (let j = 0; j < a.points.length; j++) {
+      const start = a.points[j]!;
+      const end = a.points[j + 1] ?? start;
+      const dx = (end.x - start.x) * width, dy = (end.y - start.y) * height;
+      const x = (p.x - start.x) * width, y = (p.y - start.y) * height;
+      const t = Math.max(0, Math.min(1, (x * dx + y * dy) / (dx * dx + dy * dy || 1)));
+      if (Math.hypot(x - t * dx, y - t * dy) <= radius) return a;
+    }
+  }
+  return null;
 }

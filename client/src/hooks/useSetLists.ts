@@ -142,7 +142,7 @@ export async function deleteSetList(id: number): Promise<void> {
 /**
  * Pick the one track to play for a song when practising as a given section.
  * Preference: a track tagged with that section → an untagged track (full
- * mix / piano) → the first track. Null when the song has no audio at all.
+ * mix / piano). Skip songs with no suitable track.
  */
 export function pickTrackForSection(audio: PieceFile[], sectionId: number | null): PieceFile | null {
   if (audio.length === 0) return null;
@@ -150,5 +150,5 @@ export function pickTrackForSection(audio: PieceFile[], sectionId: number | null
     const own = audio.find((f) => f.sectionId === sectionId);
     if (own) return own;
   }
-  return audio.find((f) => f.sectionId === null) ?? audio[0] ?? null;
+  return audio.find((f) => f.sectionId === null) ?? null;
 }

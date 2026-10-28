@@ -3,6 +3,7 @@ import {
   canSeeAnnotation,
   createAnnotation,
   deleteAnnotation,
+  updateMarker,
   getAnnotationById,
   listAnnotationsForPiece,
   type AnnotationLayer,
@@ -169,6 +170,29 @@ export const annotationRoutes: FastifyPluginAsync = async (app) => {
 
       const dto = createAnnotation(input);
       return reply.code(201).send(dto);
+    },
+  );
+
+  app.patch<{ Params: { annotationId: string } }>(
+    '/annotations/:annotationId',
+    { preHandler: requireAuth },
+    async (req, reply) => {
+      const user = req.user!;
+      const existing = getAnnotationById(req.params.annotationId, user.internalId);
+      if (!existing || !canSeeAnnotation(existing, getUserSectionIdByEmail(user.email))) {
+        return reply.code(404).send({ error: 'not found' });
+      }
+      if (existing.kind !== 'marker') return reply.code(400).send({ error: 'not a marker' });
+      if (existing.layer === 'private' && !existing.isMine) return reply.code(403).send({ error: 'forbidden' });
+      if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) return reply.code(400).send({ error: 'body must be an object' });
+      const validated = validateBody({ ...existing, ...(req.body as object), id: existing.id,
+        fileId: existing.fileId, layer: existing.layer, sectionIds: existing.sectionIds, kind: 'marker' });
+      if (!validated.ok || validated.value.kind !== 'marker') return reply.code(400).send({ error: 'invalid marker' });
+      const body = validated.value;
+      if (!Number.isInteger(body.page) || body.page < 1 || ![body.position.x, body.position.y].every((n) => Number.isFinite(n) && n >= 0 && n <= 1)) {
+        return reply.code(400).send({ error: 'invalid position' });
+      }
+      return updateMarker(existing.id, user.internalId, { page: body.page, markerKind: body.markerKind, label: body.label ?? null, position: body.position });
     },
   );
 
