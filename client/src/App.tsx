@@ -543,7 +543,6 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
                 onEnterReadMode={() => setReadMode(true)}
                 mySectionId={mySectionId}
                 selectedSectionId={selectedSectionId}
-                onSectionChange={setSelectedSectionId}
                 partLineOn={partLine}
                 onPartLineChange={setPartLine}
                 playerHidden={readPlayerHidden}

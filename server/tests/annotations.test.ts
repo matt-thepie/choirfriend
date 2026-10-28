@@ -67,6 +67,25 @@ await test('shared marker edits preserve the original author and reject malforme
   process.env.DEV_AUTH_EMAIL = 'owner@example.test';
 });
 
+await test('redo restores a deleted shared mark with its original author, only for the member who deleted it', async () => {
+  const input = { id: 'shared-to-redo', fileId: 1, page: 1, kind: 'marker', layer: 'shared', markerKind: 'fine', label: null, position: { x: .5, y: .5 } };
+  assert.equal((await app.inject({ method: 'POST', url: '/api/pieces/1/annotations', payload: input })).statusCode, 201);
+  process.env.DEV_AUTH_EMAIL = 'other@example.test';
+  assert.equal((await app.inject({ method: 'DELETE', url: '/api/annotations/shared-to-redo' })).statusCode, 204);
+  assert.ok(!(await app.inject('/api/pieces/1/annotations')).json().some((a: {id: string}) => a.id === 'shared-to-redo'));
+  assert.equal((await app.inject({ method: 'PATCH', url: '/api/annotations/shared-to-redo', payload: { label: 'x' } })).statusCode, 404);
+  process.env.DEV_AUTH_EMAIL = 'owner@example.test';
+  assert.equal((await app.inject({ method: 'POST', url: '/api/annotations/shared-to-redo/restore' })).statusCode, 404);
+  process.env.DEV_AUTH_EMAIL = 'other@example.test';
+  const restored = await app.inject({ method: 'POST', url: '/api/annotations/shared-to-redo/restore' });
+  assert.equal(restored.statusCode, 200);
+  assert.equal(restored.json().authorEmail, 'owner@example.test');
+  assert.equal(restored.json().isMine, false);
+  assert.equal((await app.inject({ method: 'POST', url: '/api/annotations/shared-to-redo/restore' })).statusCode, 404);
+  process.env.DEV_AUTH_EMAIL = 'owner@example.test';
+  assert.ok((await app.inject('/api/pieces/1/annotations')).json().some((a: {id: string}) => a.id === 'shared-to-redo'));
+});
+
 await app.close();
 db.close();
 rmSync(dir, { recursive: true, force: true });

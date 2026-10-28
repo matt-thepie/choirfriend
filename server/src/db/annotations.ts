@@ -129,6 +129,7 @@ const listForPieceStmt = db.prepare(`
   FROM annotations a
   JOIN users u ON u.id = a.user_id
   WHERE a.piece_id = ?
+    AND a.deleted_at IS NULL
     AND (a.user_id = ? OR (a.layer = 'shared' AND (
       a.section_ids IS NULL
       OR EXISTS (SELECT 1 FROM json_each(a.section_ids) WHERE value = (SELECT section_id FROM users WHERE id = ?))
@@ -145,10 +146,18 @@ const getByIdStmt = db.prepare(`
   SELECT a.*, u.email AS author_email
   FROM annotations a
   JOIN users u ON u.id = a.user_id
-  WHERE a.id = ?
+  WHERE a.id = ? AND a.deleted_at IS NULL
 `);
 
-const deleteStmt = db.prepare(`DELETE FROM annotations WHERE id = ?`);
+const deleteStmt = db.prepare(`
+  UPDATE annotations SET deleted_at = unixepoch(), deleted_by_user_id = ?
+  WHERE id = ? AND deleted_at IS NULL
+`);
+const restoreStmt = db.prepare(`
+  UPDATE annotations SET deleted_at = NULL, deleted_by_user_id = NULL
+  WHERE id = ? AND deleted_by_user_id = ? AND deleted_at IS NOT NULL
+`);
+const purgeStmt = db.prepare(`DELETE FROM annotations WHERE deleted_at < unixepoch() - 86400`);
 
 export function listAnnotationsForPiece(pieceId: number, requesterId: number): AnnotationDTO[] {
   return (listForPieceStmt.all(pieceId, requesterId, requesterId) as AnnotationRow[]).map((r) => rowToDTO(r, requesterId));
@@ -214,9 +223,17 @@ export function getAnnotationById(id: string, requesterId: number): AnnotationDT
   return rowToDTO(row, requesterId);
 }
 
-export function deleteAnnotation(id: string): boolean {
-  const info = deleteStmt.run(id);
+/** Soft-delete, so the person who deleted it can restore it (redo). */
+export function deleteAnnotation(id: string, userId: number): boolean {
+  purgeStmt.run();
+  const info = deleteStmt.run(userId, id);
   return (info.changes as number) > 0;
+}
+
+/** Undo a deletion made by `userId`. Author, audience and timestamps are unchanged. */
+export function restoreAnnotation(id: string, userId: number): AnnotationDTO | null {
+  const info = restoreStmt.run(id, userId);
+  return (info.changes as number) > 0 ? getAnnotationById(id, userId) : null;
 }
 
 /** Move or change a navigation marker without changing its author or audience. */

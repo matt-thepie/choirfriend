@@ -39,7 +39,6 @@ interface ScoreViewerProps {
   onEnterReadMode?: () => void;
   mySectionId?: number | null;
   selectedSectionId?: number | null;
-  onSectionChange?: (id: number | null) => void;
   partLineOn?: boolean;
   onPartLineChange?: (on: boolean) => void;
   playerHidden?: boolean;
@@ -60,6 +59,7 @@ const LAYOUT_KEY = 'choirfriend.flowLayout';
 const ZOOM_KEY = 'choirfriend.flowOriginalZoom';
 const SOUND_KEY = 'choirfriend.flowSound';
 const MIX_KEY = 'choirfriend.flowMix';
+const PDF_HINT_KEY = 'choirfriend.flowPdfHintSeen';
 const TOOLS_HIDE_MS = 4000;
 const HIGHLIGHT = '#2563eb';
 
@@ -96,7 +96,6 @@ export function ScoreViewer({
   onEnterReadMode,
   mySectionId = null,
   selectedSectionId = mySectionId,
-  onSectionChange,
   partLineOn = false,
   onPartLineChange,
   playerHidden = false,
@@ -191,6 +190,7 @@ export function ScoreViewer({
   const canOriginal = !!model?.hasLayout && !!model.layoutWidth;
   const layout = canOriginal ? layoutPref : 'flow';
   const [zoom, setZoomState] = useState<number>(() => load(ZOOM_KEY, 1, (v) => typeof v === 'number' && v >= 1 && v <= 1.6));
+  const [showPdfHint, setShowPdfHint] = useState(() => !load(PDF_HINT_KEY, false, (v) => v === true));
   const setZoom = (z: number) => {
     const v = Math.min(1.6, Math.max(1, Math.round(z * 10) / 10));
     setZoomState(v);
@@ -210,7 +210,10 @@ export function ScoreViewer({
   const [mixMode, setMixModeState] = useState<MixMode>(() =>
     load(MIX_KEY, 'mine', (v) => v === 'balanced' || v === 'mine' || v === 'solo'),
   );
-  const lineSectionId = selectedSectionId;
+  // The player's "emphasise" picker is local to this score: it follows the
+  // browsing section but changing it doesn't change the app-wide section.
+  const [lineSectionId, setLineSectionId] = useState<number | null>(selectedSectionId);
+  useEffect(() => setLineSectionId(selectedSectionId), [selectedSectionId]);
 
   const tempoKey = `choirfriend.flowTempo.${fileId}`;
   const [bpmOverride, setBpmOverride] = useState<number | null>(() =>
@@ -1074,12 +1077,15 @@ export function ScoreViewer({
         )}
       >
         {readMode ? minimalToolbar : fullToolbar}
-        <div className="px-3 pb-2 text-xs text-muted-foreground flex flex-wrap items-center gap-2">
-          <span>Highlighting, pen marks and navigation markers are available on PDFs only.</span>
-          {piece?.files.some((f) => f.kind === 'pdf') ? (
-            <Button size="sm" variant="outline" onClick={() => onOpenView({ kind: 'pdf', id: piece.files.find((f) => f.kind === 'pdf')!.id })}>Annotate the PDF</Button>
-          ) : <span>No PDF is attached to this song.</span>}
-        </div>
+        {!readMode && showPdfHint && (
+          <div className="px-3 pb-2 text-xs text-muted-foreground flex flex-wrap items-center gap-2">
+            <span>Highlighting, pen marks and navigation markers are available on PDFs only{piece?.files.some((f) => f.kind === 'pdf') ? ' — switch with View.' : '. No PDF is attached to this song.'}</span>
+            {piece?.files.some((f) => f.kind === 'pdf') && (
+              <Button size="sm" variant="outline" onClick={() => onOpenView({ kind: 'pdf', id: piece.files.find((f) => f.kind === 'pdf')!.id })}>Annotate the PDF</Button>
+            )}
+            <Button size="sm" variant="ghost" onClick={() => { setShowPdfHint(false); save(PDF_HINT_KEY, true); }}>Got it</Button>
+          </div>
+        )}
       </header>
 
       <div
@@ -1237,7 +1243,7 @@ export function ScoreViewer({
           onClearLoop={() => setLoop({ start: null, end: null })}
           lineChoices={sections.filter((s) => assignments.has(s.id)).map((s) => ({ id: s.id, label: s.label, mine: s.id === mySectionId }))}
           lineSectionId={lineSectionId}
-          onLine={(id) => onSectionChange?.(id)}
+          onLine={setLineSectionId}
           lineLabel={lineSectionId !== null && hearLine ? sections.find((s) => s.id === lineSectionId)?.label ?? null : null}
           mixMode={mixMode}
           onMixMode={(m) => { setMixModeState(m); save(MIX_KEY, m); }}

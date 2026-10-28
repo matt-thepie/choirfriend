@@ -181,14 +181,24 @@ export function useAnnotations(pieceId: number | null): UseAnnotationsResult {
 
   const redo = async () => {
     const a = deleted.at(-1);
-    if (!a || a.fileId == null || saving) return;
-    const remaining = deleted.slice(0, -1);
-    const common = { fileId: a.fileId, page: a.page, layer: a.layer, sectionIds: a.sectionIds };
-    const input: NewAnnotationInput = a.kind === 'ink'
-      ? { ...common, kind: 'ink', pen: a.pen ?? 'pen', color: a.color, width: a.width, points: a.points }
-      : { ...common, kind: 'marker', markerKind: a.markerKind, label: a.label, position: a.position };
-    const ok = await add(input);
-    setDeleted(ok ? remaining : deleted);
+    if (!a || saving) return;
+    setError(null);
+    setDeleted((prev) => prev.slice(0, -1));
+    setAnnotations((prev) => [...prev, a]);
+    // Restoring the original row keeps its author, audience and timestamps.
+    await enqueue(async () => {
+      try {
+        const res = await fetch(`/api/annotations/${a.id}/restore`, { method: 'POST', credentials: 'include' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const saved = (await res.json()) as Annotation;
+        setAnnotations((prev) => prev.map((x) => (x.id === a.id ? saved : x)));
+      } catch (e) {
+        setAnnotations((prev) => prev.filter((x) => x.id !== a.id));
+        setDeleted((prev) => [...prev, a]);
+        console.error('[annotations] redo failed, rolled back:', e);
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    });
   };
 
   const updateMarker = async (marker: MarkerAnnotation) => enqueue(async () => {
