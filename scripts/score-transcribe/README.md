@@ -68,7 +68,10 @@ brew install poppler imagemagick            # pdftoppm, magick
    flowing reader gives them a music font (`musicText` in
    `client/src/lib/flowing/engrave.ts`, webfonts in `client/public/fonts`),
    so they read the same in the app as in MuseScore.
-7. **Check every piano system against the scan** — a "derived" reduction is a
+7. **Check every piano system against the scan** (`cmp_pno.py PAGE` stacks the
+   render's piano system over the scan's in thirds; `checkpno.py` diffs detected
+   note-heads on every piano staff against the build tokens; `rhchords.py` is the
+   chord-aware head finder it uses) — a "derived" reduction is a
    hypothesis, not a result. For each page and each system:
    `sips --resampleWidth <scan width> render-N.png`, crop render and scan at the
    same y-offset, `magick render scan -append` and look at the pair. The intro

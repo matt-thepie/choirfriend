@@ -33,3 +33,4 @@ Lyric verses: 1 Look-ing.. 2 Some-times.. 3 This is.. (see PDF). v2/v3 have an 8
 - Piano reduction is NOT the vocal parts stacked: intro and bridge are hand-set from the print (PT1/PT2/PB2 in build_only_you.py). Bridge 21-24 RH = printed "ba da" line only; 25-28 RH = both tenor lines folded into one line of eighths with the held D4 as a hidden-rest second voice.
 - Verified 2026-10-28: all 10 piano systems compared side by side with the scan (cmp-<page>-<y>.png crops).
 - Bar 18 (and 34): the "knew" tie carries over the half note AND the first eighth of the bar; "on-ly you" starts on the 2nd eighth (T1 E5, T2 C5, B1 F#3, B2 D3). Was wrongly one note early.
+- 28 Oct, later: piano reduction rebuilt bar by bar from the scan (bridge 21-28 was wrong: RH is one beamed line with the held D4 in 26/28 as a stemmed-down 2nd voice). All 10 piano systems checked render-over-scan (cmp_pno.py) and head-diffed (checkpno.py) before handover.

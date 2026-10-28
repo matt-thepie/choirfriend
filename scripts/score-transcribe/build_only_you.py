@@ -258,19 +258,19 @@ def build_staff(name, upper, lower, clf, octave=0, chords=None, hide_lower_rests
         st.append(m)
     return st
 
-# Piano follows the PRINT, not Simon's voicing (read off the scan, bar by bar):
+# Piano follows the PRINT, not Simon's voicing. Every bar below was read off the scan at 3x
+# (scratchpad pno/p4s2*.png) and compared render-over-scan before handover:
 #  - intro: RH = tenors in unison, LH = G octave + the G3 divisi
-#  - bridge 21-24: RH = the printed T2 "ba da" line only (the baritone line is in the LH already)
-#  - bridge 25-28: RH = T1 and printed T2 folded into ONE line of eighths (chords where both sing);
-#    the held D4 in 26/28 is a second voice with its rests hidden, as the print shows it
-PT1 = {**T1,
+#  - 21-24: RH = the printed T2 "ba da" line only (the baritone line is in the LH already)
+#  - 25-28: one beamed RH line; in 26 and 28 the D4 on the 4th eighth is tied into a
+#    stem-down half note = second voice (rests hidden), exactly as printed
+PT1 = {**T1,  # bars 21-24: T1 already holds the printed T2 "ba da" line after the choir-voicing swap
+       25: "B4/8 G4/8 B4/8 G4/8 D5/8 B4/8 D5/8 B4/8",
        26: "C5/8 B4+D4/8 G4/8 B4/8 D5/8 C5/8 B4/8 G4/8",
        27: "C5/8 B4+C4/8 G4+E4/8 E4+G4/8 C5+E4/8 G4+D4/8 E4/8 C4+G4/8",
-       28: "C5/8 B4+D4/8 G4/8 B4/8 A4/8 G4/8 F#4/8 D4/8"}
-PT2 = {**T2, **{b: T1[b] for b in (1, 2, 3, 4, 21, 22, 23, 24)},
-       25: "B4/8 G4/8 B4/8 G4/8 D5/8 B4/8 D5/8 B4/8", 26: "r/8 r/8 r/8 D4/8~ D4/2",
-       27: PT1[27], 28: "r/8 r/8 r/8 D4/8~ D4/2"}
-PT1[25] = PT2[25]
+       28: "C5/8 B4+D4/8 G4/8 D4/8 A4/8 G4/8 F#4/8 D4/8"}
+PT2 = {**T2, **{b: PT1[b] for b in (1, 2, 3, 4, 21, 22, 23, 24, 25, 27)},
+       26: "r/8 r/8 r/8 D4/8~ D4/2", 28: "r/8 r/8 r/8 D4/8~ D4/2"}
 PB2 = {**B2, 1: "G2+G3/1~", 2: "G2+G3/1", 3: "G2+G3/1~", 4: "G2+G3/1"}
 rh = build_staff("Piano (for rehearsal)", PT1, PT2, clef.TrebleClef(), octave=0, chords=CHORDS, hide_lower_rests=True)  # print writes RH at tenor written pitch, not sounding
 lh = build_staff("", B1, PB2, clef.BassClef())
