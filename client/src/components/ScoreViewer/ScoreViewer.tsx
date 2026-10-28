@@ -22,7 +22,7 @@ import { ViewSwitcher, type ViewTarget } from '@/components/ViewSwitcher.tsx';
 import { createToolkit } from '@/lib/flowing/verovio.ts';
 import { parseScore, type ScoreModel } from '@/lib/flowing/score.ts';
 import { assignParts, voicesByStaff, type PartAssignment } from '@/lib/flowing/parts.ts';
-import { BALANCE_MIN_WIDTH, engrave, engraveOriginal } from '@/lib/flowing/engrave.ts';
+import { BALANCE_MIN_WIDTH, MUSIC_TEXT_SCALE, engrave, engraveOriginal } from '@/lib/flowing/engrave.ts';
 import { buildPlayNotes, FlowPlayer, Timeline, type MixMode, type PlayNote } from '@/lib/flowing/playback.ts';
 import { SOUNDS, type SoundId } from '@/lib/flowing/sampler.ts';
 import { usePlayer } from '@/player/PlayerContext.tsx';
@@ -1043,6 +1043,12 @@ export function ScoreViewer({
         .cf-score svg { display: block; margin: 0 auto; max-width: 100%; height: auto; }
         /* Verovio spaces text with Times metrics; Tinos has the same widths. */
         .cf-score svg text { font-family: Tinos, "Times New Roman", Times, serif; }
+        /* Music characters in text (see musicText in engrave.ts). */
+        @font-face { font-family: Leland; src: url(/fonts/Leland.woff2) format("woff2"); font-display: swap; }
+        /* Leland lacks a few (the ♯ Verovio uses in chord symbols): Bravura, cut down to the text-symbol ranges, fills in. */
+        @font-face { font-family: "Bravura Text"; src: url(/fonts/BravuraText-subset.woff2) format("woff2"); font-display: swap; }
+        .cf-score svg [font-family="Leipzig"], .cf-score svg .cf-smufl { font-family: Leland, "Bravura Text"; }
+        .cf-score svg .cf-smufl { font-size: ${Math.round(MUSIC_TEXT_SCALE * 100)}%; }
         .cf-score .cf-myline { fill: rgb(59 130 246 / 0.13); }
         .cf-score g.cf-playing, .cf-score g.cf-playing * { fill: ${HIGHLIGHT}; stroke: ${HIGHLIGHT}; }
         .cf-score g.cf-from > g.staff > path { stroke: ${HIGHLIGHT}; }

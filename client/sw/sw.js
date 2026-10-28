@@ -76,6 +76,11 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(cacheFirst(req, FONTS));
     return;
   }
+  if (url.origin === self.location.origin && url.pathname.startsWith('/fonts/')) {
+    // The music fonts for flowing scores: fetched when one is first opened.
+    event.respondWith(cacheFirst(req, FONTS));
+    return;
+  }
   if (url.origin !== self.location.origin) return; // audio on the CDN etc: network only
 
   if (req.mode === 'navigate') {

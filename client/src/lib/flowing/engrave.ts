@@ -46,10 +46,32 @@ const BASE_OPTIONS = {
   svgRemoveXlink: true,
 };
 
+/** Verovio's text font's em is ~45% of a SMuFL font's, so Verovio draws its
+ *  own music characters at this multiple of the text size (720px vs 405px). */
+export const MUSIC_TEXT_SCALE = 720 / 405;
+
+/**
+ * Give SMuFL characters in text a music font. MuseScore puts them in staff
+ * text (a bracketed fermata, a lyric rest, a segno) and the export tags them
+ * with its Leland font, but Verovio drops the tag, and Verovio's own ones
+ * (the ♩ in a tempo, the ♯ in a chord) ask for Leipzig, which browsers
+ * don't have. Both would show as a hex box. ScoreViewer's CSS maps the class
+ * and the Leipzig tag to Leland.
+ */
+export function musicText(svg: string): string {
+  return svg.replace(
+    /(<tspan\b[^>]*>)([^<]*)(?=<\/tspan>)/g,
+    (whole, open: string, text: string) =>
+      /[-]/.test(text) && !open.includes('font-family')
+        ? open + text.replace(/[-]+/g, '<tspan class="cf-smufl">$&</tspan>')
+        : whole,
+  );
+}
+
 function renderAll(tk: VerovioToolkit): string {
   let svg = '';
   for (let p = 1; p <= tk.getPageCount(); p++) svg += tk.renderToSVG(p);
-  return svg;
+  return musicText(svg);
 }
 
 const countSystems = (svg: string) => svg.split('class="system"').length - 1;
