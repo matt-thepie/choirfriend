@@ -8,7 +8,7 @@ export function ReadModeControls({ toolsOpen, onShow, onExit }: {
   onExit?: () => void;
 }) {
   const [guide, setGuide] = useState(() => {
-    try { return sessionStorage.getItem('choirfriend.readGuide.v1') !== 'seen'; } catch { return true; }
+    try { return localStorage.getItem('choirfriend.readGuide.v1') !== 'seen'; } catch { return true; }
   });
   return (
     <div className="absolute bottom-12 right-3 z-30 max-w-[min(22rem,calc(100%-1.5rem))] rounded-lg border border-border bg-background/95 p-2 shadow-card text-sm">
@@ -18,7 +18,7 @@ export function ReadModeControls({ toolsOpen, onShow, onExit }: {
           <p>Controls stay visible while you use the keyboard. Exit read mode returns to the full viewer; Escape also exits.</p>
           <Button size="sm" variant="outline" onClick={() => {
             setGuide(false);
-            try { sessionStorage.setItem('choirfriend.readGuide.v1', 'seen'); } catch { /* storage blocked */ }
+            try { localStorage.setItem('choirfriend.readGuide.v1', 'seen'); } catch { /* storage blocked */ }
           }}>Got it</Button>
         </div>
       )}

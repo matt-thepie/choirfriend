@@ -513,9 +513,11 @@ export function PdfViewer({
       void lock?.release();
     };
   }, [readMode]);
+  // Corrections are stored per member + file, not per browsing section.
+  const canCorrectLine = selectedSectionId === mySectionId;
   useEffect(() => {
     setLineOverrides({});
-    if (!partLineOn || !pdfFile) return;
+    if (!partLineOn || !pdfFile || !canCorrectLine) return;
     let cancelled = false;
     fetch(`/api/me/part-lines/${pdfFile.id}`, { credentials: 'include' })
       .then((r) => (r.ok ? (r.json() as Promise<PartLineOverrides>) : {}))
@@ -526,11 +528,12 @@ export function PdfViewer({
     return () => {
       cancelled = true;
     };
-  }, [partLineOn, pdfFile?.id]);
+  }, [partLineOn, pdfFile?.id, canCorrectLine]);
   useEffect(() => {
-    if (!partLineOn) setAdjustingLine(false);
-  }, [partLineOn]);
+    if (!partLineOn || !canCorrectLine) setAdjustingLine(false);
+  }, [partLineOn, canCorrectLine]);
   const saveLineOverrides = (next: PartLineOverrides): void => {
+    if (!canCorrectLine) return;
     setLineOverrides(next);
     if (!pdfFile) return;
     void fetch(`/api/me/part-lines/${pdfFile.id}`, {
@@ -543,8 +546,8 @@ export function PdfViewer({
   const mySection = selectedSectionId !== null ? sectionsById.get(selectedSectionId) ?? null : null;
   const myPart = useMemo(() => (mySection ? partFromSection(mySection.label, mySection.badge) : null), [mySection]);
   const linePicks = useMemo(
-    () => (partLineOn && pdf ? resolvePartLine(layouts, pdf.numPages, myPart, lineOverrides) : []),
-    [partLineOn, pdf, layouts, myPart, lineOverrides],
+    () => (partLineOn && pdf ? resolvePartLine(layouts, pdf.numPages, myPart, canCorrectLine ? lineOverrides : {}) : []),
+    [partLineOn, pdf, layouts, myPart, lineOverrides, canCorrectLine],
   );
   /** Bands to draw, by page: the picked stave, padded to take in notes and
    *  words just above and below it without reaching the next stave. */
@@ -569,7 +572,7 @@ export function PdfViewer({
     return m;
   }, [linePicks, layouts]);
   const staveTargetsFor = (page: number): StaveTarget[] | undefined => {
-    if (!adjustingLine) return undefined;
+    if (!adjustingLine || !canCorrectLine) return undefined;
     const L = layouts.get(page);
     if (!L) return [];
     const picked = new Set(linePicks.filter((p) => p.page === page).map((p) => `${p.system}:${p.stave}`));
@@ -594,9 +597,10 @@ export function PdfViewer({
       onChange={onPartLineChange}
       partName={mySection?.label ?? null}
       guessable={!!myPart}
-      adjusting={adjustingLine}
-      onAdjustingChange={setAdjustingLine}
-      hasCorrections={Object.keys(lineOverrides).length > 0}
+      adjusting={adjustingLine && canCorrectLine}
+      canCorrect={canCorrectLine}
+      onAdjustingChange={(on) => setAdjustingLine(on && canCorrectLine)}
+      hasCorrections={canCorrectLine && Object.keys(lineOverrides).length > 0}
       onReset={() => saveLineOverrides({})}
       onActivate={() => setMarkUp(false)}
     />
@@ -1527,6 +1531,7 @@ function MyLineControl({
   onChange,
   partName,
   guessable,
+  canCorrect,
   adjusting,
   onAdjustingChange,
   hasCorrections,
@@ -1537,6 +1542,7 @@ function MyLineControl({
   onChange: (on: boolean) => void;
   partName: string | null;
   guessable: boolean;
+  canCorrect: boolean;
   adjusting: boolean;
   onAdjustingChange: (adjusting: boolean) => void;
   hasCorrections: boolean;
@@ -1593,7 +1599,9 @@ function MyLineControl({
             {on ? 'Your part is shaded blue on every page.' : 'Shades your part blue on every page.'}
           </p>
           <p className="px-3 pt-1 pb-1 text-xs text-muted-foreground max-w-[16rem]">
-            {guessable
+            {!canCorrect
+              ? `Showing the automatic guess for ${partName ?? 'the selected section'}. Your saved corrections are not applied. Select your own section to adjust or reset them.`
+              : guessable
               ? `Guessed from the part names printed on the score (${partName}). Fix any system it gets wrong with Adjust.`
               : partName
                 ? `Can't guess ${partName} from part names. Use Adjust to pick your stave; it carries on to later systems.`
@@ -1602,6 +1610,7 @@ function MyLineControl({
           <button
             type="button"
             className={row}
+            disabled={!canCorrect}
             onClick={() => {
               if (!on) onChange(true);
               onActivate();
@@ -1614,7 +1623,7 @@ function MyLineControl({
           <button
             type="button"
             className={row}
-            disabled={!hasCorrections}
+            disabled={!canCorrect || !hasCorrections}
             onClick={() => {
               onReset();
               setOpen(false);
