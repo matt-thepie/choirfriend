@@ -1062,7 +1062,7 @@ export function ScoreViewer({
         .cf-score g.measure { cursor: pointer; }
         .cf-original > svg + svg { margin-top: 40px; }
       `}</style>
-      {readMode && <ReadModeControls toolsOpen={toolsOpen} onExit={onExitReadMode} onShow={() => {
+      {readMode && <ReadModeControls toolsOpen={toolsOpen} onShow={() => {
         setToolsOpen(true);
         requestAnimationFrame(() => headerRef.current?.querySelector<HTMLElement>('button, select, input')?.focus());
       }} />}

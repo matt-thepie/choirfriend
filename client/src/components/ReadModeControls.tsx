@@ -1,32 +1,37 @@
-import { useState } from 'react';
-import { Button } from '@/components/ui/button.tsx';
+import { useRef } from 'react';
 
-/** A permanent way back to controls, including for touch and keyboard readers. */
-export function ReadModeControls({ toolsOpen, onShow, onExit }: {
+/** A slim pull tab at the top edge: the way back to the hidden read-mode
+ *  toolbar for touch and keyboard readers. Tap it, drag it down, or Tab to it.
+ *  It only shows while the toolbar is hidden, and sits clear of the music. */
+export function ReadModeControls({ toolsOpen, onShow }: {
   toolsOpen: boolean;
   onShow: () => void;
-  onExit?: () => void;
 }) {
-  const [guide, setGuide] = useState(() => {
-    try { return localStorage.getItem('choirfriend.readGuide.v1') !== 'seen'; } catch { return true; }
-  });
+  const dragRef = useRef<number | null>(null);
+  if (toolsOpen) return null;
   return (
-    <div className="absolute bottom-12 right-3 z-30 max-w-[min(22rem,calc(100%-1.5rem))] rounded-lg border border-border bg-background/95 p-2 shadow-card text-sm">
-      {guide && (
-        <div className="p-2 space-y-2">
-          <p>Read mode opens automatically to give the music more room. Tap the middle of the music or use Show controls to find playback and viewing tools. Edge taps turn pages; a flowing bar tap selects where playback starts.</p>
-          <p>Controls stay visible while you use the keyboard. Exit read mode returns to the full viewer; Escape also exits.</p>
-          <Button size="sm" variant="outline" onClick={() => {
-            setGuide(false);
-            try { localStorage.setItem('choirfriend.readGuide.v1', 'seen'); } catch { /* storage blocked */ }
-          }}>Got it</Button>
-        </div>
-      )}
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs text-muted-foreground px-1">Read mode</span>
-        {!toolsOpen && <Button size="sm" variant="outline" onClick={onShow}>Show controls</Button>}
-        {onExit && <Button size="sm" variant="outline" onClick={onExit}>Exit read mode</Button>}
-      </div>
-    </div>
+    <button
+      type="button"
+      aria-label="Show controls"
+      title="Show controls"
+      onClick={onShow}
+      onPointerDown={(e) => {
+        // Capture so a drag keeps reporting here once it leaves the 24px tab.
+        e.currentTarget.setPointerCapture(e.pointerId);
+        dragRef.current = e.clientY;
+      }}
+      onPointerMove={(e) => {
+        if (dragRef.current !== null && e.clientY - dragRef.current > 12) {
+          dragRef.current = null;
+          onShow();
+        }
+      }}
+      onPointerUp={() => { dragRef.current = null; }}
+      onPointerCancel={() => { dragRef.current = null; }}
+      onLostPointerCapture={() => { dragRef.current = null; }}
+      className="group absolute top-0 left-1/2 -translate-x-1/2 z-30 flex h-6 w-20 touch-none items-start justify-center pt-1 focus-visible:outline-none"
+    >
+      <span className="block h-1.5 w-10 rounded-full bg-foreground/25 shadow-sm transition-colors group-hover:bg-foreground/50 group-focus-visible:bg-primary group-focus-visible:ring-2 group-focus-visible:ring-primary/40" />
+    </button>
   );
 }
