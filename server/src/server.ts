@@ -16,6 +16,7 @@ import { backfillAudioSections, seedSectionsIfEmpty } from './db/sections.ts';
 import { getConfig } from './config.ts';
 import { seedIfEmpty } from './seed.ts';
 import { resumeRenditions } from './scores/render.ts';
+import { purgeDeletedAnnotations } from './db/annotations.ts';
 
 const config = getConfig();
 
@@ -57,6 +58,9 @@ seedSectionsIfEmpty();
 backfillAudioSections();
 // Flowing scores missing or out of date are converted in the background.
 resumeRenditions();
+// Deleted marks stay restorable for a day; clear expired ones now and hourly.
+purgeDeletedAnnotations();
+setInterval(purgeDeletedAnnotations, 60 * 60 * 1000).unref();
 
 try {
   await app.listen({ port: config.port, host: '0.0.0.0' });

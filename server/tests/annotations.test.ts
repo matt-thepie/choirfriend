@@ -67,6 +67,50 @@ await test('shared marker edits preserve the original author and reject malforme
   process.env.DEV_AUTH_EMAIL = 'owner@example.test';
 });
 
+await test('redo restores a deleted shared mark with its original author, only for the member who deleted it', async () => {
+  const input = { id: 'shared-to-redo', fileId: 1, page: 1, kind: 'marker', layer: 'shared', markerKind: 'fine', label: null, position: { x: .5, y: .5 } };
+  assert.equal((await app.inject({ method: 'POST', url: '/api/pieces/1/annotations', payload: input })).statusCode, 201);
+  process.env.DEV_AUTH_EMAIL = 'other@example.test';
+  assert.equal((await app.inject({ method: 'DELETE', url: '/api/annotations/shared-to-redo' })).statusCode, 204);
+  assert.ok(!(await app.inject('/api/pieces/1/annotations')).json().some((a: {id: string}) => a.id === 'shared-to-redo'));
+  assert.equal((await app.inject({ method: 'PATCH', url: '/api/annotations/shared-to-redo', payload: { label: 'x' } })).statusCode, 404);
+  process.env.DEV_AUTH_EMAIL = 'owner@example.test';
+  assert.equal((await app.inject({ method: 'POST', url: '/api/annotations/shared-to-redo/restore' })).statusCode, 404);
+  process.env.DEV_AUTH_EMAIL = 'other@example.test';
+  const restored = await app.inject({ method: 'POST', url: '/api/annotations/shared-to-redo/restore' });
+  assert.equal(restored.statusCode, 200);
+  assert.equal(restored.json().authorEmail, 'owner@example.test');
+  assert.equal(restored.json().isMine, false);
+  assert.equal((await app.inject({ method: 'POST', url: '/api/annotations/shared-to-redo/restore' })).statusCode, 404);
+  process.env.DEV_AUTH_EMAIL = 'owner@example.test';
+  assert.ok((await app.inject('/api/pieces/1/annotations')).json().some((a: {id: string}) => a.id === 'shared-to-redo'));
+});
+
+await test('restore requires the deleting member to still see the mark from their current section', async () => {
+  db.exec(`INSERT INTO sections (id, label, badge) VALUES (1, 'Tenor 1', 'T1'), (2, 'Bass', 'B')`);
+  const input = { id: 'section-a-only', fileId: 1, page: 1, kind: 'marker', layer: 'shared', sectionIds: [1], markerKind: 'segno', label: null, position: { x: .5, y: .5 } };
+  assert.equal((await app.inject({ method: 'POST', url: '/api/pieces/1/annotations', payload: input })).statusCode, 201);
+  db.prepare(`UPDATE users SET section_id = 1 WHERE email = 'other@example.test'`).run();
+  process.env.DEV_AUTH_EMAIL = 'other@example.test';
+  assert.equal((await app.inject({ method: 'DELETE', url: '/api/annotations/section-a-only' })).statusCode, 204);
+  db.prepare(`UPDATE users SET section_id = 2 WHERE email = 'other@example.test'`).run();
+  assert.equal((await app.inject({ method: 'POST', url: '/api/annotations/section-a-only/restore' })).statusCode, 404);
+  db.prepare(`UPDATE users SET section_id = 1 WHERE email = 'other@example.test'`).run();
+  assert.equal((await app.inject({ method: 'POST', url: '/api/annotations/section-a-only/restore' })).statusCode, 200);
+  process.env.DEV_AUTH_EMAIL = 'owner@example.test';
+});
+
+await test('a deletion older than a day cannot be restored and is purged without another deletion', async () => {
+  const { purgeDeletedAnnotations } = await import('../src/db/annotations.ts');
+  const input = { id: 'expired', fileId: 1, page: 1, kind: 'marker', layer: 'private', markerKind: 'fine', label: null, position: { x: .5, y: .5 } };
+  assert.equal((await app.inject({ method: 'POST', url: '/api/pieces/1/annotations', payload: input })).statusCode, 201);
+  assert.equal((await app.inject({ method: 'DELETE', url: '/api/annotations/expired' })).statusCode, 204);
+  db.prepare(`UPDATE annotations SET deleted_at = unixepoch() - 2 * 86400 WHERE id = 'expired'`).run();
+  assert.equal((await app.inject({ method: 'POST', url: '/api/annotations/expired/restore' })).statusCode, 404);
+  assert.equal(purgeDeletedAnnotations(), 1);
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM annotations WHERE id = 'expired'`).get().n, 0);
+});
+
 await app.close();
 db.close();
 rmSync(dir, { recursive: true, force: true });

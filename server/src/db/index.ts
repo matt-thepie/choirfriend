@@ -164,6 +164,11 @@ addColumnIfMissing('users', 'section_id INTEGER REFERENCES sections(id)');
 // ids. NULL = everyone. Only members of those parts (and the author) see it.
 addColumnIfMissing('annotations', 'section_ids TEXT');
 
+// Deleted marks are kept briefly so the person who erased one can redo it
+// with its original author intact. Purged a day after deletion.
+addColumnIfMissing('annotations', 'deleted_at INTEGER');
+addColumnIfMissing('annotations', 'deleted_by_user_id INTEGER REFERENCES users(id)');
+
 // Track length, shown under the play button on audio rows. Imported from
 // ChoirMate's metadata; measured in the browser for new uploads. NULL = unknown.
 addColumnIfMissing('files', 'duration_ms INTEGER');

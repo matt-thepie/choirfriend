@@ -3,6 +3,7 @@ import {
   canSeeAnnotation,
   createAnnotation,
   deleteAnnotation,
+  restoreAnnotation,
   updateMarker,
   getAnnotationById,
   listAnnotationsForPiece,
@@ -210,8 +211,20 @@ export const annotationRoutes: FastifyPluginAsync = async (app) => {
         return reply.code(403).send({ error: 'forbidden' });
       }
 
-      deleteAnnotation(req.params.annotationId);
+      deleteAnnotation(req.params.annotationId, user.internalId);
       return reply.code(204).send();
+    },
+  );
+
+  // Redo of a delete: only the member who deleted the mark can bring it back.
+  app.post<{ Params: { annotationId: string } }>(
+    '/annotations/:annotationId/restore',
+    { preHandler: requireAuth },
+    async (req, reply) => {
+      const user = req.user!;
+      const restored = restoreAnnotation(req.params.annotationId, user.internalId, getUserSectionIdByEmail(user.email));
+      if (!restored) return reply.code(404).send({ error: 'not found' });
+      return restored;
     },
   );
 };
