@@ -221,7 +221,8 @@ export const annotationRoutes: FastifyPluginAsync = async (app) => {
     '/annotations/:annotationId/restore',
     { preHandler: requireAuth },
     async (req, reply) => {
-      const restored = restoreAnnotation(req.params.annotationId, req.user!.internalId);
+      const user = req.user!;
+      const restored = restoreAnnotation(req.params.annotationId, user.internalId, getUserSectionIdByEmail(user.email));
       if (!restored) return reply.code(404).send({ error: 'not found' });
       return restored;
     },
