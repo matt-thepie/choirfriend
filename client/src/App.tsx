@@ -171,6 +171,7 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
   }
   const offerInstall = installer.canPrompt || installer.iosInstructions;
   const [mySectionId, setMySectionId] = useState<number | null>(me.sectionId ?? null);
+  const [selectedSectionId, setSelectedSectionId] = useState<number | null>(me.sectionId ?? null);
   const [partLine, setPartLineState] = useState(me.partLine === true);
   const setPartLine = (on: boolean): void => {
     setPartLineState(on);
@@ -239,6 +240,7 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
 
   async function chooseSection(id: number | null): Promise<void> {
     setMySectionId(id);
+    setSelectedSectionId(id);
     setPartMenuOpen(false);
     setMenuOpen(false);
     try {
@@ -496,7 +498,8 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
             setListId={setListId!}
             pieces={pieces}
             sections={sections}
-            mySectionId={mySectionId}
+            selectedSectionId={selectedSectionId}
+            onSectionChange={setSelectedSectionId}
             isAdmin={editing}
             onBack={() => setSetListId(null)}
             onOpenPiece={openPiece}
@@ -511,6 +514,8 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
                 refreshTick={pieceRefreshTick}
                 sections={sections}
                 mySectionId={mySectionId}
+                selectedSectionId={selectedSectionId}
+                onSectionChange={setSelectedSectionId}
                 editing={editing}
                 showConfidence={me.features?.confidence !== false}
                 fromSetList={currentSetList ? { id: currentSetList.id, name: currentSetList.name } : setListId === 0 ? { id: 0, name: 'All songs' } : null}
@@ -537,6 +542,8 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
                 onExitReadMode={() => setReadMode(false)}
                 onEnterReadMode={() => setReadMode(true)}
                 mySectionId={mySectionId}
+                selectedSectionId={selectedSectionId}
+                onSectionChange={setSelectedSectionId}
                 partLineOn={partLine}
                 onPartLineChange={setPartLine}
                 playerHidden={readPlayerHidden}
@@ -558,6 +565,7 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
                 onEnterReadMode={() => setReadMode(true)}
                 isAdmin={editing}
                 mySectionId={mySectionId}
+                selectedSectionId={selectedSectionId}
                 partLineOn={partLine}
                 onPartLineChange={setPartLine}
                 playerHidden={readPlayerHidden}

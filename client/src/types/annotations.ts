@@ -13,7 +13,7 @@
 
 export type AnnotationLayer = 'private' | 'shared';
 
-export type AnnotationTool = 'pen' | 'highlighter' | 'pan' | 'marker';
+export type AnnotationTool = 'pen' | 'highlighter' | 'pan' | 'marker' | 'erase' | 'select';
 
 // ---------------------------------------------------------------------------
 // Ink

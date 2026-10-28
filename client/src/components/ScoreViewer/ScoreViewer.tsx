@@ -1,3 +1,4 @@
+import { ReadModeControls } from '@/components/ReadModeControls.tsx';
 /**
  * Flowing score viewer: the music engraved live (Verovio) from MusicXML to
  * fit the screen, rather than a fixed PDF page. Same reading controls as the
@@ -20,7 +21,7 @@ import type { SetListFlow } from '@/hooks/useSetListFlow.ts';
 import { ListenButton, ToolButton, useDropStaleRecording } from '@/components/PdfViewer/PdfViewer.tsx';
 import { ViewSwitcher, type ViewTarget } from '@/components/ViewSwitcher.tsx';
 import { createToolkit } from '@/lib/flowing/verovio.ts';
-import { parseScore, type ScoreModel } from '@/lib/flowing/score.ts';
+import { parseScore, tempoAt, type ScoreModel } from '@/lib/flowing/score.ts';
 import { assignParts, voicesByStaff, type PartAssignment } from '@/lib/flowing/parts.ts';
 import { BALANCE_MIN_WIDTH, MUSIC_TEXT_SCALE, engrave, engraveOriginal } from '@/lib/flowing/engrave.ts';
 import { buildPlayNotes, FlowPlayer, Timeline, type MixMode, type PlayNote } from '@/lib/flowing/playback.ts';
@@ -37,6 +38,8 @@ interface ScoreViewerProps {
   onExitReadMode?: () => void;
   onEnterReadMode?: () => void;
   mySectionId?: number | null;
+  selectedSectionId?: number | null;
+  onSectionChange?: (id: number | null) => void;
   partLineOn?: boolean;
   onPartLineChange?: (on: boolean) => void;
   playerHidden?: boolean;
@@ -92,6 +95,8 @@ export function ScoreViewer({
   onExitReadMode,
   onEnterReadMode,
   mySectionId = null,
+  selectedSectionId = mySectionId,
+  onSectionChange,
   partLineOn = false,
   onPartLineChange,
   playerHidden = false,
@@ -205,8 +210,7 @@ export function ScoreViewer({
   const [mixMode, setMixModeState] = useState<MixMode>(() =>
     load(MIX_KEY, 'mine', (v) => v === 'balanced' || v === 'mine' || v === 'solo'),
   );
-  const [lineSectionId, setLineSectionId] = useState<number | null>(mySectionId);
-  useEffect(() => setLineSectionId(mySectionId), [mySectionId]);
+  const lineSectionId = selectedSectionId;
 
   const tempoKey = `choirfriend.flowTempo.${fileId}`;
   const [bpmOverride, setBpmOverride] = useState<number | null>(() =>
@@ -223,7 +227,7 @@ export function ScoreViewer({
 
   const assignments = useMemo(() => (model ? assignParts(model, sections) : new Map<number, PartAssignment>()), [model, sections]);
   const voices = useMemo(() => (model ? voicesByStaff(model) : new Map<string, string[]>()), [model]);
-  const myLine = mySectionId !== null ? assignments.get(mySectionId) ?? null : null;
+  const myLine = selectedSectionId !== null ? assignments.get(selectedSectionId) ?? null : null;
   const hearLine = lineSectionId !== null ? assignments.get(lineSectionId) ?? null : null;
   const visibleParts = useMemo(() => model?.parts.filter((p) => !hidden.includes(p.id)) ?? [], [model, hidden]);
 
@@ -662,7 +666,7 @@ export function ScoreViewer({
     if (!readMode || !toolsOpen || toolsBusy) return;
     touchTools();
     const id = setInterval(() => {
-      if (document.querySelector('[data-popover]')) return touchTools();
+      if (headerRef.current?.contains(document.activeElement) || document.querySelector('[data-popover]')) return touchTools();
       if (Date.now() - toolsTouchedRef.current > TOOLS_HIDE_MS) setToolsOpen(false);
     }, 500);
     return () => clearInterval(id);
@@ -1055,6 +1059,10 @@ export function ScoreViewer({
         .cf-score g.measure { cursor: pointer; }
         .cf-original > svg + svg { margin-top: 40px; }
       `}</style>
+      {readMode && <ReadModeControls toolsOpen={toolsOpen} onExit={onExitReadMode} onShow={() => {
+        setToolsOpen(true);
+        requestAnimationFrame(() => headerRef.current?.querySelector<HTMLElement>('button, select, input')?.focus());
+      }} />}
       <header
         ref={headerRef}
         onPointerDown={touchTools}
@@ -1066,6 +1074,12 @@ export function ScoreViewer({
         )}
       >
         {readMode ? minimalToolbar : fullToolbar}
+        <div className="px-3 pb-2 text-xs text-muted-foreground flex flex-wrap items-center gap-2">
+          <span>Highlighting, pen marks and navigation markers are available on PDFs only.</span>
+          {piece?.files.some((f) => f.kind === 'pdf') ? (
+            <Button size="sm" variant="outline" onClick={() => onOpenView({ kind: 'pdf', id: piece.files.find((f) => f.kind === 'pdf')!.id })}>Annotate the PDF</Button>
+          ) : <span>No PDF is attached to this song.</span>}
+        </div>
       </header>
 
       <div
@@ -1213,6 +1227,8 @@ export function ScoreViewer({
           bpm={bpm}
           markedBpm={model.markedTempo ?? 120}
           hasMarkedTempo={model.markedTempo != null}
+          laterTempo={model.markedTempo === null ? model.tempo.find((t) => t.kind === 'set')?.bpm ?? null : null}
+          currentBpm={Math.round(tempoAt(model, model.measures[currentBar]?.pos ?? 0, model.markedTempo ?? 120) * bpm / (model.markedTempo ?? 120))}
           onBpm={setBpm}
           onResetBpm={() => { setBpmOverride(null); save(tempoKey, null); }}
           loop={loop}
@@ -1221,7 +1237,7 @@ export function ScoreViewer({
           onClearLoop={() => setLoop({ start: null, end: null })}
           lineChoices={sections.filter((s) => assignments.has(s.id)).map((s) => ({ id: s.id, label: s.label, mine: s.id === mySectionId }))}
           lineSectionId={lineSectionId}
-          onLine={setLineSectionId}
+          onLine={(id) => onSectionChange?.(id)}
           lineLabel={lineSectionId !== null && hearLine ? sections.find((s) => s.id === lineSectionId)?.label ?? null : null}
           mixMode={mixMode}
           onMixMode={(m) => { setMixModeState(m); save(MIX_KEY, m); }}

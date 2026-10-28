@@ -20,7 +20,8 @@ interface SetListScreenProps {
   setListId: number;
   pieces: PieceSummary[];
   sections: Section[];
-  mySectionId: number | null;
+  selectedSectionId: number | null;
+  onSectionChange: (id: number | null) => void;
   isAdmin: boolean;
   onBack: () => void;
   onOpenPiece: (id: number) => void;
@@ -40,7 +41,8 @@ export function SetListScreen({
   setListId,
   pieces,
   sections,
-  mySectionId,
+  selectedSectionId: sectionId,
+  onSectionChange: setSectionId,
   isAdmin,
   onBack,
   onOpenPiece,
@@ -72,8 +74,6 @@ export function SetListScreen({
   const err = isVirtual ? allError : error;
 
   const player = usePlayer();
-  const [sectionId, setSectionId] = useState<number | null>(mySectionId);
-  useEffect(() => setSectionId(mySectionId), [mySectionId]);
   const [editing, setEditing] = useState(false);
   // Filters the list on screen only; numbers stay as the running order and
   // Play still queues the whole list.
@@ -179,7 +179,7 @@ export function SetListScreen({
               <span className="block text-base font-semibold">{isThisQueuePlaying ? 'Pause' : 'Play'}</span>
               <span className="block text-sm text-muted-foreground">
                 {queue?.tracks.length ?? 0} track{queue?.tracks.length === 1 ? '' : 's'}, one per song
-                {songsWithoutAudio > 0 && `; ${songsWithoutAudio} without audio skipped`}
+                {songsWithoutAudio > 0 && `; ${songsWithoutAudio} without a matching or full-mix track skipped`}
               </span>
             </span>
           </button>
@@ -232,7 +232,7 @@ export function SetListScreen({
                       <Icon name="play_arrow" filled />
                     </button>
                   ) : (
-                    <span className="text-xs text-muted-foreground shrink-0">no audio</span>
+                    <span className="text-xs text-muted-foreground shrink-0">{song.audio.length ? 'no matching track' : 'no audio'}</span>
                   )}
                   <Icon name="chevron_right" className="text-muted-foreground" />
                 </li>

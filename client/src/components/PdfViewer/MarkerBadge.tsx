@@ -24,15 +24,19 @@ interface MarkerBadgeProps {
   marker: MarkerAnnotation;
   pageWidth: number;
   pageHeight: number;
-  /** If interactive, the badge responds to taps (jump) and shows a delete ×. */
+  /** Reading follows a jump; editing selects the marker and exposes deletion. */
   interactive: boolean;
+  editing?: boolean;
+  selected?: boolean;
+  erasing?: boolean;
+  onSelect?: (marker: MarkerAnnotation) => void;
   /** Context "follow" action (e.g. D.S. → Go to Segno), or null. A single tap
    *  on the badge runs it — no menu, no second tap. */
   follow?: { label: string; run: () => void } | null;
   onDelete?: (id: string) => void;
 }
 
-export function MarkerBadge({ marker, pageWidth, pageHeight, interactive, follow, onDelete }: MarkerBadgeProps) {
+export function MarkerBadge({ marker, pageWidth, pageHeight, interactive, follow, onDelete, editing, selected, erasing, onSelect }: MarkerBadgeProps) {
   const styles = KIND_STYLES[marker.markerKind];
   const label = markerLabel(marker);
   const canDelete = onDelete && (marker.layer === 'shared' || marker.isMine !== false);
@@ -52,35 +56,28 @@ export function MarkerBadge({ marker, pageWidth, pageHeight, interactive, follow
         onClick={(e) => {
           if (!interactive) return;
           e.stopPropagation();
+          if (erasing && canDelete) { onDelete!(marker.id); return; }
+          if (editing && canDelete) { onSelect?.(marker); return; }
+          if (editing || erasing) return;
           follow?.run(); // single tap jumps; no-op for markers that aren't a jump source
         }}
         className={cn(
           'inline-flex items-center px-2 py-0.5 rounded-md border text-xs font-semibold shadow-sm whitespace-nowrap select-none',
           styles,
+          selected && 'ring-4 ring-primary',
+          (editing || erasing) && 'min-w-11 min-h-11 justify-center',
           // Pad the hit area well beyond the small badge so a finger can find it.
-          interactive && follow ? "relative cursor-pointer hover:shadow-md after:absolute after:-inset-3 after:content-['']" : 'cursor-default',
+          interactive && follow && !editing && !erasing ? "relative cursor-pointer hover:shadow-md after:absolute after:-inset-3 after:content-['']" : 'cursor-default',
         )}
+        tabIndex={interactive ? 0 : -1}
+        aria-label={editing ? `Edit ${label} marker` : erasing ? `Erase ${label} marker` : undefined}
         title={follow ? follow.label : `${marker.markerKind}${marker.label ? ` · ${marker.label}` : ''}`}
       >
         <MarkerGlyph kind={marker.markerKind} label={label} className="w-4 h-4" />
-        {follow && <span className="ml-1 opacity-70">→</span>}
+        {follow && !editing && !erasing && <span className="ml-1 opacity-70">→</span>}
       </button>
 
-      {interactive && canDelete && (
-        <button
-          type="button"
-          aria-label="Delete marker"
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete!(marker.id);
-          }}
-          className="absolute -top-2 -right-2 inline-flex items-center justify-center w-4 h-4 rounded-full bg-background border border-border text-muted-foreground hover:text-destructive hover:border-destructive shadow"
-        >
-          <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" aria-hidden>
-            <path d="M6 6 18 18M18 6 6 18" />
-          </svg>
-        </button>
-      )}
+
     </div>
   );
 }

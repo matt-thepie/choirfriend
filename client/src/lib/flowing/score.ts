@@ -75,7 +75,8 @@ export interface ScoreModel {
   notes: Map<string, ScoreNote>;
   dynamics: DynPoint[][];
   tempo: TempoEvent[];
-  /** Quarter-note bpm of the first tempo marking, or null when there is none. */
+  /** Initial quarter-note bpm, or null when there is no marking near the start.
+   * Later fixed markings remain in tempo. */
   markedTempo: number | null;
   measures: ScoreMeasure[];
   rehearsals: Array<{ label: string; measure: number }>;

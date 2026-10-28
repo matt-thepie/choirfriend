@@ -29,6 +29,8 @@ interface SongScreenProps {
   refreshTick: number;
   sections: Section[];
   mySectionId: number | null;
+  selectedSectionId: number | null;
+  onSectionChange: (id: number | null) => void;
   /** Admin edit mode — the ChoirMate admin layout. Members never see it. */
   editing: boolean;
   /** Breadcrumb: where the member came from. */
@@ -64,6 +66,8 @@ export function SongScreen({
   refreshTick,
   sections,
   mySectionId,
+  selectedSectionId: sectionId,
+  onSectionChange: setSectionId,
   editing,
   fromSetList,
   onGoSetLists,
@@ -76,8 +80,6 @@ export function SongScreen({
   const { piece, loading, error, refresh } = usePiece(pieceId, refreshTick);
 
   // Section filter: the member's own part by default. null = all parts.
-  const [sectionId, setSectionId] = useState<number | null>(mySectionId);
-  useEffect(() => setSectionId(mySectionId), [mySectionId]);
   const [panel, setPanel] = useState<'remarks' | 'lyrics' | 'links' | null>(null);
   const [onlyMine, setOnlyMine] = useState(false);
 

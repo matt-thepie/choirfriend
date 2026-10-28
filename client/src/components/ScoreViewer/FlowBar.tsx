@@ -23,6 +23,8 @@ export interface FlowBarProps {
   bpm: number;
   markedBpm: number;
   hasMarkedTempo: boolean;
+  laterTempo: number | null;
+  currentBpm: number;
   onBpm: (bpm: number) => void;
   onResetBpm: () => void;
   loop: { start: number | null; end: number | null };
@@ -87,8 +89,8 @@ export function FlowBar(p: FlowBarProps) {
         {open && (
           <div className="px-4 pt-5 pb-3 border-b border-border max-h-[50dvh] overflow-auto flex flex-col gap-4 text-sm">
             <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
-              <div className="flex items-center gap-1" title={p.hasMarkedTempo ? 'Tempo (the score’s marking, adjusted)' : 'Tempo (the score has no marking)'}>
-                <span className="text-muted-foreground mr-1">Tempo</span>
+              <div className="flex items-center gap-1" title={p.hasMarkedTempo ? 'Tempo (the score’s marking, adjusted)' : 'Starting tempo (no initial fixed tempo marking)'}>
+                <span className="text-muted-foreground mr-1">Starting tempo</span>
                 <Button size="sm" variant="outline" onClick={() => p.onBpm(p.bpm - 2)} aria-label="Slower">−</Button>
                 <span className="tabular-nums w-16 text-center">♩ = {p.bpm}</span>
                 <Button size="sm" variant="outline" onClick={() => p.onBpm(p.bpm + 2)} aria-label="Faster">+</Button>
@@ -98,6 +100,10 @@ export function FlowBar(p: FlowBarProps) {
                   </Button>
                 )}
               </div>
+              <p className="text-xs text-muted-foreground">
+                {p.hasMarkedTempo ? `Initial marking: ♩ = ${p.markedBpm}.` : p.laterTempo !== null ? `No initial fixed tempo; introduction defaults to ♩ = 120. Later marking: ♩ = ${p.laterTempo}.` : 'No fixed tempo markings; playback defaults to ♩ = 120.'}
+                {' '}Current playback tempo: ♩ = {p.currentBpm}. Speed changes scale subsequent markings too.
+              </p>
               <div className="flex items-center gap-1">
                 <span className="text-muted-foreground mr-1">Loop bars</span>
                 <Button size="sm" variant={p.loop.start !== null ? 'default' : 'outline'} onClick={p.onLoopStart} title="Loop from the current bar">
@@ -170,7 +176,7 @@ export function FlowBar(p: FlowBarProps) {
               {p.playState === 'error' && <span className="ml-1.5 text-destructive">· couldn’t play</span>}
             </div>
             <div className="text-xs text-muted-foreground tabular-nums truncate">
-              Bar {barLabel(shown)}{p.bars.length ? ` / ${p.bars[last]}` : ''} · ♩ = {p.bpm}
+              Bar {barLabel(shown)}{p.bars.length ? ` / ${p.bars[last]}` : ''} · ♩ = {p.currentBpm}
               {looping && <span className="ml-1.5 text-primary">· loop {writtenLabel(p.loop.start)}–{writtenLabel(p.loop.end)}</span>}
             </div>
           </button>
