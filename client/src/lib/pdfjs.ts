@@ -9,8 +9,20 @@
 import * as pdfjsLib from 'pdfjs-dist';
 // Vite-specific: bundle the worker as a separate asset and import its URL.
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import type { DocumentInitParameters } from 'pdfjs-dist/types/src/display/api';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
+
+/** Where pdf.js fetches its wasm image decoders (JBIG2, JPEG 2000) from; see
+ *  the pdfjsWasm plugin in vite.config.ts. Without this, scanned scores render
+ *  as blank pages with only their OCR text layer showing. */
+const WASM_URL = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/pdfjs-wasm/`;
+
+/** Open a PDF with the app's standard pdf.js options. Always use this rather
+ *  than calling getDocument directly. */
+export function openPdf(src: DocumentInitParameters): ReturnType<typeof pdfjsLib.getDocument> {
+  return pdfjsLib.getDocument({ wasmUrl: WASM_URL, ...src });
+}
 
 export { pdfjsLib };
 export type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';

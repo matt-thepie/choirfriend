@@ -36,8 +36,40 @@ function serviceWorker(): Plugin {
   };
 }
 
+/** pdf.js 5 decodes JBIG2 and JPEG 2000 images (scanned scores) with wasm
+ *  modules it fetches by name from `wasmUrl` at runtime, so they can't go
+ *  through Vite's hashed-import pipeline. Serve them from /pdfjs-wasm/ in
+ *  dev and emit them unhashed into the build (which also precaches them). */
+function pdfjsWasm(): Plugin[] {
+  const srcDir = path.join(import.meta.dirname, 'node_modules', 'pdfjs-dist', 'wasm');
+  const files = ['jbig2.wasm', 'jbig2_nowasm_fallback.js', 'openjpeg.wasm', 'openjpeg_nowasm_fallback.js', 'qcms_bg.wasm'];
+  const types: Record<string, string> = { '.wasm': 'application/wasm', '.js': 'text/javascript' };
+  return [{
+    name: 'choirfriend-pdfjs-wasm-serve',
+    apply: 'serve',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const m = /^\/pdfjs-wasm\/([^/?]+)/.exec(req.url ?? '');
+        if (!m || !files.includes(m[1]!)) return next();
+        res.setHeader('Content-Type', types[path.extname(m[1]!)] ?? 'application/octet-stream');
+        fs.createReadStream(path.join(srcDir, m[1]!)).pipe(res);
+      });
+    },
+  }, {
+    name: 'choirfriend-pdfjs-wasm-emit',
+    apply: 'build',
+    // Emitted at build start so the service-worker plugin's generateBundle
+    // sees them and adds them to the precache list.
+    buildStart() {
+      for (const f of files) {
+        this.emitFile({ type: 'asset', fileName: `pdfjs-wasm/${f}`, source: fs.readFileSync(path.join(srcDir, f)) });
+      }
+    },
+  }];
+}
+
 export default defineConfig({
-  plugins: [react(), tailwindcss(), serviceWorker()],
+  plugins: [react(), tailwindcss(), serviceWorker(), ...pdfjsWasm()],
   // Registered as /sw.js?v=<build>: Cloudflare caches /sw.js at the edge, so a
   // fresh URL per deploy is what makes devices pick up the new worker.
   define: { __BUILD_ID__: JSON.stringify(Date.now().toString(36)) },

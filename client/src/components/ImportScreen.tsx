@@ -23,7 +23,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import JSZip from 'jszip';
 import { Button } from '@/components/ui/button.tsx';
 import { cn } from '@/lib/utils.ts';
-import { pdfjsLib } from '@/lib/pdfjs.ts';
+import { openPdf } from '@/lib/pdfjs.ts';
 
 interface ImportScreenProps {
   onClose: () => void;
@@ -990,7 +990,7 @@ function PdfThumb({ blob }: { blob: Blob | undefined }) {
       try {
         const data = new Uint8Array(await blob.arrayBuffer());
         if (cancelled) return;
-        const doc = await pdfjsLib.getDocument({ data }).promise;
+        const doc = await openPdf({ data }).promise;
         const page = await doc.getPage(1);
         const canvas = canvasRef.current;
         if (cancelled || !canvas) {

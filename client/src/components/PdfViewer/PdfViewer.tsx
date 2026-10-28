@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { pdfjsLib, type PDFDocumentProxy } from '@/lib/pdfjs.ts';
+import { openPdf, type PDFDocumentProxy } from '@/lib/pdfjs.ts';
 import { Button, Icon } from '@/components/ui/button.tsx';
 import { Popover } from '@/components/ui/popover.tsx';
 import { usePlayer } from '@/player/PlayerContext.tsx';
@@ -400,7 +400,7 @@ export function PdfViewer({
     setIntrinsicPageSize(null);
     setPdfLoadError(null);
     setPdfProgress(null);
-    const task = pdfjsLib.getDocument({ url: pdfFile.url, disableRange: true }); // whole file, so the service worker can cache it
+    const task = openPdf({ url: pdfFile.url, disableRange: true }); // whole file, so the service worker can cache it
     // Scanned scores can be 10MB+; show how far along the download is.
     task.onProgress = ({ loaded, total }: { loaded: number; total: number }) => {
       if (!cancelled && total > 0) setPdfProgress(Math.min(1, loaded / total));
