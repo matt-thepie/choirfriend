@@ -22,7 +22,7 @@ import { ViewSwitcher, type ViewTarget } from '@/components/ViewSwitcher.tsx';
 import { createToolkit } from '@/lib/flowing/verovio.ts';
 import { parseScore, type ScoreModel } from '@/lib/flowing/score.ts';
 import { assignParts, voicesByStaff, type PartAssignment } from '@/lib/flowing/parts.ts';
-import { BALANCE_MIN_WIDTH, engrave } from '@/lib/flowing/engrave.ts';
+import { BALANCE_MIN_WIDTH, engrave, engraveOriginal } from '@/lib/flowing/engrave.ts';
 import { buildPlayNotes, FlowPlayer, Timeline, type MixMode, type PlayNote } from '@/lib/flowing/playback.ts';
 import { SOUNDS, type SoundId } from '@/lib/flowing/sampler.ts';
 import { usePlayer } from '@/player/PlayerContext.tsx';
@@ -53,6 +53,8 @@ type NavMode = 'scroll' | 'page';
 
 const NAV_MODE_KEY = 'choirfriend.navMode'; // shared with the PDF viewer
 const SCALE_KEY = 'choirfriend.flowScale';
+const LAYOUT_KEY = 'choirfriend.flowLayout';
+const ZOOM_KEY = 'choirfriend.flowOriginalZoom';
 const SOUND_KEY = 'choirfriend.flowSound';
 const MIX_KEY = 'choirfriend.flowMix';
 const TOOLS_HIDE_MS = 4000;
@@ -172,6 +174,24 @@ export function ScoreViewer({
     save(SCALE_KEY, v);
   };
 
+  // Flow fits the music to the screen; Original keeps MuseScore's lines and
+  // pages, so "top of page 3" means the same thing on every device.
+  const [layoutPref, setLayoutPref] = useState<'flow' | 'original'>(() =>
+    load(LAYOUT_KEY, 'flow', (v) => v === 'flow' || v === 'original'),
+  );
+  const setLayout = (l: 'flow' | 'original') => {
+    setLayoutPref(l);
+    save(LAYOUT_KEY, l);
+  };
+  const canOriginal = !!model?.hasLayout && !!model.layoutWidth;
+  const layout = canOriginal ? layoutPref : 'flow';
+  const [zoom, setZoomState] = useState<number>(() => load(ZOOM_KEY, 1, (v) => typeof v === 'number' && v >= 1 && v <= 1.6));
+  const setZoom = (z: number) => {
+    const v = Math.min(1.6, Math.max(1, Math.round(z * 10) / 10));
+    setZoomState(v);
+    save(ZOOM_KEY, v);
+  };
+
   const hiddenKey = `choirfriend.flowHidden.${fileId}`;
   const [hidden, setHiddenState] = useState<string[]>(() => load(hiddenKey, [], Array.isArray));
   const setHidden = (ids: string[]) => {
@@ -283,18 +303,25 @@ export function ScoreViewer({
       const pad = readMode ? 8 : 16;
       const w = width - pad;
       try {
-        setSvg(sanitiseSvg(engrave(tk, filteredXml, { width: w, scale, balance: w >= BALANCE_MIN_WIDTH })));
+        const out = layout === 'original' && model?.layoutWidth
+          ? engraveOriginal(tk, filteredXml, { width: w, layoutWidth: model.layoutWidth, zoom })
+          : engrave(tk, filteredXml, { width: w, scale, balance: w >= BALANCE_MIN_WIDTH });
+        setSvg(sanitiseSvg(out));
       } catch (e) {
         setLoadError((e as Error).message);
       }
       setEngraving(false);
     });
     return () => cancelAnimationFrame(id);
-  }, [filteredXml, width, scale, readMode]);
+    // model only supplies layoutWidth, which changes with filteredXml.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredXml, width, scale, readMode, layout, zoom]);
 
   // ------- After each engraving: shade my line, find lines and bars ----------
 
   const [systems, setSystems] = useState<Array<{ top: number; bottom: number }>>([]);
+  /** Where each of MuseScore's pages starts, in sheet coordinates. */
+  const [pageMarks, setPageMarks] = useState<Array<{ label: string; system: number; top: number; left: number }>>([]);
   const measureEls = useRef<SVGGElement[]>([]);
   useLayoutEffect(() => {
     const root = scoreRef.current;
@@ -334,11 +361,22 @@ export function ScoreViewer({
 
     // Lines (systems) in sheet coordinates (title included), for page turns
     // and following.
-    const base = (sheetRef.current ?? root).getBoundingClientRect().top;
+    const sheetBox = (sheetRef.current ?? root).getBoundingClientRect();
+    const base = sheetBox.top;
+    const systemEls = Array.from(root.querySelectorAll('g.system'));
     setSystems(
-      Array.from(root.querySelectorAll('g.system')).map((s) => {
+      systemEls.map((s) => {
         const r = s.getBoundingClientRect();
         return { top: r.top - base, bottom: r.bottom - base };
+      }),
+    );
+    setPageMarks(
+      model.pages.slice(1).flatMap((pg) => {
+        const m = measureEls.current[pg.measure];
+        const sys = m?.closest('g.system');
+        if (!m || !sys) return [];
+        const s = sys.getBoundingClientRect();
+        return [{ label: pg.label, system: systemEls.indexOf(sys), top: s.top - base, left: m.getBoundingClientRect().left - sheetBox.left }];
       }),
     );
   }, [svg, model, partLineOn, myLine, visibleParts, topGap]);
@@ -350,21 +388,33 @@ export function ScoreViewer({
     const room = viewportH - 16;
     const out: Array<{ top: number; bottom: number }> = [];
     let cur: { top: number; bottom: number } | null = null;
-    for (const s of systems) {
-      // A small lead-in above each line catches dynamics and bar numbers;
-      // the first page starts at the top so it carries the title.
-      const top: number = cur || out.length ? Math.max(0, s.top - 12) : 0;
-      if (!cur || s.bottom - cur.top > room) {
+    const pageStarts = new Set(layout === 'original' ? pageMarks.map((m) => m.system) : []);
+    for (const [i, s] of systems.entries()) {
+      // A small lead-in above each line catches dynamics and bar numbers
+      // (and an original page's label); the first page starts at the top so
+      // it carries the title.
+      const lead = pageStarts.has(i) ? 36 : 12;
+      const top: number = cur || out.length ? Math.max(0, s.top - lead) : 0;
+      if (!cur || s.bottom - cur.top > room || pageStarts.has(i)) {
         if (cur) out.push(cur);
         cur = { top, bottom: s.bottom };
       } else cur.bottom = s.bottom;
     }
     if (cur) out.push(cur);
     return out;
-  }, [effectiveNavMode, systems, viewportH]);
+  }, [effectiveNavMode, systems, viewportH, layout, pageMarks]);
   const [pageIndex, setPageIndex] = useState(0);
   useEffect(() => setPageIndex((i) => Math.min(i, Math.max(0, pages.length - 1))), [pages.length]);
   const page = pages[pageIndex] ?? null;
+  // In the original layout, name screen pages after MuseScore's pages.
+  const pageLabel = (() => {
+    if (!page) return '';
+    if (layout !== 'original' || !model?.pages.length) return `${pageIndex + 1} / ${pages.length}`;
+    const at = (p: { top: number }) => [...pageMarks].reverse().find((m) => m.top <= p.top + 40)?.label ?? model.pages[0]!.label;
+    const label = at(page);
+    const prev = pages[pageIndex - 1];
+    return `p. ${label}${prev && at(prev) === label ? ' cont.' : ''}`;
+  })();
   const atEnd = effectiveNavMode === 'page' ? pageIndex >= pages.length - 1 : false;
   const nextSong = setListFlow?.next ?? null;
   const prevSong = setListFlow?.prev ?? null;
@@ -412,12 +462,19 @@ export function ScoreViewer({
 
   const playerRef = useRef<FlowPlayer | null>(null);
   const [playState, setPlayState] = useState<'stopped' | 'loading' | 'playing' | 'error'>('stopped');
-  const [fromMeasure, setFromMeasure] = useState<number | null>(null);
+  /** Where Play will start, as a step in played order (repeats unrolled). */
+  const [fromStep, setFromStep] = useState<number | null>(null);
+  const fromMeasure = fromStep !== null ? (perf?.bars[fromStep]?.measure ?? null) : null;
+  /** A written bar's first time through, in played order. */
+  const stepOf = (measure: number) => Math.max(0, perf?.bars.findIndex((b) => b.measure === measure) ?? 0);
   /** Bumped on every (re)start, so the highlighter re-reads where play is. */
   const [run, setRun] = useState(0);
-  /** The bar sounding now, while playing. */
-  const [nowMeasure, setNowMeasure] = useState<number | null>(null);
+  /** The step in played order sounding now, while playing. */
+  const [nowStep, setNowStep] = useState<number | null>(null);
   const [loop, setLoop] = useState<{ start: number | null; end: number | null }>({ start: null, end: null });
+  // Read mode is for reading: the player stays away until asked for.
+  const [barOpen, setBarOpen] = useState(!readMode);
+  useEffect(() => setBarOpen(!readMode), [readMode]);
   useEffect(() => () => playerRef.current?.dispose(), []);
   // Settings change the player in place for notes not yet scheduled.
   useEffect(() => {
@@ -441,7 +498,7 @@ export function ScoreViewer({
         const l = loopRef.current;
         if (l) return void startAtRef.current?.(l.startQ);
         setPlayState('stopped');
-        setNowMeasure(null);
+        setNowStep(null);
         clearHighlight();
       };
       setPlayState('loading');
@@ -461,7 +518,7 @@ export function ScoreViewer({
   const stop = useCallback(() => {
     playerRef.current?.stop();
     setPlayState('stopped');
-    setNowMeasure(null);
+    setNowStep(null);
     clearHighlight();
   }, []);
 
@@ -510,6 +567,8 @@ export function ScoreViewer({
     let idx = notes.findIndex((n) => n.q >= (playerRef.current?.nowQ() ?? 0) - 1e-6);
     if (idx < 0) idx = notes.length;
     const active: PlayNote[] = [];
+    const bars = perf.bars;
+    let barIdx = -1;
     let lastSystem: Element | null = null;
     let lastBar: Element | null = null;
     let raf = 0;
@@ -531,26 +590,26 @@ export function ScoreViewer({
           active.push(n);
         }
       }
-      let lead: Element | null = null;
       for (let i = active.length - 1; i >= 0; i--) {
         const n = active[i]!;
+        if (n.qEnd > q) continue;
         const el = elOf(n.baseId);
-        if (n.qEnd <= q) {
-          el?.classList.remove('cf-playing');
-          if (el) highlighted.current.delete(el);
-          active.splice(i, 1);
-        } else if (el) lead = el;
+        el?.classList.remove('cf-playing');
+        if (el) highlighted.current.delete(el);
+        active.splice(i, 1);
       }
-      const bar = lead?.closest('g.measure') ?? null;
+      // Follow the bar clock, not the notes, so the page still turns while
+      // the reader's part (or everyone) is resting.
+      while (barIdx + 1 < bars.length && bars[barIdx + 1]!.q <= q + 1e-6) barIdx++;
+      const bar = barIdx >= 0 ? (measureEls.current[bars[barIdx]!.measure] ?? null) : null;
       if (bar && bar !== lastBar) {
         lastBar = bar;
-        const i = measureEls.current.indexOf(bar as SVGGElement);
-        if (i >= 0) setNowMeasure(i);
+        setNowStep(barIdx);
       }
-      const sys = lead?.closest('g.system') ?? null;
+      const sys = bar?.closest('g.system') ?? null;
       if (sys && sys !== lastSystem) {
         lastSystem = sys;
-        const box = systemOf(lead);
+        const box = systemOf(bar);
         if (box) {
           const sc = scrollRef.current;
           if (effectiveNavMode === 'page') showY(box.top + 13, false);
@@ -565,7 +624,7 @@ export function ScoreViewer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playState, run, perf, effectiveNavMode, showY, systems]);
 
-  const qOf = (i: number) => perf?.measureQ.get(i) ?? 0;
+  const qOf = (step: number) => perf?.bars[step]?.q ?? 0;
   const play = (i: number | null) => {
     if (recordings.isPlaying) recordings.pause();
     if (recordings.queue && !playerHidden) onPlayerHiddenChange?.(true);
@@ -574,15 +633,18 @@ export function ScoreViewer({
   // Pause is a stop that remembers the bar, so Play carries on from there.
   const togglePlay = () => {
     if (playState === 'playing' || playState === 'loading') {
-      if (nowMeasure !== null) setFromMeasure(nowMeasure);
+      if (nowStep !== null) setFromStep(nowStep);
       return stop();
     }
-    play(fromMeasure);
+    play(fromStep);
   };
-  const currentBar = nowMeasure ?? fromMeasure ?? 0;
-  const seekBar = (i: number) => {
-    if (playState === 'playing') play(i);
-    else setFromMeasure(i);
+  // The player's strip and bar buttons go through bars in played order, so
+  // a repeat moves on rather than jumping back; loops use written bars.
+  const currentStep = nowStep ?? fromStep ?? 0;
+  const currentBar = perf?.bars[currentStep]?.measure ?? 0;
+  const seekStep = (step: number) => {
+    if (playState === 'playing') play(step);
+    else setFromStep(step);
   };
 
   // ------- Read mode chrome ---------------------------------------------------
@@ -630,7 +692,7 @@ export function ScoreViewer({
     // tap on a bar picks where Play starts (again to clear), off a bar hides them.
     if (readMode && !toolsOpen) return setToolsOpen(true);
     if (i >= 0) {
-      setFromMeasure((cur) => (cur === i ? null : i));
+      setFromStep(fromMeasure === i ? null : stepOf(i));
       touchTools();
     } else if (readMode) setToolsOpen(false);
   }
@@ -719,7 +781,7 @@ export function ScoreViewer({
   function jumpToMeasure(i: number): void {
     const box = systemOf(measureEls.current[i] ?? null);
     if (box) showY(box.top + 13);
-    setFromMeasure(i);
+    setFromStep(stepOf(i));
     setJumpOpen(false);
   }
 
@@ -728,13 +790,18 @@ export function ScoreViewer({
   const extra = cn('contents', !moreOpen && 'max-md:hidden');
   const current: ViewTarget = { kind: 'flow', id: fileId };
   const barLabels = useMemo(() => model?.measures.map((m, i) => m.number || String(i + 1)) ?? [], [model]);
+  const stepLabels = useMemo(() => perf?.bars.map((b) => barLabels[b.measure] ?? String(b.measure + 1)) ?? [], [perf, barLabels]);
 
+  // In the original layout bigger music means squeezing each line, as far
+  // as it will sensibly go; the bars on each line stay the same.
+  const smaller = () => (layout === 'original' ? setZoom(zoom - 0.1) : setScale(scale - 4));
+  const larger = () => (layout === 'original' ? setZoom(zoom + 0.1) : setScale(scale + 4));
   const sizeControl = (
     <div className="flex items-center gap-1">
-      <Button size="sm" variant="outline" onClick={() => setScale(scale - 4)} aria-label="Smaller music">
+      <Button size="sm" variant="outline" onClick={smaller} disabled={layout === 'original' && zoom <= 1} aria-label="Smaller music">
         <span className="text-[11px]">A</span>
       </Button>
-      <Button size="sm" variant="outline" onClick={() => setScale(scale + 4)} aria-label="Larger music">
+      <Button size="sm" variant="outline" onClick={larger} disabled={layout === 'original' && zoom >= 1.6} aria-label="Larger music">
         <span className="text-base leading-none">A</span>
       </Button>
     </div>
@@ -806,6 +873,22 @@ export function ScoreViewer({
           <button type="button" className="block w-full text-left px-3 py-1.5 text-xs hover:bg-accent rounded" onClick={() => jumpToMeasure(0)}>
             Start
           </button>
+          {model.pages.length > 1 && (
+            <div className="flex flex-wrap items-center gap-1 px-1 py-1.5">
+              <span className="text-xs text-muted-foreground mr-1">Page</span>
+              {model.pages.map((pg) => (
+                <button
+                  key={pg.label}
+                  type="button"
+                  className="h-8 min-w-8 px-2 rounded border border-border text-xs tabular-nums hover:bg-accent"
+                  onClick={() => jumpToMeasure(pg.measure)}
+                  title={`Top of page ${pg.label} (bar ${model.measures[pg.measure]?.number ?? pg.measure + 1})`}
+                >
+                  {pg.label}
+                </button>
+              ))}
+            </div>
+          )}
           {model.rehearsals.map((r) => (
             <button
               key={`${r.label}-${r.measure}`}
@@ -825,7 +908,7 @@ export function ScoreViewer({
   const pageNav = effectiveNavMode === 'page' && pages.length > 0 && (
     <div className="flex items-center gap-1">
       <Button size="sm" variant="outline" onClick={prevPage} disabled={!canPrev} aria-label="Previous">◀</Button>
-      <span className="hidden md:inline text-xs tabular-nums w-14 text-center">{pageIndex + 1} / {pages.length}</span>
+      <span className="hidden md:inline text-xs tabular-nums min-w-14 text-center">{pageLabel}</span>
       <Button size="sm" variant="outline" onClick={nextPage} disabled={!canNext} aria-label="Next">▶</Button>
     </div>
   );
@@ -844,6 +927,13 @@ export function ScoreViewer({
 
   const viewSwitcher = piece && <ViewSwitcher piece={piece} current={current} onSelect={onOpenView} />;
 
+  const playerButton = !barOpen && (
+    <Button size="sm" variant="outline" onClick={() => setBarOpen(true)} title="Play the score">
+      <Icon name="play_arrow" className="text-xl" />
+      Play
+    </Button>
+  );
+
   const readingControls = (
     <>
       {myLineToggle}
@@ -852,6 +942,12 @@ export function ScoreViewer({
         <div className="flex items-center rounded-md border border-border overflow-hidden">
           <ToolButton active={navMode === 'scroll'} onClick={() => setNavMode('scroll')}>Scroll</ToolButton>
           <ToolButton active={navMode === 'page'} onClick={() => setNavMode('page')}>Pages</ToolButton>
+        </div>
+      )}
+      {canOriginal && (
+        <div className="flex items-center rounded-md border border-border overflow-hidden" title="Flow fits the music to your screen; Original keeps the score’s own lines and pages">
+          <ToolButton active={layout === 'flow'} onClick={() => setLayout('flow')}>Flow</ToolButton>
+          <ToolButton active={layout === 'original'} onClick={() => setLayout('original')}>Original</ToolButton>
         </div>
       )}
       {sizeControl}
@@ -872,11 +968,12 @@ export function ScoreViewer({
       {jumpMenu}
       {moreButton}
       <div className={extra}>{readingControls}</div>
-      {piece && onPlayerHiddenChange && (
-        <div className="ml-auto">
+      <div className="ml-auto flex items-center gap-2">
+        {playerButton}
+        {piece && onPlayerHiddenChange && (
           <ListenButton piece={piece} playerHidden={playerHidden} onPlayerHiddenChange={onPlayerHiddenChange} />
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 
@@ -888,6 +985,7 @@ export function ScoreViewer({
       {moreButton}
       <div className={extra}>{readingControls}</div>
       <div className="flex ml-auto items-center gap-2">
+        {playerButton}
         {piece && onPlayerHiddenChange && (
           <ListenButton piece={piece} playerHidden={playerHidden} onPlayerHiddenChange={onPlayerHiddenChange} />
         )}
@@ -949,6 +1047,7 @@ export function ScoreViewer({
         .cf-score g.cf-playing, .cf-score g.cf-playing * { fill: ${HIGHLIGHT}; stroke: ${HIGHLIGHT}; }
         .cf-score g.cf-from > g.staff > path { stroke: ${HIGHLIGHT}; }
         .cf-score g.measure { cursor: pointer; }
+        .cf-original > svg + svg { margin-top: 40px; }
       `}</style>
       <header
         ref={headerRef}
@@ -974,7 +1073,7 @@ export function ScoreViewer({
       >
         {readMode && effectiveNavMode === 'page' && pages.length > 0 && (
           <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-20 px-2.5 h-7 rounded-full bg-background/90 text-xs tabular-nums shadow-card inline-flex items-center pointer-events-none">
-            {pageIndex + 1} / {pages.length}
+            {pageLabel}
           </div>
         )}
         <div
@@ -995,6 +1094,7 @@ export function ScoreViewer({
           >
             <div
               ref={sheetRef}
+              className="relative"
               style={effectiveNavMode === 'page' && page ? { transform: `translateY(${-page.top}px)` } : undefined}
             >
               <ScoreTitle
@@ -1004,7 +1104,24 @@ export function ScoreViewer({
                 lyricist={model?.credits.lyricist ?? null}
                 gap={topGap}
               />
-              <div ref={scoreRef} className="cf-score" dangerouslySetInnerHTML={svgHtml} />
+              <div ref={scoreRef} className={cn('cf-score', layout === 'original' && 'cf-original')} dangerouslySetInnerHTML={svgHtml} />
+              {svg && pageMarks.map((m) =>
+                layout === 'original' ? (
+                  <div key={m.label} className="absolute inset-x-0 pointer-events-none" style={{ top: m.top - 34 }}>
+                    <div className="border-t border-dashed border-border" />
+                    <span className="absolute left-2 top-1 text-xs font-semibold text-muted-foreground">Page {m.label}</span>
+                  </div>
+                ) : (
+                  <span
+                    key={m.label}
+                    className="absolute pointer-events-none rounded bg-accent text-accent-foreground px-1 text-[10px] font-semibold leading-4"
+                    style={{ top: Math.max(0, m.top - 18), left: Math.max(0, m.left) }}
+                    title={`Page ${m.label} of the original starts here`}
+                  >
+                    p.{m.label}
+                  </span>
+                ),
+              )}
             </div>
           </div>
 
@@ -1077,15 +1194,16 @@ export function ScoreViewer({
         )}
       </div>
 
-      {!recordingShowing && model && (
+      {!recordingShowing && model && barOpen && (
         <FlowBar
           title={piece?.title || model.credits.title || 'Score'}
           playState={playState}
           canPlay={!!perf}
           onToggle={togglePlay}
-          bars={barLabels}
-          bar={currentBar}
-          onSeek={seekBar}
+          bars={stepLabels}
+          writtenBars={barLabels}
+          bar={currentStep}
+          onSeek={seekStep}
           bpm={bpm}
           markedBpm={model.markedTempo ?? 120}
           hasMarkedTempo={model.markedTempo != null}
@@ -1106,6 +1224,10 @@ export function ScoreViewer({
           listen={piece && onPlayerHiddenChange && (
             <ListenButton piece={piece} playerHidden={playerHidden} onPlayerHiddenChange={onPlayerHiddenChange} />
           )}
+          onClose={() => {
+            stop();
+            setBarOpen(false);
+          }}
         />
       )}
     </div>

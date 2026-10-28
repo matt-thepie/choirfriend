@@ -13,11 +13,13 @@ export interface FlowBarProps {
   playState: 'stopped' | 'loading' | 'playing' | 'error';
   canPlay: boolean;
   onToggle: () => void;
-  /** Bar labels as printed, by index. */
+  /** Bar labels as printed, one per bar in played order (repeats unrolled). */
   bars: string[];
-  /** The bar sounding now, or where Play will start. */
+  /** Bar labels as printed, by written bar, for the loop. */
+  writtenBars: string[];
+  /** The step in played order sounding now, or where Play will start. */
   bar: number;
-  onSeek: (bar: number) => void;
+  onSeek: (step: number) => void;
   bpm: number;
   markedBpm: number;
   hasMarkedTempo: boolean;
@@ -37,6 +39,8 @@ export interface FlowBarProps {
   onSound: (s: SoundId) => void;
   /** The headphones button, to swap to a recording. */
   listen?: React.ReactNode;
+  /** Stop and put the bar away. */
+  onClose: () => void;
 }
 
 /**
@@ -57,6 +61,7 @@ export function FlowBar(p: FlowBarProps) {
     setDraft(null);
   };
   const barLabel = (i: number | null) => (i === null ? '' : p.bars[i] ?? String(i + 1));
+  const writtenLabel = (i: number | null) => (i === null ? '' : p.writtenBars[i] ?? String(i + 1));
   const soundLabel = SOUNDS.find((s) => s.id === p.sound)?.label ?? '';
   const looping = p.loop.start !== null && p.loop.end !== null;
 
@@ -96,10 +101,10 @@ export function FlowBar(p: FlowBarProps) {
               <div className="flex items-center gap-1">
                 <span className="text-muted-foreground mr-1">Loop bars</span>
                 <Button size="sm" variant={p.loop.start !== null ? 'default' : 'outline'} onClick={p.onLoopStart} title="Loop from the current bar">
-                  {p.loop.start !== null ? `From ${barLabel(p.loop.start)}` : 'Set start'}
+                  {p.loop.start !== null ? `From ${writtenLabel(p.loop.start)}` : 'Set start'}
                 </Button>
                 <Button size="sm" variant={p.loop.end !== null ? 'default' : 'outline'} onClick={p.onLoopEnd} title="Loop to the end of the current bar">
-                  {p.loop.end !== null ? `To ${barLabel(p.loop.end)}` : 'Set end'}
+                  {p.loop.end !== null ? `To ${writtenLabel(p.loop.end)}` : 'Set end'}
                 </Button>
                 {(p.loop.start !== null || p.loop.end !== null) && (
                   <Button size="sm" variant="ghost" onClick={p.onClearLoop}>Clear</Button>
@@ -166,7 +171,7 @@ export function FlowBar(p: FlowBarProps) {
             </div>
             <div className="text-xs text-muted-foreground tabular-nums truncate">
               Bar {barLabel(shown)}{p.bars.length ? ` / ${p.bars[last]}` : ''} · ♩ = {p.bpm}
-              {looping && <span className="ml-1.5 text-primary">· loop {barLabel(p.loop.start)}–{barLabel(p.loop.end)}</span>}
+              {looping && <span className="ml-1.5 text-primary">· loop {writtenLabel(p.loop.start)}–{writtenLabel(p.loop.end)}</span>}
             </div>
           </button>
 
@@ -185,7 +190,7 @@ export function FlowBar(p: FlowBarProps) {
               <option key={r} value={r}>{r}x</option>
             ))}
           </select>
-          <IconButton icon="first_page" label="Back to the start" size="sm" onClick={() => p.onSeek(p.loop.start ?? 0)} disabled={!p.canPlay} />
+          <IconButton icon="first_page" label="Back to the start" size="sm" onClick={() => p.onSeek(p.loop.start ?? 0)} disabled={!p.canPlay} className="hidden sm:inline-flex" />
           <IconButton icon="fast_rewind" label="Back a bar" size="sm" onClick={() => p.onSeek(Math.max(0, p.bar - 1))} disabled={!p.canPlay || p.bar <= 0} />
           <button
             type="button"
@@ -213,6 +218,7 @@ export function FlowBar(p: FlowBarProps) {
           />
           {p.listen && <div className="hidden sm:block">{p.listen}</div>}
           <IconButton icon={open ? 'expand_more' : 'expand_less'} label={open ? 'Hide playback settings' : 'Playback settings'} size="sm" onClick={() => setOpen((o) => !o)} />
+          <IconButton icon="close" label="Stop and close the player" size="sm" onClick={p.onClose} />
         </div>
       </div>
     </div>

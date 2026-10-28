@@ -10,6 +10,10 @@
  *
  * The score is engraved as one tall page; read mode's "pages" are screenfuls
  * of whole lines cut from it (see ScoreViewer).
+ *
+ * The original layout instead keeps MuseScore's own line and page breaks
+ * (one SVG per page), scaled so the page's width fills the screen, for when
+ * the director says "from the top of page 3".
  */
 
 import type { VerovioToolkit } from 'verovio/esm';
@@ -60,6 +64,33 @@ function lineStarts(svg: string): string[] {
 }
 
 const units = (px: number, scale: number) => Math.round((px * 100) / scale);
+
+/** Verovio's staff space at scale 100, in its units. */
+const STAFF_SPACE = 18;
+
+export interface OriginalOptions {
+  /** Width to fill, in CSS pixels. */
+  width: number;
+  /** The original page's music width, in staff spaces. */
+  layoutWidth: number;
+  /** 1 fits the page to the width; more squeezes each line into less room
+   *  so the notes come out bigger. */
+  zoom: number;
+}
+
+/** Engrave `xml` with the line and page breaks saved in it. */
+export function engraveOriginal(tk: VerovioToolkit, xml: string, opts: OriginalOptions): string {
+  const margins = BASE_OPTIONS.pageMarginLeft + BASE_OPTIONS.pageMarginRight;
+  const natural = (opts.layoutWidth * STAFF_SPACE) / opts.zoom + margins;
+  const width = Math.max(260, opts.width);
+  // Verovio's scale is a whole percent: round it, then fit the page to the
+  // width at that scale (a few percent off the original at most).
+  const scale = Math.max(5, Math.min(200, Math.floor((width * 100) / natural)));
+  const pageWidth = units(width, scale);
+  tk.setOptions({ ...BASE_OPTIONS, scale, pageWidth, breaks: 'encoded' });
+  tk.loadData(xml);
+  return renderAll(tk);
+}
 
 /** Engrave `xml` (MusicXML) and return the SVG. */
 export function engrave(tk: VerovioToolkit, xml: string, opts: EngraveOptions): string {

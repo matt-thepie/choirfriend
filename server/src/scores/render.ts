@@ -28,6 +28,7 @@ import {
 import { deleteObject, getObject, isB2Configured } from '../storage/b2.ts';
 import { deleteLocalFile, readLocalFile, storeImportedFile } from '../import/storage.ts';
 import { cleanMusicXml } from './musicxml.ts';
+import { forcePageView } from './mscz.ts';
 
 const TIMEOUT_MS = 180_000;
 const MAC_APP = '/Applications/MuseScore 4.app/Contents/MacOS/mscore';
@@ -88,7 +89,7 @@ async function convert(fileId: number): Promise<void> {
     const ext = path.extname(row.filename).toLowerCase() || '.mscz';
     const input = path.join(dir, `in${ext}`);
     const output = path.join(dir, 'out.musicxml');
-    await fsp.writeFile(input, await readSource(row));
+    await fsp.writeFile(input, forcePageView(await readSource(row), ext));
     let raw: string;
     try {
       await runMscore(input, output);

@@ -41,8 +41,12 @@ export const isKeyboardPart = (name: string) => /piano|pno|keyboard|organ|accomp
 
 /** The notes in played order, with ties merged and each note's place in the
  *  score. `tk` must hold the full score (every part). */
-export function buildPlayNotes(tk: VerovioToolkit, model: ScoreModel): { notes: PlayNote[]; endQ: number; measureQ: Map<number, number> } {
-  const tm: TimemapEntry[] = tk.renderToTimemap({ includeMeasures: true, includeRests: false });
+export function buildPlayNotes(
+  tk: VerovioToolkit,
+  model: ScoreModel,
+): { notes: PlayNote[]; endQ: number; measureQ: Map<number, number>; bars: { q: number; measure: number }[] } {
+  // Rests are included so bars where nothing sounds still get a start time.
+  const tm: TimemapEntry[] = tk.renderToTimemap({ includeMeasures: true, includeRests: true });
   const mei = new DOMParser().parseFromString(tk.getMEI(), 'application/xml');
 
   // Measures in written order, so a bar on screen maps to when it first plays.
@@ -55,11 +59,16 @@ export function buildPlayNotes(tk: VerovioToolkit, model: ScoreModel): { notes: 
   const starts = new Map<string, number>();
   const notes: PlayNote[] = [];
   const measureQ = new Map<number, number>();
+  /** Every bar start in played order, repeats included. */
+  const bars: { q: number; measure: number }[] = [];
   let endQ = 0;
   for (const e of tm) {
     if (e.measureOn) {
       const i = measureIndex.get(e.measureOn.replace(/-rend\d+$/, ''));
-      if (i !== undefined && !measureQ.has(i)) measureQ.set(i, e.qstamp);
+      if (i !== undefined) {
+        if (!measureQ.has(i)) measureQ.set(i, e.qstamp);
+        bars.push({ q: e.qstamp, measure: i });
+      }
     }
     for (const id of e.on ?? []) starts.set(id, e.qstamp);
     for (const id of e.off ?? []) {
@@ -94,7 +103,8 @@ export function buildPlayNotes(tk: VerovioToolkit, model: ScoreModel): { notes: 
       cur = next.get(cur)!;
     }
   }
-  return { notes, endQ, measureQ };
+  bars.sort((a, b) => a.q - b.q);
+  return { notes, endQ, measureQ, bars };
 }
 
 /** Performance clock: q ↔ seconds, with tempo changes, rits and fermatas. */

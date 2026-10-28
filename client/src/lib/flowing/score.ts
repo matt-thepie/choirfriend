@@ -79,6 +79,13 @@ export interface ScoreModel {
   markedTempo: number | null;
   measures: ScoreMeasure[];
   rehearsals: Array<{ label: string; measure: number }>;
+  /** Where each page of the MuseScore layout starts (page 1 at bar 0), or
+   *  empty when the file carries no page breaks. */
+  pages: Array<{ label: string; measure: number }>;
+  /** The file carries its own line breaks (MuseScore's layout). */
+  hasLayout: boolean;
+  /** Width of the original page's music, in staff spaces. */
+  layoutWidth: number | null;
   /** Title and creators from the file's header, where it has them. */
   credits: ScoreCredits;
 }
@@ -98,6 +105,18 @@ function readCredits(doc: Document): ScoreCredits {
     arranger: text('identification > creator[type="arranger"]'),
     lyricist: text('identification > creator[type="lyricist"]') ?? text('identification > creator[type="poet"]'),
   };
+}
+
+/** The original page's printable width in staff spaces (MusicXML tenths
+ *  are tenths of a staff space). */
+function readLayoutWidth(doc: Document): number | null {
+  const layout = doc.querySelector('defaults > page-layout');
+  const width = Number(layout?.querySelector('page-width')?.textContent);
+  if (!layout || !(width > 0)) return null;
+  const margins = layout.querySelector('page-margins');
+  const left = Number(margins?.querySelector('left-margin')?.textContent) || 0;
+  const right = Number(margins?.querySelector('right-margin')?.textContent) || 0;
+  return (width - left - right) / 10;
 }
 
 /** Velocities for the written dynamics, when MuseScore didn't export a
@@ -166,6 +185,8 @@ export function parseScore(rawXml: string): ScoreModel {
   const tempo: TempoEvent[] = [];
   const measures: ScoreMeasure[] = [];
   const rehearsals: Array<{ label: string; measure: number }> = [];
+  const pages: Array<{ label: string; measure: number }> = [];
+  let hasLayout = false;
   let staveCount = 0;
 
   partEls.forEach((partEl, partIndex) => {
@@ -277,6 +298,16 @@ export function parseScore(rawXml: string): ScoreModel {
             }
             break;
           }
+          case 'print': {
+            if (partIndex !== 0) break;
+            if (el.getAttribute('new-system') === 'yes') hasLayout = true;
+            if (el.getAttribute('new-page') === 'yes') {
+              hasLayout = true;
+              if (!pages.length) pages.push({ label: '1', measure: 0 });
+              pages.push({ label: el.getAttribute('page-number') || String(pages.length + 1), measure: mi });
+            }
+            break;
+          }
           case 'sound': {
             // A bare <sound tempo> straight under the measure.
             const t = Number(el.getAttribute('tempo'));
@@ -310,6 +341,9 @@ export function parseScore(rawXml: string): ScoreModel {
     markedTempo: firstSet && firstSet.pos <= 4 ? firstSet.bpm : null,
     measures,
     rehearsals,
+    pages,
+    hasLayout,
+    layoutWidth: readLayoutWidth(doc),
     credits: readCredits(doc),
   };
 }
