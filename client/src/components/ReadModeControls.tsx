@@ -29,9 +29,13 @@ export function ReadModeControls({ toolsOpen, onShow }: {
       onPointerUp={() => { dragRef.current = null; }}
       onPointerCancel={() => { dragRef.current = null; }}
       onLostPointerCapture={() => { dragRef.current = null; }}
-      className="group absolute top-0 left-1/2 -translate-x-1/2 z-30 flex h-6 w-20 touch-none items-start justify-center pt-1 focus-visible:outline-none"
+      className="group absolute top-0 left-1/2 -translate-x-1/2 z-30 flex h-6 w-20 touch-none items-start justify-center focus-visible:outline-none"
     >
-      <span className="block h-1.5 w-10 rounded-full bg-foreground/25 shadow-sm transition-colors group-hover:bg-foreground/50 group-focus-visible:bg-primary group-focus-visible:ring-2 group-focus-visible:ring-primary/40" />
+      <span className="flex h-5 w-12 items-center justify-center rounded-b-lg bg-primary text-primary-foreground shadow-md transition-colors group-hover:bg-primary-hover group-focus-visible:ring-2 group-focus-visible:ring-primary/40 group-focus-visible:ring-offset-1">
+        <svg aria-hidden="true" viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M4 6l4 4 4-4" />
+        </svg>
+      </span>
     </button>
   );
 }
