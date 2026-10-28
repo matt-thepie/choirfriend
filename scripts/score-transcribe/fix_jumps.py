@@ -4,16 +4,20 @@ objects inside an .mscz so playback and MIDI export honour the repeat structure.
 MuseScore 4 reads <Marker>/<Jump> as direct children of <Measure> (siblings of <voice>),
 so the StaffText is removed from the voice and the object inserted at measure level.
 
-usage: fix_jumps.py in.mscz out.mscz [--flag STAFF:BAR,BAR...]
-  --flag 6:19,35  print the first two quavers of voice 1 in those piano bars with flags, not a beam
+usage: fix_jumps.py in.mscz out.mscz [--flag STAFF:BAR[/N],BAR...] ...
+  --flag 6:19,35   print the first two quavers of voice 1 in those bars with flags, not a beam
+  --flag 1:6/4,7   /N flags the first N quavers instead of two; --flag may be repeated
 """
 import re, sys, zipfile, shutil, os, tempfile
 
 src, dst = sys.argv[1], sys.argv[2]
-FLAG = {}  # staff id -> bar numbers whose opening quaver pair is flagged in the print
-if "--flag" in sys.argv:
-    st, bars = sys.argv[sys.argv.index("--flag") + 1].split(":")
-    FLAG[st] = {int(b) for b in bars.split(",")}
+FLAG = {}  # staff id -> {bar: how many opening quavers are flagged in the print}
+for i, a in enumerate(sys.argv):
+    if a == "--flag":
+        st, bars = sys.argv[i + 1].split(":")
+        for b in bars.split(","):
+            bar, _, n = b.partition("/")
+            FLAG.setdefault(st, {})[int(bar)] = int(n or 2)
 tmp = tempfile.mkdtemp()
 with zipfile.ZipFile(src) as z:
     z.extractall(tmp)
@@ -70,9 +74,9 @@ def swap_voices(staff_xml):
     out = re.sub(r"\s*<voice/>", "", out)
     return re.sub(r"\s*<StemDirection>\w+</StemDirection>", "", out)  # let voice decide stem direction
 x = re.sub(r'<Staff id="[56]">.*?</Staff>', lambda m: swap_voices(m.group(0)), x, flags=re.S)
-# music21 writes explicit beams per beat (pairs of quavers); the print beams the piano in half-bar
-# groups of four, which is MuseScore's default 4/4 grouping - so drop the explicit beams (keeping
-# BeamMode "no" on lone flagged quavers), then re-flag any pairs the print leaves unbeamed (--flag)
+# music21 writes explicit beams per beat (pairs of quavers) on every staff; the print beams in
+# half-bar groups of four, which is MuseScore's default 4/4 grouping - so drop the explicit beams
+# (keeping BeamMode "no" on lone flagged quavers), then re-flag what the print leaves unbeamed (--flag)
 def rebeam(m):
     sid = m.group(1)
     out = re.sub(r"\s*<Beam>.*?</Beam>|\s*<BeamMode>(?:begin|mid|end|begin32|begin64|auto)</BeamMode>", "", m.group(0), flags=re.S)
@@ -81,10 +85,10 @@ def rebeam(m):
         n[0] += 1
         if n[0] not in FLAG[sid]: return mm.group(0)
         v = re.search(r"<voice>.*?</voice>", mm.group(0), re.S)
-        body = re.sub(r"(<Chord>\s*(?:<eid>[^<]*</eid>\s*)?)", r"\1<BeamMode>no</BeamMode>\n", v.group(0), count=2)
+        body = re.sub(r"(<Chord>\s*(?:<eid>[^<]*</eid>\s*)?)", r"\1<BeamMode>no</BeamMode>\n", v.group(0), count=FLAG[sid][n[0]])
         return mm.group(0).replace(v.group(0), body, 1)
     return re.sub(r"<Measure>.*?</Measure>", flag, out, flags=re.S)
-x = re.sub(r'<Staff id="([56])">.*?</Staff>', rebeam, x, flags=re.S)
+x = re.sub(r'<Staff id="(\d+)">.*?</Staff>', rebeam, x, flags=re.S)
 x = x.replace("<text>FERMSYLB</text>", '<text>(<font face="Leland"/>\uE4C1<font face="Edwin"/>)</text>')
 print("lyric rest glyphs:", n_rest)
 open(path, "w", encoding="utf-8").write(x)
