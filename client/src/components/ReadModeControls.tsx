@@ -1,26 +1,49 @@
 import { useRef } from 'react';
 
+/** Touches end in touchend, below; some report an empty pointerType. */
+const isMouseOrPen = (e: React.PointerEvent) => e.pointerType === 'mouse' || e.pointerType === 'pen';
+
 /** Tap or drag-past-12px handling shared by both pull tabs. `dir` is the way
- *  the drag has to go: 1 down, -1 up. */
+ *  the drag has to go: 1 down, -1 up. A tap counts on release, however long
+ *  the press: Android turns a press of over half a second into a long-press
+ *  and sends no click, and slow, deliberate presses are common. */
 function usePull(dir: 1 | -1, onPull: () => void) {
-  const dragRef = useRef<number | null>(null);
+  const dragRef = useRef<{ x: number; y: number } | null>(null);
   const reset = () => { dragRef.current = null; };
+  const tapped = (x: number, y: number) => {
+    const s = dragRef.current;
+    reset();
+    if (s && Math.hypot(x - s.x, y - s.y) <= 12) onPull();
+  };
   return {
-    onClick: onPull,
+    // Pointers are handled on release; this is Enter or Space (detail 0).
+    onClick: (e: React.MouseEvent) => { if (e.detail === 0) onPull(); },
+    onContextMenu: (e: React.MouseEvent) => e.preventDefault(),
+    // A touch tap counts here rather than on pointerup, so that cancelling
+    // the click still reaches us: otherwise the tab has gone by now and the
+    // click lands on whatever is under the finger (a toolbar button).
+    onTouchEnd: (e: React.TouchEvent) => {
+      e.preventDefault();
+      const t = e.changedTouches[0];
+      if (t) tapped(t.clientX, t.clientY);
+    },
     onPointerDown: (e: React.PointerEvent<HTMLElement>) => {
       // Capture so a drag keeps reporting here once it leaves the tab.
       e.currentTarget.setPointerCapture(e.pointerId);
-      dragRef.current = e.clientY;
+      dragRef.current = { x: e.clientX, y: e.clientY };
     },
     onPointerMove: (e: React.PointerEvent) => {
-      if (dragRef.current !== null && (e.clientY - dragRef.current) * dir > 12) {
-        dragRef.current = null;
+      if (dragRef.current !== null && (e.clientY - dragRef.current.y) * dir > 12) {
+        reset();
         onPull();
       }
     },
-    onPointerUp: reset,
+    onPointerUp: (e: React.PointerEvent) => {
+      if (isMouseOrPen(e)) tapped(e.clientX, e.clientY);
+    },
     onPointerCancel: reset,
-    onLostPointerCapture: reset,
+    // Capture ends before touchend, which still needs the start point.
+    onLostPointerCapture: (e: React.PointerEvent) => { if (isMouseOrPen(e)) reset(); },
   };
 }
 
