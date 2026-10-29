@@ -1001,7 +1001,8 @@ function PdfThumb({ blob }: { blob: Blob | undefined }) {
         const viewport = page.getViewport({ scale });
         canvas.width = viewport.width;
         canvas.height = viewport.height;
-        const ctx = canvas.getContext('2d');
+        // CPU canvas: GPU canvases garble pdf.js output on weak GPUs (see PdfPage).
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
         if (ctx) await page.render({ canvas, canvasContext: ctx, viewport }).promise;
         doc.destroy();
       } catch (e) {

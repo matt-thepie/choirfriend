@@ -140,7 +140,10 @@ export function PdfPage({
       const viewport = page.getViewport({ scale });
       const canvas = pdfCanvasRef.current;
       if (!canvas) return;
-      const ctx = canvas.getContext('2d');
+      // willReadFrequently keeps the canvas in CPU memory. GPU-accelerated
+      // canvases garble pdf.js output on weak GPUs (Nexus 7's Adreno 320:
+      // dashed staff lines, broken glyphs), and pdf.js gains little from it.
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
       if (!ctx) return;
 
       // Render at device resolution so phones/tablets aren't blurry, but lay
