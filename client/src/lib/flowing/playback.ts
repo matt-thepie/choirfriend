@@ -14,9 +14,9 @@
  * Timeline turns them into seconds.
  */
 
-import type { TimemapEntry, VerovioToolkit } from 'verovio/esm';
 import { tempoAt, velocityAt, type ScoreModel, type ScoreNote } from './score.ts';
 import { noteIsSections, type PartAssignment } from './parts.ts';
+import type { PlaySource } from './playSource.ts';
 import { loadBank, type Bank, type SoundId } from './sampler.ts';
 
 export interface PlayNote {
@@ -40,21 +40,14 @@ const DEFAULT_BPM = 120;
 export const isKeyboardPart = (name: string) => /piano|pno|keyboard|organ|accomp|rehearsal|harp/i.test(name);
 
 /** The notes in played order, with ties merged and each note's place in the
- *  score. `tk` must hold the full score (every part). */
+ *  score. */
 export function buildPlayNotes(
-  tk: VerovioToolkit,
+  src: PlaySource,
   model: ScoreModel,
 ): { notes: PlayNote[]; endQ: number; measureQ: Map<number, number>; bars: { q: number; measure: number }[] } {
-  // Rests are included so bars where nothing sounds still get a start time.
-  const tm: TimemapEntry[] = tk.renderToTimemap({ includeMeasures: true, includeRests: true });
-  const mei = new DOMParser().parseFromString(tk.getMEI(), 'application/xml');
-
   // Measures in written order, so a bar on screen maps to when it first plays.
   const measureIndex = new Map<string, number>();
-  Array.from(mei.getElementsByTagName('measure')).forEach((m, i) => {
-    const id = m.getAttribute('xml:id');
-    if (id) measureIndex.set(id, i);
-  });
+  src.measureIds.forEach((id, i) => measureIndex.set(id, i));
 
   const starts = new Map<string, number>();
   const notes: PlayNote[] = [];
@@ -62,7 +55,7 @@ export function buildPlayNotes(
   /** Every bar start in played order, repeats included. */
   const bars: { q: number; measure: number }[] = [];
   let endQ = 0;
-  for (const e of tm) {
+  for (const e of src.timemap) {
     if (e.measureOn) {
       const i = measureIndex.get(e.measureOn.replace(/-rend\d+$/, ''));
       if (i !== undefined) {
@@ -75,22 +68,17 @@ export function buildPlayNotes(
       const q = starts.get(id);
       if (q === undefined) continue;
       starts.delete(id);
-      const midi = tk.getMIDIValuesForElement(id);
-      if (!midi || midi.pitch <= 0) continue;
+      const pitch = src.pitches[id];
+      if (!pitch) continue;
       const baseId = id.replace(/-rend\d+$/, '');
-      notes.push({ id, baseId, q, qEnd: e.qstamp, pitch: midi.pitch, silent: false, note: model.notes.get(baseId) });
+      notes.push({ id, baseId, q, qEnd: e.qstamp, pitch, silent: false, note: model.notes.get(baseId) });
     }
     endQ = Math.max(endQ, e.qstamp);
   }
   notes.sort((a, b) => a.q - b.q || b.pitch - a.pitch);
 
   // A tie sounds once for its whole length.
-  const next = new Map<string, string>();
-  for (const t of Array.from(mei.getElementsByTagName('tie'))) {
-    const s = (t.getAttribute('startid') ?? '').replace(/^#/, '');
-    const e = (t.getAttribute('endid') ?? '').replace(/^#/, '');
-    if (s && e) next.set(s, e);
-  }
+  const next = new Map(src.ties);
   const byId = new Map(notes.map((n) => [n.id, n]));
   for (const n of notes) {
     if (n.silent) continue;

@@ -25,7 +25,9 @@ const API = 'api-v1';
 const SCORES = 'scores-v1';
 const FONTS = 'fonts-v1';
 const ENGRAVER = 'engraver-v1';
-const KEEP = new Set([SHELL, API, SCORES, FONTS, ENGRAVER]);
+// Scores the page has engraved, saved by lib/flowing/engine.ts (ENGRAVED_CACHE).
+const ENGRAVED = 'engraved-v1';
+const KEEP = new Set([SHELL, API, SCORES, FONTS, ENGRAVER, ENGRAVED]);
 
 const FONT_CSS =
   'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Tinos:ital,wght@0,400;0,700;1,400;1,700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0..1,0&display=swap';

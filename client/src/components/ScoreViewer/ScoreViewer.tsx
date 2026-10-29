@@ -11,7 +11,6 @@ import { ReadModeControls, ReadModeHideTab } from '@/components/ReadModeControls
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { VerovioToolkit } from 'verovio/esm';
 import { Button, Icon } from '@/components/ui/button.tsx';
 import { Popover } from '@/components/ui/popover.tsx';
 import { cn } from '@/lib/utils.ts';
@@ -20,10 +19,11 @@ import { useSections } from '@/hooks/useSections.ts';
 import type { SetListFlow } from '@/hooks/useSetListFlow.ts';
 import { ListenButton, ToolButton, useDropStaleRecording } from '@/components/PdfViewer/PdfViewer.tsx';
 import { ViewSwitcher, type ViewTarget } from '@/components/ViewSwitcher.tsx';
-import { createToolkit } from '@/lib/flowing/verovio.ts';
+import { engraveScore, engraveScoreOriginal, scorePlaySource } from '@/lib/flowing/engine.ts';
 import { parseScore, tempoAt, type ScoreModel } from '@/lib/flowing/score.ts';
 import { assignParts, voicesByStaff, type PartAssignment } from '@/lib/flowing/parts.ts';
-import { BALANCE_MIN_WIDTH, MUSIC_TEXT_SCALE, engrave, engraveOriginal } from '@/lib/flowing/engrave.ts';
+import { BALANCE_MIN_WIDTH, MUSIC_TEXT_SCALE } from '@/lib/flowing/engrave.ts';
+import type { PlaySource } from '@/lib/flowing/playSource.ts';
 import { buildPlayNotes, FlowPlayer, Timeline, type MixMode, type PlayNote } from '@/lib/flowing/playback.ts';
 import { SOUNDS, type SoundId } from '@/lib/flowing/sampler.ts';
 import { usePlayer } from '@/player/PlayerContext.tsx';
@@ -121,24 +121,16 @@ export function ScoreViewer({
 
   const [model, setModel] = useState<ScoreModel | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const viewTkRef = useRef<VerovioToolkit | null>(null);
-  const playTkRef = useRef<VerovioToolkit | null>(null);
   const url = flowing?.status === 'ready' ? flowing.url : null;
   useEffect(() => {
     if (!url) return;
     let cancelled = false;
     setModel(null);
     setLoadError(null);
-    Promise.all([
-      fetch(url, { mode: 'cors', credentials: 'omit' }).then((r) => (r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`)))),
-      createToolkit(),
-      createToolkit(),
-    ])
-      .then(([xml, viewTk, playTk]) => {
-        if (cancelled) return;
-        viewTkRef.current = viewTk;
-        playTkRef.current = playTk;
-        setModel(parseScore(xml));
+    fetch(url, { mode: 'cors', credentials: 'omit' })
+      .then((r) => (r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((xml) => {
+        if (!cancelled) setModel(parseScore(xml));
       })
       .catch((e: Error) => {
         if (!cancelled) setLoadError(e.message);
@@ -301,25 +293,33 @@ export function ScoreViewer({
   // object changes, which would wipe the shading and playback highlights.
   const svgHtml = useMemo(() => (svg ? { __html: svg } : undefined), [svg]);
   const [engraving, setEngraving] = useState(false);
+  /** Engraving has run long enough to explain why (old devices, first open). */
+  const [engravingSlow, setEngravingSlow] = useState(false);
   useEffect(() => {
-    const tk = viewTkRef.current;
-    if (!tk || !filteredXml || width === 0) return;
+    if (!filteredXml || width === 0) return;
+    let cancelled = false;
     setEngraving(true);
-    // Let the spinner paint before the (synchronous) engraving starts.
-    const id = requestAnimationFrame(() => {
-      const pad = readMode ? 8 : 16;
-      const w = width - pad;
-      try {
-        const out = layout === 'original' && model?.layoutWidth
-          ? engraveOriginal(tk, filteredXml, { width: w, layoutWidth: model.layoutWidth, zoom })
-          : engrave(tk, filteredXml, { width: w, scale, balance: w >= BALANCE_MIN_WIDTH });
-        setSvg(sanitiseSvg(out));
-      } catch (e) {
-        setLoadError((e as Error).message);
-      }
-      setEngraving(false);
-    });
-    return () => cancelAnimationFrame(id);
+    setEngravingSlow(false);
+    const slow = setTimeout(() => setEngravingSlow(true), 3000);
+    const w = width - (readMode ? 8 : 16);
+    (layout === 'original' && model?.layoutWidth
+      ? engraveScoreOriginal(filteredXml, { width: w, layoutWidth: model.layoutWidth, zoom })
+      : engraveScore(filteredXml, { width: w, scale, balance: w >= BALANCE_MIN_WIDTH })
+    )
+      .then((out) => {
+        if (!cancelled) setSvg(sanitiseSvg(out));
+      })
+      .catch((e: Error) => {
+        if (!cancelled) setLoadError(e.message);
+      })
+      .finally(() => {
+        clearTimeout(slow);
+        if (!cancelled) setEngraving(false);
+      });
+    return () => {
+      cancelled = true;
+      clearTimeout(slow);
+    };
     // model only supplies layoutWidth, which changes with filteredXml.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filteredXml, width, scale, readMode, layout, zoom]);
@@ -457,13 +457,32 @@ export function ScoreViewer({
 
   // ------- Playback ----------------------------------------------------------
 
-  const perf = useMemo(() => {
-    const tk = playTkRef.current;
-    if (!tk || !model) return null;
-    tk.setOptions({ breaks: 'none' });
-    tk.loadData(model.xml);
-    return buildPlayNotes(tk, model);
-  }, [model]);
+  // Read mode is for reading: the player stays away until asked for.
+  const [barOpen, setBarOpen] = useState(!readMode);
+  useEffect(() => setBarOpen(!readMode), [readMode]);
+  // Playback data is a second pass through Verovio (~18s on an old tablet),
+  // so it waits until the score is drawn and the player is open.
+  const [playSource, setPlaySource] = useState<{ model: ScoreModel; src: PlaySource } | null>(null);
+  const wantPlay = !!model && !!svg && barOpen;
+  useEffect(() => {
+    if (!wantPlay || !model || playSource?.model === model) return;
+    let cancelled = false;
+    scorePlaySource(model.xml)
+      .then((src) => {
+        if (!cancelled) setPlaySource({ model, src });
+      })
+      .catch((e: Error) => {
+        if (!cancelled) setLoadError(e.message);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [wantPlay, model, playSource]);
+  const perf = useMemo(
+    () => (model && playSource?.model === model ? buildPlayNotes(playSource.src, model) : null),
+    [model, playSource],
+  );
+  const perfLoading = wantPlay && !perf;
   const timeline = useMemo(() => (perf && model ? new Timeline(perf.notes, perf.endQ, model, bpm) : null), [perf, model, bpm]);
   const mix = useMemo(() => ({ mode: mixMode, line: hearLine, voices }), [mixMode, hearLine, voices]);
 
@@ -479,9 +498,6 @@ export function ScoreViewer({
   /** The step in played order sounding now, while playing. */
   const [nowStep, setNowStep] = useState<number | null>(null);
   const [loop, setLoop] = useState<{ start: number | null; end: number | null }>({ start: null, end: null });
-  // Read mode is for reading: the player stays away until asked for.
-  const [barOpen, setBarOpen] = useState(!readMode);
-  useEffect(() => setBarOpen(!readMode), [readMode]);
   useEffect(() => () => playerRef.current?.dispose(), []);
   // Settings change the player in place for notes not yet scheduled.
   useEffect(() => {
@@ -1040,7 +1056,18 @@ export function ScoreViewer({
       );
     }
     if (loadError) return <p className="text-sm text-destructive">The score didn’t load: {loadError}</p>;
-    if (!svg) return <Spinner text="Engraving the score…" />;
+    if (!svg) {
+      return (
+        <div className="flex flex-col items-center gap-2 text-center">
+          <Spinner text="Engraving the score…" />
+          {engravingSlow && (
+            <p className="max-w-xs text-sm text-muted-foreground">
+              The first time can take a minute on older devices. After that it opens straight away.
+            </p>
+          )}
+        </div>
+      );
+    }
     return null;
   })();
 
@@ -1224,7 +1251,7 @@ export function ScoreViewer({
       {!recordingShowing && model && barOpen && (
         <FlowBar
           title={piece?.title || model.credits.title || 'Score'}
-          playState={playState}
+          playState={perfLoading && playState === 'stopped' ? 'loading' : playState}
           canPlay={!!perf}
           onToggle={togglePlay}
           bars={stepLabels}

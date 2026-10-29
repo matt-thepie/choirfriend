@@ -73,6 +73,9 @@ export default defineConfig({
   // Registered as /sw.js?v=<build>: Cloudflare caches /sw.js at the edge, so a
   // fresh URL per deploy is what makes devices pick up the new worker.
   define: { __BUILD_ID__: JSON.stringify(Date.now().toString(36)) },
+  // The engraver worker loads Verovio with a dynamic import, which needs
+  // module output (iife can't split chunks).
+  worker: { format: 'es' },
   resolve: {
     alias: {
       '@': path.resolve(import.meta.dirname, './src'),
