@@ -1,4 +1,4 @@
-import { ReadModeControls } from '@/components/ReadModeControls.tsx';
+import { ReadModeControls, ReadModeHideTab } from '@/components/ReadModeControls.tsx';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { openPdf, type PDFDocumentProxy } from '@/lib/pdfjs.ts';
 import { Button, Icon } from '@/components/ui/button.tsx';
@@ -458,6 +458,17 @@ export function PdfViewer({
       cancelled = true;
     };
   }, [pdf, needLayouts, pdfFile?.id]);
+
+  // On a slow device drawing every page takes a while, and turns to pages not
+  // yet drawn lag; say so in read mode. Wait a second first so fast devices
+  // (and pages cached from earlier) never flash it.
+  const layoutsPending = readMode && !!pdf && layouts.size < pdf.numPages;
+  const [preparing, setPreparing] = useState(false);
+  useEffect(() => {
+    if (!layoutsPending) return setPreparing(false);
+    const t = setTimeout(() => setPreparing(true), 1000);
+    return () => clearTimeout(t);
+  }, [layoutsPending]);
 
   // --- My line -------------------------------------------------------------
   const [lineOverrides, setLineOverrides] = useState<PartLineOverrides>({});
@@ -1289,6 +1300,7 @@ export function PdfViewer({
         )}
       >
         {readMode ? minimalToolbar : fullToolbar}
+        {readMode && !markUp && !adjustingLine && <ReadModeHideTab onHide={() => setToolsOpen(false)} />}
         {markUp && markUpToolbar}
         {tool === 'marker' && markerToolbar}
         {markUp && <div className="px-3 py-2 text-xs text-muted-foreground" role="status">
@@ -1321,6 +1333,15 @@ export function PdfViewer({
         onPointerUp={onStagePointerUp}
         onPointerCancel={() => { tapRef.current = null; }}
       >
+        {preparing && (
+          <div role="status" className="absolute bottom-11 left-1/2 -translate-x-1/2 z-20 max-w-[calc(100%-2rem)] px-3 py-1.5 rounded-full bg-background/95 text-xs text-muted-foreground shadow-card inline-flex items-center gap-2 pointer-events-none">
+            <svg className="animate-spin h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" opacity="0.25" />
+              <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+            </svg>
+            <span className="tabular-nums">Preparing pages · {layouts.size} of {pageCount}. Page turns may be slow until done.</span>
+          </div>
+        )}
         {readMode && effectiveNavMode === 'page' && pageCount > 0 && (
           <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-20 px-2.5 h-7 rounded-full bg-background/90 text-xs tabular-nums shadow-card inline-flex items-center pointer-events-none">
             {currentPage} / {pageCount}

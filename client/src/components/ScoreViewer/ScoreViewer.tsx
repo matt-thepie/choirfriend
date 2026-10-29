@@ -1,4 +1,4 @@
-import { ReadModeControls } from '@/components/ReadModeControls.tsx';
+import { ReadModeControls, ReadModeHideTab } from '@/components/ReadModeControls.tsx';
 /**
  * Flowing score viewer: the music engraved live (Verovio) from MusicXML to
  * fit the screen, rather than a fixed PDF page. Same reading controls as the
@@ -1077,6 +1077,7 @@ export function ScoreViewer({
         )}
       >
         {readMode ? minimalToolbar : fullToolbar}
+        {readMode && <ReadModeHideTab onHide={() => setToolsOpen(false)} />}
         {!readMode && showPdfHint && (
           <div className="px-3 pb-2 text-xs text-muted-foreground flex flex-wrap items-center gap-2">
             <span>Highlighting, pen marks and navigation markers are available on PDFs only{piece?.files.some((f) => f.kind === 'pdf') ? ' — switch with View.' : '. No PDF is attached to this song.'}</span>
