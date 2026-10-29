@@ -87,7 +87,7 @@ export function FlowBar(p: FlowBarProps) {
         />
 
         {open && (
-          <div className="px-4 pt-5 pb-3 border-b border-border max-h-[50dvh] overflow-auto flex flex-col gap-4 text-sm">
+          <div className="px-4 pt-5 pb-3 border-b border-border max-h-[calc(var(--app-h)/2)] overflow-auto flex flex-col gap-4 text-sm">
             <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
               <div className="flex items-center gap-1" title={p.hasMarkedTempo ? 'Tempo (the score’s marking, adjusted)' : 'Starting tempo (no initial fixed tempo marking)'}>
                 <span className="text-muted-foreground mr-1">Starting tempo</span>

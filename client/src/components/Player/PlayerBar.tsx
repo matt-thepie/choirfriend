@@ -41,7 +41,7 @@ export function PlayerBar({ onOpenPiece }: PlayerBarProps) {
         />
 
         {open && (
-          <div className="px-4 pt-5 pb-3 border-b border-border max-h-[50dvh] overflow-auto">
+          <div className="px-4 pt-5 pb-3 border-b border-border max-h-[calc(var(--app-h)/2)] overflow-auto">
             <div className="text-base font-semibold mb-3">
               {p.queue.name}
               <span className="text-muted-foreground font-normal ml-2 text-sm">{p.index + 1} of {total}</span>

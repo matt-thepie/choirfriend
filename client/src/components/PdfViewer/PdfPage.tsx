@@ -46,7 +46,15 @@ interface PdfPageProps {
   /** Adjusting "My line": every stave on the page, tappable. */
   staveTargets?: StaveTarget[];
   onPickStave?: (system: number, stave: number) => void;
+  /** Scroll mode: the scrolling container. Only pages within about a screen
+   *  of it are rasterised; the rest keep their size but free their canvases. */
+  scrollRoot?: React.RefObject<HTMLElement | null>;
 }
+
+/** Most canvas pixels one page may use. Low-memory devices (old tablets)
+ *  garble or drop canvases long before iOS Safari's ~16M-pixel limit. */
+const lowMemory = ((navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 8) <= 2;
+const MAX_CANVAS_PIXELS = lowMemory ? 4e6 : 16e6;
 
 export interface StaveTarget {
   system: number;
@@ -86,7 +94,9 @@ export function PdfPage({
   partBands = [],
   staveTargets,
   onPickStave,
+  scrollRoot,
 }: PdfPageProps) {
+  const wrapRef = useRef<HTMLDivElement>(null);
   const pdfCanvasRef = useRef<HTMLCanvasElement>(null);
   const annotationCanvasRef = useRef<HTMLCanvasElement>(null);
   // width/height: the full page in CSS px; offX/offY/viewW/viewH: the visible (clipped) window.
@@ -101,6 +111,22 @@ export function PdfPage({
   const inkAnnotations = annotations.filter((a): a is InkAnnotation => a.kind === 'ink');
   const inkPen: InkPen | null = tool === 'pen' || tool === 'highlighter' ? tool : null;
   const markerAnnotations = annotations.filter((a): a is MarkerAnnotation => a.kind === 'marker');
+  const inkEnabled = inkPen !== null && drawTarget !== null;
+
+  // Without a scroll root (page mode) the one page shown is always near.
+  const [near, setNear] = useState(!scrollRoot);
+  const sized = renderedSize !== null;
+  useEffect(() => {
+    const el = wrapRef.current;
+    // Wait until the page has its real size, or every empty page looks near.
+    if (!scrollRoot || !el || !sized) return;
+    const io = new IntersectionObserver(([entry]) => setNear(entry!.isIntersecting), {
+      root: scrollRoot.current,
+      rootMargin: '100% 0px',
+    });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [scrollRoot, sized]);
 
   // Render the PDF page whenever the source or scale changes.
   useEffect(() => {
@@ -128,13 +154,18 @@ export function PdfPage({
       const offY = clip ? Math.floor(clip.y0 * viewport.height) : 0;
       const viewW = clip ? Math.ceil((clip.x1 - clip.x0) * viewport.width) : cssW;
       const viewH = clip ? Math.ceil((clip.y1 - clip.y0) * viewport.height) : cssH;
-      // Stay under ~16M pixels (iOS Safari's canvas limit).
-      const dpr = Math.min(3, window.devicePixelRatio || 1, Math.sqrt(16e6 / Math.max(1, viewW * viewH)));
-      canvas.width = Math.floor(viewW * dpr);
-      canvas.height = Math.floor(viewH * dpr);
+      const dpr = Math.min(3, window.devicePixelRatio || 1, Math.sqrt(MAX_CANVAS_PIXELS / Math.max(1, viewW * viewH)));
       canvas.style.width = `${viewW}px`;
       canvas.style.height = `${viewH}px`;
       setRenderedSize({ width: cssW, height: cssH, dpr, offX, offY, viewW, viewH });
+      if (!near) {
+        // Keep the page's place in the scroll, but give back its memory.
+        canvas.width = 0;
+        canvas.height = 0;
+        return;
+      }
+      canvas.width = Math.floor(viewW * dpr);
+      canvas.height = Math.floor(viewH * dpr);
 
       renderTask = page.render({ canvas, canvasContext: ctx, viewport, transform: [dpr, 0, 0, dpr, -offX * dpr, -offY * dpr] });
       try {
@@ -148,17 +179,26 @@ export function PdfPage({
       cancelled = true;
       renderTask?.cancel();
     };
-  }, [pdf, pageNumber, scale, clip?.x0, clip?.y0, clip?.x1, clip?.y1]);
+  }, [pdf, pageNumber, scale, clip?.x0, clip?.y0, clip?.x1, clip?.y1, near]);
+
+  // The ink layer only needs pixels when there is ink to show or draw; the
+  // other tools just need its pointer events, which a 0×0 canvas still gets.
+  const inkLayer = near && (inkAnnotations.length > 0 || inkEnabled);
 
   // Redraw the ink layer whenever the annotation list or rendered size changes.
   useEffect(() => {
     const canvas = annotationCanvasRef.current;
     if (!canvas || !renderedSize) return;
     const { dpr } = renderedSize;
-    canvas.width = Math.floor(renderedSize.viewW * dpr);
-    canvas.height = Math.floor(renderedSize.viewH * dpr);
     canvas.style.width = `${renderedSize.viewW}px`;
     canvas.style.height = `${renderedSize.viewH}px`;
+    if (!inkLayer) {
+      canvas.width = 0;
+      canvas.height = 0;
+      return;
+    }
+    canvas.width = Math.floor(renderedSize.viewW * dpr);
+    canvas.height = Math.floor(renderedSize.viewH * dpr);
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -185,7 +225,7 @@ export function PdfPage({
       for (let i = 1; i < a.points.length; i++) ctx.lineTo(...px(a.points[i]!));
       ctx.stroke();
     }
-  }, [inkAnnotations, renderedSize, scale, redrawTick]);
+  }, [inkAnnotations, renderedSize, scale, redrawTick, inkLayer]);
 
   function getNormalisedPoint(e: React.PointerEvent<HTMLCanvasElement>): { x: number; y: number } {
     const canvas = e.currentTarget;
@@ -221,7 +261,6 @@ export function PdfPage({
     ctx.stroke();
   }
 
-  const inkEnabled = inkPen !== null && drawTarget !== null;
   const markerEnabled = tool === 'marker' && drawTarget !== null && markerKind !== null;
   const canvasInteractive = inkEnabled || markerEnabled || tool === 'erase' || tool === 'select';
 
@@ -301,6 +340,7 @@ export function PdfPage({
     <div
       className={cn('relative inline-block bg-white', !bare && 'shadow-md border border-border', clip && 'overflow-hidden')}
       data-page={pageNumber}
+      ref={wrapRef}
     >
       <canvas ref={pdfCanvasRef} className="block" />
       {renderedSize && partBands.length > 0 && (
@@ -319,7 +359,8 @@ export function PdfPage({
         style={{
           touchAction: 'none',
           // Multiply onto the score so highlighter colour never hides the notes.
-          mixBlendMode: 'multiply',
+          // Only while it has pixels: blending is costly on old GPUs.
+          mixBlendMode: inkLayer ? 'multiply' : undefined,
           cursor,
           pointerEvents: canvasInteractive ? 'auto' : 'none',
         }}

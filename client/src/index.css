@@ -7,6 +7,11 @@
  * below) — no raw hex in components.
  */
 :root {
+  /* The visible viewport height. Browsers older than Chrome 108 / Safari 15.4
+     drop 100dvh, which collapses the app shell, so main.tsx overrides this
+     with a measured height there. Use h-(--app-h) rather than h-dvh. */
+  --app-h: 100dvh;
+
   /* brand, from the choirfriend logo: deep teal + seafoam */
   --teal: #123d48;
   --teal-dark: #0b2a32;
@@ -166,6 +171,7 @@
     content: '';
     position: fixed;
     inset: 0;
+    height: 100vh;
     height: 100lvh;
     z-index: -1;
     background-image: var(--field-gradient);
@@ -176,7 +182,7 @@
     line-height: var(--lh);
     color: var(--ink);
     background: var(--field);
-    min-height: 100dvh;
+    min-height: var(--app-h);
     -webkit-font-smoothing: antialiased;
   }
   * {

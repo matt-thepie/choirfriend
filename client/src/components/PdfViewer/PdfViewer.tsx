@@ -1393,6 +1393,7 @@ export function PdfViewer({
                   partBands={lineBandsByPage.get(pageNumber)}
                   staveTargets={staveTargetsFor(pageNumber)}
                   onPickStave={(system, stave) => pickStave(pageNumber, system, stave)}
+                  scrollRoot={scrollContainerRef}
                   scale={readMode ? readScrollScale(pageNumber) : effectiveScale}
                   clip={readMode ? layouts.get(pageNumber)?.content ?? null : null}
                   bare={readMode}

@@ -4,11 +4,15 @@
  * Vite turns `?url` imports into a built asset URL, so the worker file is
  * bundled and hashed alongside the rest of the client. No special build
  * config needed.
+ *
+ * The legacy build carries polyfills (Promise.withResolvers and friends) that
+ * the modern one assumes; without them the viewer crashes on browsers older
+ * than Chrome 119, which some members' tablets still run.
  */
 
-import * as pdfjsLib from 'pdfjs-dist';
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 // Vite-specific: bundle the worker as a separate asset and import its URL.
-import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import workerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
 import type { DocumentInitParameters } from 'pdfjs-dist/types/src/display/api';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
@@ -25,4 +29,4 @@ export function openPdf(src: DocumentInitParameters): ReturnType<typeof pdfjsLib
 }
 
 export { pdfjsLib };
-export type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
+export type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist/legacy/build/pdf.mjs';

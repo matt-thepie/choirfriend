@@ -256,7 +256,7 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
   const mySection = sections.find((s) => s.id === mySectionId) ?? null;
 
   return (
-    <div className="h-dvh flex flex-col pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
+    <div className="h-(--app-h) flex flex-col pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
       {!readMode && (
         <header className="bg-background border-b border-border shadow-sm shrink-0 h-14 md:h-16 px-4 flex items-center gap-3 text-base">
           {view === 'viewer' ? (

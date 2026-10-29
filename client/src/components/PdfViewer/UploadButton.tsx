@@ -171,9 +171,9 @@ export function UploadButton({
           e.preventDefault();
           if (!busy) closeDialog();
         }}
-        className="m-auto w-[min(28rem,calc(100vw-2rem))] max-h-[calc(100dvh-2rem)] rounded-lg border border-border bg-background text-foreground p-0 shadow-xl backdrop:bg-black/50"
+        className="m-auto w-[min(28rem,calc(100vw-2rem))] max-h-[calc(var(--app-h)-2rem)] rounded-lg border border-border bg-background text-foreground p-0 shadow-xl backdrop:bg-black/50"
       >
-        <div className="flex flex-col max-h-[calc(100dvh-2rem)]">
+        <div className="flex flex-col max-h-[calc(var(--app-h)-2rem)]">
           <div className="px-4 pt-4 pb-2">
             <h2 id={titleId} className="text-base font-semibold">
               {staged.length > 0 ? `Upload ${staged.length === 1 ? 'this file' : `${staged.length} files`}?` : 'Can\u2019t upload that'}
