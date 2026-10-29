@@ -23,6 +23,7 @@ import { engraveScore, engraveScoreOriginal, scorePlaySource } from '@/lib/flowi
 import { parseScore, tempoAt, type ScoreModel } from '@/lib/flowing/score.ts';
 import { assignParts, voicesByStaff, type PartAssignment } from '@/lib/flowing/parts.ts';
 import { BALANCE_MIN_WIDTH, MUSIC_TEXT_SCALE } from '@/lib/flowing/engrave.ts';
+import { rasteriseScore, rasterScore } from '@/lib/flowing/raster.ts';
 import type { PlaySource } from '@/lib/flowing/playSource.ts';
 import { buildPlayNotes, FlowPlayer, Timeline, type MixMode, type PlayNote } from '@/lib/flowing/playback.ts';
 import { SOUNDS, type SoundId } from '@/lib/flowing/sampler.ts';
@@ -83,6 +84,25 @@ function save(key: string, v: unknown): void {
 
 /** Verovio's SVG is our own engraving of an admin-uploaded file; strip
  *  anything active from it all the same. */
+/** The score's own look, as rules inside the SVG: the page prefixes them with
+ *  .cf-score, and raster.ts embeds them as they are. Verovio spaces text with
+ *  Times metrics; Tinos has the same widths. */
+const SCORE_CSS = `
+  text { font-family: Tinos, "Times New Roman", Times, serif; }
+  [font-family="Leipzig"], .cf-smufl { font-family: Leland, "Bravura Text"; }
+  .cf-smufl { font-size: ${Math.round(MUSIC_TEXT_SCALE * 100)}%; }
+  .cf-myline { fill: rgb(59 130 246 / 0.13); }
+`;
+
+/** The bar under a point, by position: for when the SVG is hidden behind
+ *  images and can't be hit-tested. */
+function measureAt(measures: SVGGElement[], x: number, y: number): SVGGElement | null {
+  return measures.find((m) => {
+    const r = m.getBoundingClientRect();
+    return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+  }) ?? null;
+}
+
 function sanitiseSvg(svg: string): string {
   return svg.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/\son[a-z]+="[^"]*"/gi, '');
 }
@@ -386,6 +406,37 @@ export function ScoreViewer({
         return [{ label: pg.label, system: systemEls.indexOf(sys), top: s.top - base, left: m.getBoundingClientRect().left - sheetBox.left }];
       }),
     );
+  }, [svg, model, partLineOn, myLine, visibleParts, topGap]);
+
+  // On weak-GPU devices, swap the live SVG for CPU-drawn images once the
+  // shading above is in (see raster.ts). Until then the live SVG shows.
+  const rasterRef = useRef<HTMLDivElement>(null);
+  const [rastered, setRastered] = useState(false);
+  const [rasterising, setRasterising] = useState(false);
+  useEffect(() => {
+    const root = scoreRef.current;
+    const holder = rasterRef.current;
+    if (!rasterScore || !root || !holder || !svg || !model) return;
+    let stale = false;
+    let cleanup: (() => void) | null = null;
+    setRasterising(true);
+    // Settle first: the shading inputs often change again just after opening.
+    const start = setTimeout(() => {
+      rasteriseScore(root, holder, SCORE_CSS, () => stale)
+        .then((c) => {
+          if (stale) return c?.();
+          cleanup = c;
+          setRastered(!!c);
+        })
+        .catch((e: Error) => console.warn('Score stays as live SVG:', e.message))
+        .finally(() => { if (!stale) setRasterising(false); });
+    }, 500);
+    return () => {
+      stale = true;
+      clearTimeout(start);
+      cleanup?.();
+      setRastered(false);
+    };
   }, [svg, model, partLineOn, myLine, visibleParts, topGap]);
 
   // ------- Pages: screenfuls of whole lines --------------------------------
@@ -704,7 +755,7 @@ export function ScoreViewer({
     if (Math.hypot(e.clientX - s.x, e.clientY - s.y) > 10 || Date.now() - s.t > 400) return;
     const target = e.target as Element;
     if (target.closest('button, a, input, select, textarea, [role="button"]')) return;
-    const m = target.closest('g.measure');
+    const m = rastered ? measureAt(measureEls.current, e.clientX, e.clientY) : target.closest('g.measure');
     const i = m ? measureEls.current.indexOf(m as SVGGElement) : -1;
     if (i >= 0 && playState === 'playing') {
       const q = perf?.measureQ.get(i);
@@ -713,8 +764,9 @@ export function ScoreViewer({
     }
     // In read mode a tap first brings the tools back; with them showing, a
     // tap on a bar picks where Play starts (again to clear), off a bar hides them.
+    // Bars only count once playback is ready, as a start bar is a play step.
     if (readMode && !toolsOpen) return setToolsOpen(true);
-    if (i >= 0) {
+    if (i >= 0 && perf) {
       setFromStep(fromMeasure === i ? null : stepOf(i));
       touchTools();
     } else if (readMode) setToolsOpen(false);
@@ -804,7 +856,7 @@ export function ScoreViewer({
   function jumpToMeasure(i: number): void {
     const box = systemOf(measureEls.current[i] ?? null);
     if (box) showY(box.top + 13);
-    setFromStep(stepOf(i));
+    if (perf) setFromStep(stepOf(i));
     setJumpOpen(false);
   }
 
@@ -1075,15 +1127,17 @@ export function ScoreViewer({
     <div className="relative flex flex-col h-full">
       <style>{`
         .cf-score svg { display: block; margin: 0 auto; max-width: 100%; height: auto; }
-        /* Verovio spaces text with Times metrics; Tinos has the same widths. */
-        .cf-score svg text { font-family: Tinos, "Times New Roman", Times, serif; }
+        @font-face { font-family: Tinos; src: url(/fonts/Tinos-Regular.woff2) format("woff2"); font-display: swap; }
+        @font-face { font-family: Tinos; src: url(/fonts/Tinos-Bold.woff2) format("woff2"); font-weight: 700; font-display: swap; }
+        @font-face { font-family: Tinos; src: url(/fonts/Tinos-Italic.woff2) format("woff2"); font-style: italic; font-display: swap; }
+        @font-face { font-family: Tinos; src: url(/fonts/Tinos-BoldItalic.woff2) format("woff2"); font-weight: 700; font-style: italic; font-display: swap; }
         /* Music characters in text (see musicText in engrave.ts). */
         @font-face { font-family: Leland; src: url(/fonts/Leland.woff2) format("woff2"); font-display: swap; }
         /* Leland lacks a few (the ♯ Verovio uses in chord symbols): Bravura, cut down to the text-symbol ranges, fills in. */
         @font-face { font-family: "Bravura Text"; src: url(/fonts/BravuraText-subset.woff2) format("woff2"); font-display: swap; }
-        .cf-score svg [font-family="Leipzig"], .cf-score svg .cf-smufl { font-family: Leland, "Bravura Text"; }
-        .cf-score svg .cf-smufl { font-size: ${Math.round(MUSIC_TEXT_SCALE * 100)}%; }
-        .cf-score .cf-myline { fill: rgb(59 130 246 / 0.13); }
+        ${SCORE_CSS.replace(/(^|})\s*([^{}]+)\{/g, (_, close: string, sel: string) => `${close}\n${sel.split(',').map((x) => `.cf-score ${x.trim()}`).join(', ')} {`)}
+        .cf-rastered svg { visibility: hidden; }
+        .cf-rastered g.cf-playing, .cf-rastered g.cf-from > g.staff > path { visibility: visible; }
         .cf-score g.cf-playing, .cf-score g.cf-playing * { fill: ${HIGHLIGHT}; stroke: ${HIGHLIGHT}; }
         .cf-score g.cf-from > g.staff > path { stroke: ${HIGHLIGHT}; }
         .cf-score g.measure { cursor: pointer; }
@@ -1135,7 +1189,7 @@ export function ScoreViewer({
           className={cn('absolute inset-0 overscroll-contain bg-stage', effectiveNavMode === 'page' ? 'overflow-hidden' : 'overflow-auto')}
         >
           {status && <div className="flex justify-center py-16 px-4">{status}</div>}
-          {engraving && svg && (
+          {(engraving || rasterising) && svg && (
             <div className="absolute top-2 right-2 z-10"><Spinner small text="" /></div>
           )}
           <div
@@ -1158,7 +1212,10 @@ export function ScoreViewer({
                 lyricist={model?.credits.lyricist ?? null}
                 gap={topGap}
               />
-              <div ref={scoreRef} className={cn('cf-score', layout === 'original' && 'cf-original')} dangerouslySetInnerHTML={svgHtml} />
+              <div className="relative">
+                <div ref={rasterRef} className={cn('absolute inset-0 pointer-events-none', !rastered && 'invisible')} />
+                <div ref={scoreRef} className={cn('cf-score relative', layout === 'original' && 'cf-original', rastered && 'cf-rastered')} dangerouslySetInnerHTML={svgHtml} />
+              </div>
               {svg && pageMarks.map((m) =>
                 layout === 'original' ? (
                   <div key={m.label} className="absolute inset-x-0 pointer-events-none" style={{ top: m.top - 34 }}>
