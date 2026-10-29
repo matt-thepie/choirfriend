@@ -435,13 +435,20 @@ export function PdfViewer({
   // Read mode crops margins and can step by system, and "My line" needs the
   // staves, so analyse each page once (cached per file) when either is on.
   const needLayouts = readMode || partLineOn;
+  const currentPageRef = useRef(currentPage);
+  currentPageRef.current = currentPage;
   useEffect(() => {
     setLayouts(new Map());
     if (!pdf || !needLayouts || !pdfFile) return;
     const fileId = pdfFile.id;
     let cancelled = false;
+    // Nearest pages first, ahead before behind: each analysis also draws the
+    // page raster the viewer shows, so the next page turns are ready soonest.
+    const from = Math.min(currentPageRef.current, pdf.numPages);
+    const order = Array.from({ length: pdf.numPages }, (_, i) => i + 1)
+      .sort((a, b) => (a >= from ? a - from : 2 * (from - a)) - (b >= from ? b - from : 2 * (from - b)));
     (async () => {
-      for (let p = 1; p <= pdf.numPages; p++) {
+      for (const p of order) {
         const L = await analysePage(pdf, p, `${fileId}`);
         if (cancelled) return;
         setLayouts((m) => new Map(m).set(p, L));

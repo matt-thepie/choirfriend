@@ -60,7 +60,40 @@ export function analysePage(pdf: PDFDocumentProxy, pageNumber: number, cacheKey:
   return p;
 }
 
-async function run(pdf: PDFDocumentProxy, pageNumber: number): Promise<PageLayout> {
+/** A whole page drawn once at ANALYSIS_WIDTH, kept as a PNG. */
+export interface PageRaster {
+  image: Blob | null;
+  /** Pixel size of `image`. */
+  width: number;
+  height: number;
+  /** Pixel analysis only; stave labels are added by analysePage. */
+  layout: PageLayout;
+}
+
+/** Pixel width of a page raster; the viewer reuses it whenever the screen
+ *  needs no more detail than this. */
+export const RASTER_WIDTH = ANALYSIS_WIDTH;
+const rasters = new WeakMap<PDFDocumentProxy, Map<number, Promise<PageRaster>>>();
+
+/**
+ * Draw a page once and keep it, so analysis and display share one pdf.js
+ * render. A dense score takes seconds to draw on an old tablet; showing
+ * the kept PNG takes milliseconds, which makes page turns instant there.
+ */
+export function pageRaster(pdf: PDFDocumentProxy, pageNumber: number): Promise<PageRaster> {
+  let pages = rasters.get(pdf);
+  if (!pages) rasters.set(pdf, (pages = new Map()));
+  let p = pages.get(pageNumber);
+  if (!p) {
+    p = rasterise(pdf, pageNumber);
+    pages.set(pageNumber, p);
+    // A failed render may succeed later; don't cache it.
+    p.catch(() => pages.delete(pageNumber));
+  }
+  return p;
+}
+
+async function rasterise(pdf: PDFDocumentProxy, pageNumber: number): Promise<PageRaster> {
   const page = await pdf.getPage(pageNumber);
   const base = page.getViewport({ scale: 1 });
   const viewport = page.getViewport({ scale: ANALYSIS_WIDTH / base.width });
@@ -73,9 +106,17 @@ async function run(pdf: PDFDocumentProxy, pageNumber: number): Promise<PageLayou
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   await page.render({ canvas, canvasContext: ctx, viewport }).promise;
   const { width: W, height: H } = canvas;
-  const data = ctx.getImageData(0, 0, W, H).data;
+  const layout = analyseBitmap(ctx.getImageData(0, 0, W, H).data, W, H);
+  const image = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
   canvas.width = canvas.height = 0;
-  const layout = analyseBitmap(data, W, H);
+  return { image, width: W, height: H, layout };
+}
+
+async function run(pdf: PDFDocumentProxy, pageNumber: number): Promise<PageLayout> {
+  const page = await pdf.getPage(pageNumber);
+  const base = page.getViewport({ scale: 1 });
+  // Copy: labelStaves writes into it, and the raster's layout is shared.
+  const layout = JSON.parse(JSON.stringify((await pageRaster(pdf, pageNumber)).layout)) as PageLayout;
   try {
     const text = await page.getTextContent();
     const items: TextItem[] = [];

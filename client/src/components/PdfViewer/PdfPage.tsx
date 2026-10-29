@@ -11,7 +11,7 @@ import type {
 } from '@/types/annotations.ts';
 import { MarkerBadge } from './MarkerBadge.tsx';
 import { cn } from '@/lib/utils.ts';
-import type { Box } from '@/lib/pageLayout.ts';
+import { pageRaster, RASTER_WIDTH, type Box } from '@/lib/pageLayout.ts';
 
 interface PdfPageProps {
   pdf: PDFDocumentProxy;
@@ -166,6 +166,29 @@ export function PdfPage({
         canvas.width = 0;
         canvas.height = 0;
         return;
+      }
+
+      // When the screen needs no more detail than the shared page raster
+      // (phones, small tablets), copy from it rather than redraw the page.
+      // Up to 10% upscaling is invisible at these pixel densities.
+      if (viewport.width * dpr <= RASTER_WIDTH * 1.1) {
+        try {
+          const r = await pageRaster(pdf, pageNumber);
+          if (cancelled || !r.image) throw new Error('no raster');
+          const bmp = await createImageBitmap(r.image);
+          if (cancelled) return bmp.close();
+          // Resize only now, so a re-crop doesn't blank the page while waiting.
+          canvas.width = Math.floor(viewW * dpr);
+          canvas.height = Math.floor(viewH * dpr);
+          const k = r.width / viewport.width;
+          ctx.imageSmoothingQuality = 'high';
+          ctx.drawImage(bmp, offX * k, offY * k, viewW * k, viewH * k, 0, 0, canvas.width, canvas.height);
+          bmp.close();
+          return;
+        } catch {
+          if (cancelled) return;
+          // Fall through to drawing the page directly.
+        }
       }
       canvas.width = Math.floor(viewW * dpr);
       canvas.height = Math.floor(viewH * dpr);
