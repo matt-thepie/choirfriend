@@ -395,13 +395,16 @@ export function ScoreViewer({
 
     // Lines (systems) in sheet coordinates (title included), for page turns
     // and following.
-    const sheetBox = (sheetRef.current ?? root).getBoundingClientRect();
+    const sheet = sheetRef.current ?? root;
+    const sheetBox = sheet.getBoundingClientRect();
     const base = sheetBox.top;
+    // A squeezed page scales the sheet; measure in its own units.
+    const k = sheet.offsetWidth ? sheetBox.width / sheet.offsetWidth : 1;
     const systemEls = Array.from(root.querySelectorAll('g.system'));
     setSystems(
       systemEls.map((s) => {
         const r = s.getBoundingClientRect();
-        return { top: r.top - base, bottom: r.bottom - base };
+        return { top: (r.top - base) / k, bottom: (r.bottom - base) / k };
       }),
     );
     setPageMarks(
@@ -410,7 +413,7 @@ export function ScoreViewer({
         const sys = m?.closest('g.system');
         if (!m || !sys) return [];
         const s = sys.getBoundingClientRect();
-        return [{ label: pg.label, system: systemEls.indexOf(sys), top: s.top - base, left: m.getBoundingClientRect().left - sheetBox.left }];
+        return [{ label: pg.label, system: systemEls.indexOf(sys), top: (s.top - base) / k, left: (m.getBoundingClientRect().left - sheetBox.left) / k }];
       }),
     );
   }, [svg, model, partLineOn, myLine, visibleParts, topGap]);
@@ -448,11 +451,15 @@ export function ScoreViewer({
 
   // ------- Pages: screenfuls of whole lines --------------------------------
 
+  // A page that would leave a line's worth of room short of the next line
+  // shrinks a little to take it: a third of a screen empty reads worse than
+  // notes a tenth smaller.
+  const SQUEEZE = 0.88;
   const pages = useMemo(() => {
-    if (effectiveNavMode !== 'page' || !systems.length || viewportH === 0) return [] as Array<{ top: number; bottom: number }>;
+    if (effectiveNavMode !== 'page' || !systems.length || viewportH === 0) return [] as Array<{ top: number; bottom: number; scale: number }>;
     const room = viewportH - 16;
-    const out: Array<{ top: number; bottom: number }> = [];
-    let cur: { top: number; bottom: number } | null = null;
+    const out: Array<{ top: number; bottom: number; scale: number }> = [];
+    let cur: { top: number; bottom: number; scale: number } | null = null;
     const pageStarts = new Set(layout === 'original' ? pageMarks.map((m) => m.system) : []);
     for (const [i, s] of systems.entries()) {
       // A small lead-in above each line catches dynamics and bar numbers
@@ -460,12 +467,13 @@ export function ScoreViewer({
       // it carries the title.
       const lead = pageStarts.has(i) ? 36 : 12;
       const top: number = cur || out.length ? Math.max(0, s.top - lead) : 0;
-      if (!cur || s.bottom - cur.top > room || pageStarts.has(i)) {
+      if (!cur || (s.bottom - cur.top) * SQUEEZE > room || pageStarts.has(i)) {
         if (cur) out.push(cur);
-        cur = { top, bottom: s.bottom };
+        cur = { top, bottom: s.bottom, scale: 1 };
       } else cur.bottom = s.bottom;
     }
     if (cur) out.push(cur);
+    for (const pg of out) pg.scale = Math.min(1, room / (pg.bottom - pg.top));
     return out;
   }, [effectiveNavMode, systems, viewportH, layout, pageMarks]);
   const [pageIndex, setPageIndex] = useState(0);
@@ -1203,14 +1211,18 @@ export function ScoreViewer({
             className={cn('bg-white mx-auto', readMode ? 'px-1' : 'px-2 my-2 shadow-card rounded-sm max-w-full', !svg && 'hidden')}
             style={
               effectiveNavMode === 'page' && page
-                ? { height: page.bottom - page.top + 8, overflow: 'hidden', marginTop: 8 }
+                ? { height: (page.bottom - page.top) * page.scale + 8, overflow: 'hidden', marginTop: 8 }
                 : undefined
             }
           >
             <div
               ref={sheetRef}
               className="relative"
-              style={effectiveNavMode === 'page' && page ? { transform: `translateY(${-page.top}px)` } : undefined}
+              style={
+                effectiveNavMode === 'page' && page
+                  ? { transform: `scale(${page.scale}) translateY(${-page.top}px)`, transformOrigin: 'top center' }
+                  : undefined
+              }
             >
               <ScoreTitle
                 title={piece?.title || model?.credits.title || null}

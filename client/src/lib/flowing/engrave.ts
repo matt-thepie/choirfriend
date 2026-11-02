@@ -43,6 +43,9 @@ const BASE_OPTIONS = {
   // default, a third of word gaps on a phone came out under 1.5px. 3 brought
   // that to 2% for a few more lines; going wider gained nothing.
   lyricWordSpace: 3,
+  // Lines a little closer than Verovio's default (12): lyrics set the real
+  // distance, so this only trims the gap on lines without them.
+  spacingSystem: 8,
   svgRemoveXlink: true,
 };
 

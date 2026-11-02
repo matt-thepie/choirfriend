@@ -53,6 +53,8 @@ export async function rasteriseScore(
   const fonts = await embeddedFonts();
   const dpr = window.devicePixelRatio || 1;
   const base = root.getBoundingClientRect();
+  // A squeezed page scales the sheet; size and place bands in its own units.
+  const k = root.offsetWidth ? base.width / root.offsetWidth : 1;
   const bands: HTMLCanvasElement[] = [];
   const cleanup = () => {
     // Zero-size frees the backing store now rather than at garbage collection.
@@ -60,8 +62,8 @@ export async function rasteriseScore(
   };
   for (const svg of Array.from(root.querySelectorAll<SVGSVGElement>(':scope > svg'))) {
     const box = svg.getBoundingClientRect();
-    const W = box.width;
-    const H = box.height;
+    const W = box.width / k;
+    const H = box.height / k;
     if (!W || !H) continue;
     const clone = svg.cloneNode(true) as SVGSVGElement;
     clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
@@ -92,7 +94,7 @@ export async function rasteriseScore(
       ctx.setTransform(dpr, 0, 0, dpr, 0, -y * dpr);
       ctx.drawImage(img, 0, 0, W, H);
       // Shown as is: encoding to PNG for an <img> took ~4 s a band on the Nexus 7.
-      c.style.cssText = `position:absolute;left:${box.left - base.left}px;top:${box.top - base.top + y}px;width:${W}px;height:${h}px`;
+      c.style.cssText = `position:absolute;left:${(box.left - base.left) / k}px;top:${(box.top - base.top) / k + y}px;width:${W}px;height:${h}px`;
       bands.push(c);
       // Let taps and page turns through between bands.
       await new Promise((res) => setTimeout(res));
