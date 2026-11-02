@@ -89,10 +89,14 @@ function save(key: string, v: unknown): void {
 /** The score's own look, as rules inside the SVG: the page prefixes them with
  *  .cf-score, and raster.ts embeds them as they are. Verovio spaces text with
  *  Times metrics; Tinos has the same widths. */
+// The .tempo rule: Verovio draws the note in "♩ = 120" at 720 units, 1.8x the
+// text (405), so it dwarfs the words either side. MuseScore draws it at the
+// text size. (No comments inside: the page prefixes each selector in it.)
 const SCORE_CSS = `
   text { font-family: Tinos, "Times New Roman", Times, serif; }
   [font-family="Leipzig"], .cf-smufl { font-family: Leland, "Bravura Text"; }
   .cf-smufl { font-size: ${Math.round(MUSIC_TEXT_SCALE * 100)}%; }
+  .tempo [font-family="Leipzig"] { font-size: 405px; }
   .cf-myline { fill: rgb(59 130 246 / 0.13); }
 `;
 
