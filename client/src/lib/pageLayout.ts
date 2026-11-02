@@ -100,22 +100,36 @@ async function rasterise(pdf: PDFDocumentProxy, pageNumber: number): Promise<Pag
 // can't load it), and analysis then runs on the main thread as before.
 let worker: Worker | null | undefined;
 let nextJob = 0;
-const jobs = new Map<number, { data: Uint8ClampedArray; width: number; height: number; done: (l: PageLayout) => void }>();
+const jobs = new Map<number, { data: Uint8ClampedArray; width: number; height: number; done: (l: PageLayout) => void; timer: ReturnType<typeof setTimeout> }>();
+
+/** iOS Safari kills a worker under memory pressure without an error event,
+ *  which would leave every page's analysis hanging and "My line" blank. A
+ *  page takes under a second to analyse, so an unanswered job after this
+ *  long means the worker is gone: finish it, and the rest, on this thread. */
+const JOB_TIMEOUT_MS = 20_000;
+
+function workerLost(): void {
+  worker?.terminate();
+  worker = null;
+  for (const j of jobs.values()) {
+    clearTimeout(j.timer);
+    j.done(analyseBitmap(j.data, j.width, j.height));
+  }
+  jobs.clear();
+}
 
 function analyseOffThread(data: Uint8ClampedArray, width: number, height: number): Promise<PageLayout> {
   if (worker === undefined) {
     try {
       worker = new Worker(new URL('./pageBitmap.worker.ts', import.meta.url), { type: 'module' });
       worker.onmessage = (e: MessageEvent<{ id: number; layout: PageLayout }>) => {
-        jobs.get(e.data.id)?.done(e.data.layout);
+        const j = jobs.get(e.data.id);
+        if (!j) return;
+        clearTimeout(j.timer);
         jobs.delete(e.data.id);
+        j.done(e.data.layout);
       };
-      worker.onerror = () => {
-        worker?.terminate();
-        worker = null;
-        for (const j of jobs.values()) j.done(analyseBitmap(j.data, j.width, j.height));
-        jobs.clear();
-      };
+      worker.onerror = workerLost;
     } catch {
       worker = null;
     }
@@ -125,7 +139,7 @@ function analyseOffThread(data: Uint8ClampedArray, width: number, height: number
   return new Promise((done) => {
     const id = nextJob++;
     // Copied, not transferred, so the main thread can still analyse it if the worker fails.
-    jobs.set(id, { data, width, height, done });
+    jobs.set(id, { data, width, height, done, timer: setTimeout(workerLost, JOB_TIMEOUT_MS) });
     w.postMessage({ id, data, width, height });
   });
 }

@@ -27,7 +27,7 @@ import { replaceFile } from '@/hooks/useUploadFile.ts';
 import { useAnnotations, type NewAnnotationInput } from '@/hooks/useAnnotations.ts';
 import { PdfPage } from './PdfPage.tsx';
 import { analysePage, dropRasters, type Box, type PageLayout } from '@/lib/pageLayout.ts';
-import { overrideKey, partFromSection, resolvePartLine, type PartLineOverrides } from '@/lib/partLine.ts';
+import { labelScore, overrideKey, partFromSection, resolvePartLine, type PartLineOverrides } from '@/lib/partLine.ts';
 import type { StaveTarget } from './PdfPage.tsx';
 import { UploadButton } from './UploadButton.tsx';
 import { MarkerGlyph } from './markerIcons.tsx';
@@ -104,6 +104,8 @@ const INK_COLORS_KEY = 'choirfriend.inkColors';
 const DRAW_TARGET_KEY = 'choirfriend.drawTarget';
 const SHARE_WITH_KEY = 'choirfriend.shareWith';
 const MY_LINE_SEEN_KEY = 'choirfriend.myLineSeen';
+/** Why "My line" is or isn't shading anything, for the options popover. */
+type LineStatus = 'noPart' | 'preparing' | 'noStaves' | 'noLabels' | 'guessed';
 const NAV_MODE_KEY = 'choirfriend.navMode';
 /** How long the read-mode toolbar stays up untouched. */
 const TOOLS_HIDE_MS = 4000;
@@ -619,12 +621,21 @@ export function PdfViewer({
     const already = linePicks.some((p) => p.page === page && p.system === system && p.stave === stave);
     saveLineOverrides({ ...lineOverrides, [overrideKey(page, system)]: already ? -1 : stave });
   };
+  // What the guess actually found, so the options popover can say why a
+  // page is (or isn't) shaded instead of guessing at the reason.
+  const lineStatus = useMemo((): LineStatus => {
+    if (!myPart) return 'noPart';
+    if (!pdf || layouts.size < pdf.numPages) return 'preparing';
+    const systems = [...layouts.values()].flatMap((L) => L.systems);
+    if (!systems.length) return 'noStaves';
+    return systems.some((sys) => sys.staves.some((st) => labelScore(st.label, myPart) > 0)) ? 'guessed' : 'noLabels';
+  }, [myPart, pdf, layouts]);
   const myLineControl = onPartLineChange && (
     <MyLineControl
       on={partLineOn}
       onChange={onPartLineChange}
       partName={mySection?.label ?? null}
-      guessable={!!myPart}
+      status={lineStatus}
       adjusting={adjustingLine && canCorrectLine}
       canCorrect={canCorrectLine}
       onAdjustingChange={(on) => setAdjustingLine(on && canCorrectLine)}
@@ -1670,7 +1681,7 @@ function MyLineControl({
   on,
   onChange,
   partName,
-  guessable,
+  status,
   canCorrect,
   adjusting,
   onAdjustingChange,
@@ -1681,7 +1692,7 @@ function MyLineControl({
   on: boolean;
   onChange: (on: boolean) => void;
   partName: string | null;
-  guessable: boolean;
+  status: LineStatus;
   canCorrect: boolean;
   adjusting: boolean;
   onAdjustingChange: (adjusting: boolean) => void;
@@ -1741,11 +1752,15 @@ function MyLineControl({
           <p className="px-3 pt-1 pb-1 text-xs text-muted-foreground max-w-[16rem]">
             {!canCorrect
               ? `Showing the automatic guess for ${partName ?? 'the selected section'}. Your saved corrections are not applied. Select your own section to adjust or reset them.`
-              : guessable
-              ? `Guessed from the part names printed on the score (${partName}). Fix any system it gets wrong with Adjust.`
-              : partName
-                ? `Can't guess ${partName} from part names. Use Adjust to pick your stave; it carries on to later systems.`
-                : 'Set your voice part in the menu so this can guess, or pick your stave with Adjust.'}
+              : status === 'noPart'
+                ? 'Set your voice part in the menu so this can guess, or pick your stave with Adjust.'
+                : status === 'preparing'
+                  ? `Still reading the pages to find the staves for ${partName}…`
+                  : status === 'noStaves'
+                    ? `No staves were found on these pages, so nothing can be shaded. Try closing and reopening the score.`
+                    : status === 'noLabels'
+                      ? `No part name matching ${partName} is printed on this score. Use Adjust to pick your stave; it carries on to later systems.`
+                      : `Guessed from the part names printed on the score (${partName}). Fix any system it gets wrong with Adjust.`}
           </p>
           <button
             type="button"
