@@ -68,6 +68,17 @@ export interface ScoreMeasure {
   len: number;
 }
 
+/** A repeat or jump sign the file carries, for tappable markers. */
+export type JumpKind = 'segno' | 'coda' | 'ds' | 'dc' | 'fine' | 'to-coda' | 'repeat-start' | 'repeat-end' | 'volta-1' | 'volta-2';
+export interface ScoreJump {
+  kind: JumpKind;
+  measure: number;
+  /** Which end of the bar the sign sits at. */
+  side: 'start' | 'end';
+  /** The sign's own words ("D.S. al Coda"), where it has any. */
+  label?: string;
+}
+
 export interface ScoreModel {
   /** The MusicXML with note ids added and per-system stave hiding removed. */
   xml: string;
@@ -80,6 +91,8 @@ export interface ScoreModel {
   markedTempo: number | null;
   measures: ScoreMeasure[];
   rehearsals: Array<{ label: string; measure: number }>;
+  /** Repeats, voltas, segno/coda signs and the jumps to them, in score order. */
+  jumps: ScoreJump[];
   /** Where each page of the MuseScore layout starts (page 1 at bar 0), or
    *  empty when the file carries no page breaks. */
   pages: Array<{ label: string; measure: number }>;
@@ -187,6 +200,11 @@ export function parseScore(rawXml: string): ScoreModel {
   const measures: ScoreMeasure[] = [];
   const rehearsals: Array<{ label: string; measure: number }> = [];
   const pages: Array<{ label: string; measure: number }> = [];
+  const jumps: ScoreJump[] = [];
+  // A sign can be written twice (words plus a <sound> attribute, or in every part).
+  const addJump = (j: ScoreJump): void => {
+    if (!jumps.some((x) => x.kind === j.kind && x.measure === j.measure)) jumps.push(j);
+  };
   let hasLayout = false;
   let staveCount = 0;
 
@@ -279,7 +297,16 @@ export function parseScore(rawXml: string): ScoreModel {
                   if (partIndex === 0) {
                     if (/^(rit|rall|allarg|slowing)/.test(w)) tempo.push({ pos, kind: 'rit' });
                     else if (/^(a tempo|tempo i|tempo primo)/.test(w)) tempo.push({ pos, kind: 'a-tempo' });
+                    const text = (c.textContent ?? '').trim();
+                    if (/^d\.?\s?s\.?(\s|$)/.test(w)) addJump({ kind: 'ds', measure: mi, side: 'end', label: text });
+                    else if (/^d\.?\s?c\.?(\s|$)/.test(w)) addJump({ kind: 'dc', measure: mi, side: 'end', label: text });
+                    else if (/^fine\b/.test(w)) addJump({ kind: 'fine', measure: mi, side: 'end' });
+                    else if (/^(to|al) coda\b/.test(w)) addJump({ kind: 'to-coda', measure: mi, side: 'end' });
                   }
+                } else if (c.localName === 'segno' && partIndex === 0) {
+                  addJump({ kind: 'segno', measure: mi, side: 'start' });
+                } else if (c.localName === 'coda' && partIndex === 0) {
+                  addJump({ kind: 'coda', measure: mi, side: 'start' });
                 } else if (c.localName === 'metronome' && partIndex === 0 && !soundTempo) {
                   const unit = BEAT_UNIT_QUARTERS[child(c, 'beat-unit')?.textContent?.trim() ?? ''] ?? 1;
                   const dotted = children(c, 'beat-unit-dot').length > 0 ? 1.5 : 1;
@@ -296,6 +323,26 @@ export function parseScore(rawXml: string): ScoreModel {
             }
             if (partIndex === 0 && soundTempo && !tempoSet && Number(soundTempo) > 0) {
               tempo.push({ pos, kind: 'set', bpm: Number(soundTempo) });
+            }
+            if (partIndex === 0 && sound) {
+              if (sound.hasAttribute('segno')) addJump({ kind: 'segno', measure: mi, side: 'start' });
+              if (sound.hasAttribute('coda')) addJump({ kind: 'coda', measure: mi, side: 'start' });
+              if (sound.hasAttribute('dalsegno')) addJump({ kind: 'ds', measure: mi, side: 'end' });
+              if (sound.hasAttribute('dacapo')) addJump({ kind: 'dc', measure: mi, side: 'end' });
+              if (sound.hasAttribute('fine')) addJump({ kind: 'fine', measure: mi, side: 'end' });
+              if (sound.hasAttribute('tocoda')) addJump({ kind: 'to-coda', measure: mi, side: 'end' });
+            }
+            break;
+          }
+          case 'barline': {
+            if (partIndex !== 0) break;
+            const dir = child(el, 'repeat')?.getAttribute('direction');
+            if (dir === 'forward') addJump({ kind: 'repeat-start', measure: mi, side: 'start' });
+            else if (dir === 'backward') addJump({ kind: 'repeat-end', measure: mi, side: 'end' });
+            const ending = child(el, 'ending');
+            if (ending?.getAttribute('type') === 'start') {
+              const n = (ending.getAttribute('number') ?? '').trim();
+              addJump({ kind: n === '1' ? 'volta-1' : 'volta-2', measure: mi, side: 'start', label: n ? `${n.split(/[,\s]+/)[0]}.` : undefined });
             }
             break;
           }
@@ -332,6 +379,7 @@ export function parseScore(rawXml: string): ScoreModel {
   });
 
   tempo.sort((a, b) => a.pos - b.pos);
+  jumps.sort((a, b) => a.measure - b.measure || (a.side === 'start' ? -1 : 1) - (b.side === 'start' ? -1 : 1));
   const firstSet = tempo.find((t): t is Extract<TempoEvent, { kind: 'set' }> => t.kind === 'set');
   return {
     xml: new XMLSerializer().serializeToString(doc),
@@ -342,6 +390,7 @@ export function parseScore(rawXml: string): ScoreModel {
     markedTempo: firstSet && firstSet.pos <= 4 ? firstSet.bpm : null,
     measures,
     rehearsals,
+    jumps,
     pages,
     hasLayout,
     layoutWidth: readLayoutWidth(doc),

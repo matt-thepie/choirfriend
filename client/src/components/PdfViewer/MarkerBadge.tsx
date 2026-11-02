@@ -5,7 +5,7 @@ import { MarkerGlyph } from './markerIcons.tsx';
 /** Tailwind classes for the badge per marker kind. Keeps the visual
  *  vocabulary tight so a quick glance at the score reads as "Segno",
  *  "Coda", etc. without having to read the text. */
-const KIND_STYLES: Record<MarkerKind, string> = {
+export const KIND_STYLES: Record<MarkerKind, string> = {
   segno: 'bg-amber-100 text-amber-900 border-amber-400',
   coda: 'bg-amber-200 text-amber-900 border-amber-500',
   ds: 'bg-emerald-100 text-emerald-900 border-emerald-400',

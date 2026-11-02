@@ -20,7 +20,10 @@ import type { SetListFlow } from '@/hooks/useSetListFlow.ts';
 import { ListenButton, ToolButton, useDropStaleRecording } from '@/components/PdfViewer/PdfViewer.tsx';
 import { ViewSwitcher, type ViewTarget } from '@/components/ViewSwitcher.tsx';
 import { engraveScore, engraveScoreOriginal, scorePlaySource } from '@/lib/flowing/engine.ts';
-import { parseScore, tempoAt, type ScoreModel } from '@/lib/flowing/score.ts';
+import { parseScore, tempoAt, type ScoreJump, type ScoreModel } from '@/lib/flowing/score.ts';
+import { MarkerGlyph } from '@/components/PdfViewer/markerIcons.tsx';
+import { KIND_STYLES } from '@/components/PdfViewer/MarkerBadge.tsx';
+import { MARKER_DEFAULT_LABEL } from '@/types/annotations.ts';
 import { assignParts, voicesByStaff, type PartAssignment } from '@/lib/flowing/parts.ts';
 import { BALANCE_MIN_WIDTH, MUSIC_TEXT_SCALE } from '@/lib/flowing/engrave.ts';
 import { rasteriseScore, rasterScore } from '@/lib/flowing/raster.ts';
@@ -354,6 +357,8 @@ export function ScoreViewer({
   // ------- After each engraving: shade my line, find lines and bars ----------
 
   const [systems, setSystems] = useState<Array<{ top: number; bottom: number }>>([]);
+  /** Where each of the score's own repeat and jump signs sits, in sheet units. */
+  const [jumpSpots, setJumpSpots] = useState<Array<{ jump: ScoreJump; x: number; y: number }>>([]);
   /** Where each of MuseScore's pages starts, in sheet coordinates. */
   const [pageMarks, setPageMarks] = useState<Array<{ label: string; system: number; top: number; left: number }>>([]);
   const measureEls = useRef<SVGGElement[]>([]);
@@ -414,6 +419,15 @@ export function ScoreViewer({
         if (!m || !sys) return [];
         const s = sys.getBoundingClientRect();
         return [{ label: pg.label, system: systemEls.indexOf(sys), top: (s.top - base) / k, left: (m.getBoundingClientRect().left - sheetBox.left) / k }];
+      }),
+    );
+    setJumpSpots(
+      model.jumps.flatMap((jump) => {
+        const m = measureEls.current[jump.measure];
+        if (!m) return [];
+        const r = m.getBoundingClientRect();
+        const x = (jump.side === 'start' ? r.left - sheetBox.left + 10 : r.right - sheetBox.left - 10) / k;
+        return [{ jump, x, y: (r.top - base) / k - 2 }];
       }),
     );
   }, [svg, model, partLineOn, myLine, visibleParts, topGap]);
@@ -868,6 +882,44 @@ export function ScoreViewer({
     };
   }, []);
 
+  /** What a tap on one of the score's own signs does: the same reading as
+   *  the PDF viewer's markers (D.S. to the segno, a 1st-time bar on to the
+   *  2nd, a repeat back to its start). Null for signs that are only targets. */
+  function jumpFollow(at: number): { label: string; run: () => void } | null {
+    const jumps = model?.jumps ?? [];
+    const j = jumps[at];
+    if (!j) return null;
+    const go = (measure: number, label: string) => ({ label, run: () => jumpToMeasure(measure) });
+    if (j.kind === 'ds') {
+      const segno = jumps.find((x) => x.kind === 'segno');
+      return segno ? go(segno.measure, 'Go to Segno') : null;
+    }
+    if (j.kind === 'to-coda') {
+      const coda = jumps.find((x) => x.kind === 'coda');
+      return coda ? go(coda.measure, 'Go to Coda') : null;
+    }
+    if (j.kind === 'dc') return go(0, 'Back to start');
+    if (j.kind === 'volta-1') {
+      const second = jumps.slice(at + 1).find((x) => x.kind === 'volta-2');
+      if (second) return go(second.measure, 'Go to the 2nd time bar');
+    }
+    if (j.kind === 'repeat-end' || j.kind === 'volta-1') {
+      const start = jumps.slice(0, at).reverse().find((x) => x.kind === 'repeat-start');
+      return start ? go(start.measure, 'Repeat from start-repeat') : go(0, 'Repeat from the beginning');
+    }
+    return null;
+  }
+  /** A sign under a tap in an edge zone wins over the page turn. */
+  function tapEdge(e: React.MouseEvent, turn: () => void): void {
+    if (e.detail > 0) {
+      const badge = document
+        .elementsFromPoint(e.clientX, e.clientY)
+        .find((el): el is HTMLElement => el instanceof HTMLElement && el.dataset.markerBadge !== undefined);
+      if (badge) return badge.click();
+    }
+    turn();
+  }
+
   function jumpToMeasure(i: number): void {
     const box = systemOf(measureEls.current[i] ?? null);
     if (box) showY(box.top + 13);
@@ -1235,6 +1287,29 @@ export function ScoreViewer({
                 <div ref={rasterRef} className={cn('absolute inset-0 pointer-events-none', !rastered && 'invisible')} />
                 <div ref={scoreRef} className={cn('cf-score relative', layout === 'original' && 'cf-original', rastered && 'cf-rastered')} dangerouslySetInnerHTML={svgHtml} />
               </div>
+              {svg && jumpSpots.map(({ jump, x, y }, at) => {
+                const follow = jumpFollow(at);
+                const label = jump.label ?? MARKER_DEFAULT_LABEL[jump.kind];
+                return (
+                  <button
+                    key={`${jump.kind}-${jump.measure}`}
+                    type="button"
+                    data-marker-badge=""
+                    onClick={(e) => { e.stopPropagation(); follow?.run(); }}
+                    tabIndex={follow ? 0 : -1}
+                    title={follow ? follow.label : label}
+                    className={cn(
+                      'absolute inline-flex items-center px-1.5 py-0.5 rounded-md border text-[11px] font-semibold shadow-sm whitespace-nowrap select-none z-[5]',
+                      KIND_STYLES[jump.kind],
+                      follow ? "cursor-pointer hover:shadow-md after:absolute after:-inset-3 after:content-['']" : 'pointer-events-none opacity-80',
+                    )}
+                    style={{ left: x, top: y, transform: 'translate(-50%, -100%)' }}
+                  >
+                    <MarkerGlyph kind={jump.kind} label={label} className="w-3.5 h-3.5" />
+                    {follow && <span className="ml-1 opacity-70">→</span>}
+                  </button>
+                );
+              })}
               {svg && pageMarks.map((m) =>
                 layout === 'original' ? (
                   <div key={m.label} className="absolute inset-x-0 pointer-events-none" style={{ top: m.top - 34 }}>
@@ -1325,14 +1400,14 @@ export function ScoreViewer({
             <button
               type="button"
               aria-label="Previous page"
-              onClick={prevPage}
+              onClick={(e) => tapEdge(e, prevPage)}
               disabled={!canPrev}
               className="absolute left-0 top-0 bottom-0 w-1/4 min-w-16 z-10 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-black/5 focus-visible:bg-black/10 transition-colors"
             />
             <button
               type="button"
               aria-label="Next page"
-              onClick={nextPage}
+              onClick={(e) => tapEdge(e, nextPage)}
               disabled={!canNext}
               className="absolute right-0 top-0 bottom-0 w-1/4 min-w-16 z-10 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-black/5 focus-visible:bg-black/10 transition-colors"
             />
