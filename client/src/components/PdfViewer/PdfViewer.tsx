@@ -1606,8 +1606,10 @@ export function PdfViewer({
           </>
         )}
 
-        {/* Edge tap zones for page-turn nav. Off while marking up so a
-            stroke or marker at the page edge doesn't flip the page. */}
+        {/* Edge tap zones for page-turn nav: a quarter of the width each, so
+            a turn aimed near the edge doesn't land on the stage and open the
+            toolbar instead. Off while marking up so a stroke or marker at
+            the page edge doesn't flip the page. */}
         {effectiveNavMode === 'page' && pageCount > 0 && !markUp && (
           <>
             <button
@@ -1615,7 +1617,7 @@ export function PdfViewer({
               aria-label="Previous page"
               onClick={(e) => tapEdge(e, prevPage)}
               disabled={!canPrev}
-              className="absolute left-0 top-0 bottom-0 w-16 z-10 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-black/5 focus-visible:bg-black/10 transition-colors"
+              className="absolute left-0 top-0 bottom-0 w-1/4 min-w-16 z-10 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-black/5 focus-visible:bg-black/10 transition-colors"
               style={{ cursor: canPrev ? 'w-resize' : 'not-allowed' }}
             />
             <button
@@ -1623,7 +1625,7 @@ export function PdfViewer({
               aria-label="Next page"
               onClick={(e) => tapEdge(e, nextPage)}
               disabled={!canNext}
-              className="absolute right-0 top-0 bottom-0 w-16 z-10 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-black/5 focus-visible:bg-black/10 transition-colors"
+              className="absolute right-0 top-0 bottom-0 w-1/4 min-w-16 z-10 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-black/5 focus-visible:bg-black/10 transition-colors"
               style={{ cursor: canNext ? 'e-resize' : 'not-allowed' }}
             />
           </>

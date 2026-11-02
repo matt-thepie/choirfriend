@@ -1318,6 +1318,8 @@ export function ScoreViewer({
           </>
         )}
 
+        {/* Edge tap zones: a quarter of the width each, so a turn aimed near
+            the edge doesn't land on the music and open the toolbar instead. */}
         {effectiveNavMode === 'page' && pages.length > 1 && (
           <>
             <button
@@ -1325,14 +1327,14 @@ export function ScoreViewer({
               aria-label="Previous page"
               onClick={prevPage}
               disabled={!canPrev}
-              className="absolute left-0 top-0 bottom-0 w-16 z-10 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-black/5 focus-visible:bg-black/10 transition-colors"
+              className="absolute left-0 top-0 bottom-0 w-1/4 min-w-16 z-10 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-black/5 focus-visible:bg-black/10 transition-colors"
             />
             <button
               type="button"
               aria-label="Next page"
               onClick={nextPage}
               disabled={!canNext}
-              className="absolute right-0 top-0 bottom-0 w-16 z-10 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-black/5 focus-visible:bg-black/10 transition-colors"
+              className="absolute right-0 top-0 bottom-0 w-1/4 min-w-16 z-10 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-black/5 focus-visible:bg-black/10 transition-colors"
             />
           </>
         )}
