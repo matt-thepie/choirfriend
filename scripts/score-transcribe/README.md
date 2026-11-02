@@ -94,3 +94,30 @@ brew install poppler imagemagick            # pdftoppm, magick
   keeps heads and discards stems, beams, text.
 * Engraving quirk: bars 16/32 tenors are written e + q + e~(hollow dotted) + e
   = 5½ beats; the practice tracks sing e q e~dotted-q e (4 beats) — encoded that way.
+
+## Lessons from *Sure on this Shining Night* (SATB + piano, `build_sure.py`)
+
+* **Deskew first.** omr.py found no staves on this scan (skew −0.35° to −1.15°); rotating each
+  page level before staff detection fixed it.
+* **Pitch from fractional staff steps, not by eye.** A head finder that fills hollow heads, opens with
+  a head-sized ellipse and prints the position in half-spaces from the bottom line (e.g. `F5:8.0`) was
+  right every time it disagreed with an eyeball reading of ledger-line notes (alto bars 2–9, RH 7–9).
+  It merges tightly stacked chord heads, so read dense piano chords from a 5× crop of the bar.
+* **Write tokens as printed and let the build apply the key.** In `build_sure.py`, plain `B`/`E` mean the
+  key-signature flats, `Bn`/`En` are naturals, and an accidental carries to the barline on that
+  staff, the way it does in print (tenor bar 13 `Bn4 B4` = two B naturals).
+* **Assert every bar's length** against the time signature (with changes such as 2/4 or C) and the
+  syllable count against the notes; both caught slips before rendering.
+* **Beaming:** `beam_runs.py in out 5,6 --skip 5:1` beams each run of quavers as one group, the way
+  this reduction prints a whole bar of repeated chords. Run it after fix_jumps.py.
+* **Cross-staff beams** (RH bar 4, bar 30) are not encoded: the LH part goes in the LH staff
+  and the RH starts with a hidden rest. Playback is correct; the engraving differs from the print.
+* **Hairpins and playback dynamics.** Encode every hairpin (`WEDGES` in build_sure.py); MuseScore
+  plays them. Text such as "dim. poco a poco" does nothing in playback, and the print often leaves the
+  piano at mf while the choir is at p, so add playback-only piano dynamics (`PNO_HIDDEN`). MusicXML
+  import shows them anyway, so run `hide_marks.py in.mscz out.mscz 5:25:Dynamic:p 5:27:HairPin ...`
+  after beam_runs.py. Check the exported MIDI velocities bar by bar.
+* **TTBB from SATB without changing a note** (`TTBB=1 python build_sure.py`): Tenor 1 = tenor,
+  Tenor 2 = soprano 8vb (the tune), Bass = bass, Baritone = alto with each note's octave picked by a
+  Viterbi pass (range A2–E4, avoid going under the bass, avoid leaps, ties keep their octave).
+  Pitch classes are asserted unchanged.

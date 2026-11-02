@@ -6,7 +6,7 @@
 
 import { useEffect, useState } from 'react';
 import type { SetList } from '@/hooks/useSetLists.ts';
-import { isPdfFile, type FlowingScore, type PieceFile } from '@/hooks/usePiece.ts';
+import { isPdfFile, sheetParts, type FlowingScore, type PieceFile } from '@/hooks/usePiece.ts';
 
 export interface FlowSong {
   id: number;
@@ -22,11 +22,12 @@ export interface SetListFlow {
   next: FlowSong | null;
 }
 
-/** The sheet the viewer opens by default: the first sheet-music PDF, or a
- *  PDF lyric sheet when a song has no music. Null when there is neither. */
+/** The sheet the viewer opens by default: part 1 of a piece in parts, else
+ *  the first sheet-music PDF, or a PDF lyric sheet when a song has no music.
+ *  Null when there is none of these. */
 function defaultSheet(files: PieceFile[]): PieceFile | null {
   const bySort = [...files].sort((a, b) => a.sortOrder - b.sortOrder);
-  return bySort.find((f) => f.kind === 'pdf') ?? bySort.find((f) => f.kind === 'lyrics' && isPdfFile(f)) ?? null;
+  return sheetParts(files)[0] ?? bySort.find((f) => f.kind === 'pdf') ?? bySort.find((f) => f.kind === 'lyrics' && isPdfFile(f)) ?? null;
 }
 
 export async function fetchDefaultSheet(pieceId: number): Promise<PieceFile | null> {

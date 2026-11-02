@@ -56,17 +56,21 @@ x = x.replace("<text>RESTSYL</text>", '<text><font face="Leland"/>\uE4E6</text>'
 x = x.replace("<text>FERMSYL</text>", '<text>(<font face="Leland"/>\uE4C0<font face="Edwin"/>)</text>')
 # MuseScore's MusicXML import puts the piano LH (music21 staff-2 voices) into MS voice 2, with a hidden
 # whole-bar filler rest in voice 1 - so its rests sit under the staff and stems point the wrong way. Where a
-# bar has two real voices the LOWER part lands in voice 1. Put the upper line back in voice 1: swap the two
-# <voice> blocks, keep the Clef/KeySig/TimeSig header at the top of voice 1, drop the filler rest.
+# bar has two real voices the LOWER part can land in voice 1 (not always - check by mean pitch). Put the upper
+# line back in voice 1: swap the two <voice> blocks, keep the Clef/KeySig/TimeSig header at the top of voice 1, drop the filler rest.
 HEADER = re.compile(r"^(\s*<voice>)((?:\s*<(?:Clef|KeySig|TimeSig)>.*?</(?:Clef|KeySig|TimeSig)>)*)", re.S)
 FILLER = re.compile(r"^\s*<voice>\s*(?:<Rest>(?:(?!</Rest>).)*<durationType>measure</durationType>(?:(?!</Rest>).)*</Rest>)\s*</voice>\s*$", re.S)
+def mean_pitch(v):
+    p = [int(q) for q in re.findall(r"<pitch>(\d+)</pitch>", v)]
+    return sum(p) / len(p) if p else 0
 def swap_voices(staff_xml):
     def fix(m):
         vs = re.findall(r"<voice>.*?</voice>", m.group(0), re.S)
         if len(vs) != 2: return m.group(0)
         h = HEADER.match(vs[0]); header = h.group(2); v0 = vs[0][:h.start(2)] + vs[0][h.end(2):]
         v1 = vs[1].replace("<voice>", "<voice>" + header, 1)
-        v0 = "" if FILLER.match(v0) else v0
+        if FILLER.match(v0): v0 = ""
+        elif mean_pitch(vs[0]) >= mean_pitch(vs[1]): return m.group(0)  # import already has the upper line first
         return m.group(0).replace(vs[0], "\x00").replace(vs[1], v0).replace("\x00", v1)
     out = re.sub(r"<Measure>.*?</Measure>", fix, staff_xml, flags=re.S)
     # an empty <voice/> placeholder before the lower part pushes it into MS voice 3 (stems up);

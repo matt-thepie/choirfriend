@@ -239,7 +239,7 @@ export const filesRoutes: FastifyPluginAsync = async (app) => {
    * Rename a file's label (admin) — e.g. an imported track from "Tenor 1" to
    * "Tenor 1 (with piano)". Send { label: string } or { label: null } to clear.
    */
-  app.patch<{ Params: { id: string }; Body: { label?: string | null; sectionId?: number | null; kind?: FileKind; durationMs?: number | null; visibility?: FileVisibility } }>(
+  app.patch<{ Params: { id: string }; Body: { label?: string | null; sectionId?: number | null; kind?: FileKind; durationMs?: number | null; visibility?: FileVisibility; part?: number | null } }>(
     '/files/:id',
     { preHandler: requireAuth },
     async (req, reply) => {
@@ -250,8 +250,17 @@ export const filesRoutes: FastifyPluginAsync = async (app) => {
       const user = req.user!;
       const body = req.body ?? {};
       if (!canManageFile(user, existing)) return reply.code(403).send({ error: 'forbidden' });
-      if ('kind' in body && !isAdmin(user)) return reply.code(403).send({ error: 'forbidden' });
-      const patch: { label?: string | null; sectionId?: number | null; kind?: FileKind; durationMs?: number | null; visibility?: FileVisibility } = {};
+      if (('kind' in body || 'part' in body) && !isAdmin(user)) return reply.code(403).send({ error: 'forbidden' });
+      const patch: { label?: string | null; sectionId?: number | null; kind?: FileKind; durationMs?: number | null; visibility?: FileVisibility; part?: number | null } = {};
+      if ('part' in body) {
+        // Only sheet music is split into parts; null takes a sheet out of the sequence.
+        const p = body.part;
+        if (p !== null && (!Number.isInteger(p) || (p as number) < 1 || (p as number) > 99)) {
+          return reply.code(400).send({ error: 'part must be a whole number from 1 to 99, or null' });
+        }
+        if (p !== null && existing.kind !== 'pdf') return reply.code(400).send({ error: 'only sheet music can be numbered as parts' });
+        patch.part = p as number | null;
+      }
       if ('visibility' in body) {
         if (body.visibility !== 'private' && body.visibility !== 'shared') {
           return reply.code(400).send({ error: 'visibility must be private or shared' });

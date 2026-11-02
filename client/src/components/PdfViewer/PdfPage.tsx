@@ -55,6 +55,9 @@ interface PdfPageProps {
  *  garble or drop canvases long before iOS Safari's ~16M-pixel limit. */
 const lowMemory = ((navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 8) <= 2;
 const MAX_CANVAS_PIXELS = lowMemory ? 4e6 : 16e6;
+/** The same devices have weak GPUs that garble a blended (multiply) ink
+ *  layer over the page: ink is drawn plainly there, highlighter as a tint. */
+const weakGpu = lowMemory;
 
 export interface StaveTarget {
   system: number;
@@ -225,7 +228,8 @@ export function PdfPage({
     }
     canvas.width = Math.floor(renderedSize.viewW * dpr);
     canvas.height = Math.floor(renderedSize.viewH * dpr);
-    const ctx = canvas.getContext('2d');
+    // CPU-backed, like the page canvas: GPU canvases glitch on old tablets.
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     const px = (p: { x: number; y: number }): [number, number] => [
@@ -241,6 +245,7 @@ export function PdfPage({
     for (const a of ordered) {
       if (a.points.length === 0) continue;
       ctx.globalCompositeOperation = a.pen === 'highlighter' ? 'darken' : 'source-over';
+      ctx.globalAlpha = weakGpu && a.pen === 'highlighter' ? 0.4 : 1;
       ctx.strokeStyle = a.color;
       ctx.lineWidth = a.width * scale * renderedSize.dpr;
       ctx.lineCap = 'round';
@@ -267,10 +272,11 @@ export function PdfPage({
     const canvas = annotationCanvasRef.current;
     const stroke = activeStrokeRef.current;
     if (!canvas || !stroke || stroke.points.length < 2) return;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return;
     // 'darken' stops a highlighter's overlapping segments building up.
     ctx.globalCompositeOperation = inkPen === 'highlighter' ? 'darken' : 'source-over';
+    ctx.globalAlpha = weakGpu && inkPen === 'highlighter' ? 0.4 : 1;
     ctx.strokeStyle = inkColor;
     ctx.lineWidth = inkWidth * scale * (renderedSize?.dpr ?? 1);
     ctx.lineCap = 'round';
@@ -386,7 +392,7 @@ export function PdfPage({
           touchAction: 'none',
           // Multiply onto the score so highlighter colour never hides the notes.
           // Only while it has pixels: blending is costly on old GPUs.
-          mixBlendMode: inkLayer ? 'multiply' : undefined,
+          mixBlendMode: inkLayer && !weakGpu ? 'multiply' : undefined,
           cursor,
           pointerEvents: canvasInteractive ? 'auto' : 'none',
         }}

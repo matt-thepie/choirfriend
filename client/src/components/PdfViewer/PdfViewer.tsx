@@ -19,14 +19,14 @@ import {
   type MarkerAnnotation,
   type MarkerKind,
 } from '@/types/annotations.ts';
-import { FILE_KIND_LABEL, isPdfFile, usePiece, type FileKind, type Piece, type PieceFile } from '@/hooks/usePiece.ts';
+import { FILE_KIND_LABEL, isPdfFile, sheetName, sheetParts, usePiece, type FileKind, type Piece, type PieceFile } from '@/hooks/usePiece.ts';
 import type { SetListFlow } from '@/hooks/useSetListFlow.ts';
 import { KindBadge } from './KindBadge.tsx';
 import { useSections, type Section } from '@/hooks/useSections.ts';
 import { replaceFile } from '@/hooks/useUploadFile.ts';
 import { useAnnotations, type NewAnnotationInput } from '@/hooks/useAnnotations.ts';
 import { PdfPage } from './PdfPage.tsx';
-import { analysePage, type Box, type PageLayout } from '@/lib/pageLayout.ts';
+import { analysePage, dropRasters, type Box, type PageLayout } from '@/lib/pageLayout.ts';
 import { overrideKey, partFromSection, resolvePartLine, type PartLineOverrides } from '@/lib/partLine.ts';
 import type { StaveTarget } from './PdfPage.tsx';
 import { UploadButton } from './UploadButton.tsx';
@@ -66,6 +66,8 @@ interface PdfViewerProps {
    *  last page goes to the next song. */
   setListFlow?: SetListFlow | null;
   onOpenSong?: (pieceId: number) => void;
+  /** Opened from a set list: go straight back to it. */
+  onBackToList?: () => void;
   /** Switch to a flowing score (or another PDF) from the View menu. */
   onOpenView?: (target: ViewTarget) => void;
 }
@@ -222,6 +224,7 @@ export function PdfViewer({
   onPlayerHiddenChange,
   setListFlow = null,
   onOpenSong,
+  onBackToList,
   onOpenView,
 }: PdfViewerProps) {
   const { piece, loading: pieceLoading, error: pieceError, refresh: refreshPiece } = usePiece(pieceId, refreshTick);
@@ -230,10 +233,12 @@ export function PdfViewer({
   // A piece can carry several viewable PDFs — the score, extra parts, and any
   // lyric sheet that happens to be a PDF. Members pick which one to view; the
   // first sheet-music file is the default.
-  const pdfFiles = useMemo(
-    () => piece?.files.filter((f) => f.kind === 'pdf' || (f.kind === 'lyrics' && isPdfFile(f))) ?? [],
-    [piece],
-  );
+  // Numbered parts of a piece split over several PDFs come first, in order.
+  const pdfFiles = useMemo(() => {
+    const all = piece?.files.filter((f) => f.kind === 'pdf' || (f.kind === 'lyrics' && isPdfFile(f))) ?? [];
+    const rank = (f: PieceFile): number => (f.kind === 'pdf' && f.part !== null ? f.part : 1e9);
+    return [...all].sort((a, b) => rank(a) - rank(b));
+  }, [piece]);
   const [selectedPdfId, setSelectedPdfId] = useState<number | null>(initialFileId);
   /** Read mode hides the toolbar until a tap on the score shows it. */
   const [toolsOpen, setToolsOpen] = useState(() => readMode && !sessionFlag(TOOLS_SEEN_KEY));
@@ -400,6 +405,7 @@ export function PdfViewer({
       return;
     }
     let cancelled = false;
+    let doc: PDFDocumentProxy | null = null;
     setPdf(null);
     setIntrinsicPageSize(null);
     setPdfLoadError(null);
@@ -412,6 +418,7 @@ export function PdfViewer({
     task.promise.then(
       async (loaded) => {
         if (cancelled) return;
+        doc = loaded;
         setPdf(loaded);
         try {
           const p = await loaded.getPage(1);
@@ -428,6 +435,9 @@ export function PdfViewer({
     );
     return () => {
       cancelled = true;
+      // Give back the page images and the document (and its worker) as soon
+      // as the score closes: an old tablet runs out of memory otherwise.
+      if (doc) dropRasters(doc);
       task.destroy();
     };
   }, [pdfFile]);
@@ -685,6 +695,7 @@ export function PdfViewer({
   // Switching to a different PDF in the piece starts at its first page.
   useEffect(() => {
     setCurrentPage(1);
+    setChunkY(0);
   }, [pdfFile?.id]);
 
   // Clamp currentPage when the PDF changes.
@@ -699,30 +710,61 @@ export function PdfViewer({
     setChunkY(c.clip?.y0 ?? 0);
   }, []);
   const atEnd = chunked ? chunkIndex >= chunks.length - 1 : currentPage >= pageCount;
+  const atStart = chunked ? chunkIndex <= 0 : currentPage <= 1;
   const nextSong = setListFlow?.next ?? null;
   const prevSong = setListFlow?.prev ?? null;
+  // A piece split over several PDFs: the end of part 1 turns into part 2.
+  const parts = useMemo(() => sheetParts(pdfFiles), [pdfFiles]);
+  const partIndex = pdfFile ? parts.findIndex((f) => f.id === pdfFile.id) : -1;
+  const nextPart = partIndex >= 0 ? parts[partIndex + 1] ?? null : null;
+  const prevPart = partIndex >= 0 ? parts[partIndex - 1] ?? null : null;
   const nextPage = useCallback(() => {
-    // Performing a set list: turning past the last page opens the next song.
-    if (atEnd && nextSong && onOpenSong && pageCount > 0) return onOpenSong(nextSong.id);
+    // Turning past the last page opens the next part of the piece, or,
+    // performing a set list, the next song.
+    if (atEnd && pageCount > 0) {
+      if (nextPart) return setSelectedPdfId(nextPart.id);
+      if (nextSong && onOpenSong) return onOpenSong(nextSong.id);
+    }
     if (chunked) return goToChunk(chunks[chunkIndex + 1]);
     setCurrentPage((p) => Math.min(pageCount, p + 1));
-  }, [pageCount, chunked, chunks, chunkIndex, goToChunk, atEnd, nextSong, onOpenSong]);
+  }, [pageCount, chunked, chunks, chunkIndex, goToChunk, atEnd, nextPart, nextSong, onOpenSong]);
   const prevPage = useCallback(() => {
+    if (atStart && prevPart) return setSelectedPdfId(prevPart.id);
     if (chunked) return goToChunk(chunks[chunkIndex - 1]);
     setCurrentPage((p) => Math.max(1, p - 1));
-  }, [chunked, chunks, chunkIndex, goToChunk]);
+  }, [chunked, chunks, chunkIndex, goToChunk, atStart, prevPart]);
+  /** A marker badge under a tap in an edge zone wins over the page turn:
+   *  singers put jump marks right at the margin, where the zone covers them. */
+  function tapEdge(e: React.MouseEvent, turn: () => void): void {
+    if (e.detail > 0) {
+      const badge = document
+        .elementsFromPoint(e.clientX, e.clientY)
+        .find((el): el is HTMLElement => el instanceof HTMLElement && el.dataset.markerBadge !== undefined);
+      if (badge) return badge.click();
+    }
+    turn();
+  }
+  /** Scroll view: move most of a screen; for marking up, when a finger draws. */
+  const scrollByScreen = (dir: 1 | -1): void => {
+    const sc = scrollContainerRef.current;
+    if (sc) sc.scrollBy({ top: dir * sc.clientHeight * 0.8, behavior: 'smooth' });
+  };
   // Swipe to turn pages (or step systems) in page view. One finger, a clear
   // horizontal flick; in a system view a vertical flick steps too. Ignored
   // while drawing, while pinch-zoomed, and when the content can still scroll
   // in the swipe's direction, so panning a zoomed page never flips it.
   const swipeRef = useRef<{ x: number; y: number; t: number } | null>(null);
-  // Two-finger tap undoes, as in Procreate. Only while marking up.
-  const twoTapRef = useRef<{ t: number; x: number; y: number; moved: boolean } | null>(null);
+  // Two fingers while marking up: a tap undoes, as in Procreate; a drag
+  // scrolls the score, or turns the page in page view, so the whole piece
+  // can be marked up without putting the pen down (one finger draws).
+  const twoTapRef = useRef<{ t: number; x: number; y: number; sx: number; sy: number; moved: boolean } | null>(null);
   function onTwoTapStart(e: React.TouchEvent): void {
     if (!markUp) return;
     if (e.touches.length === 2) {
       const [a, b] = [e.touches[0]!, e.touches[1]!];
-      twoTapRef.current = { t: Date.now(), x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2, moved: false };
+      const x = (a.clientX + b.clientX) / 2;
+      const y = (a.clientY + b.clientY) / 2;
+      twoTapRef.current = { t: Date.now(), x, y, sx: x, sy: y, moved: false };
     } else if (e.touches.length > 2) {
       twoTapRef.current = null;
     }
@@ -731,13 +773,35 @@ export function PdfViewer({
     const s = twoTapRef.current;
     if (!s || e.touches.length < 2) return;
     const [a, b] = [e.touches[0]!, e.touches[1]!];
-    if (Math.hypot((a.clientX + b.clientX) / 2 - s.x, (a.clientY + b.clientY) / 2 - s.y) > 12) s.moved = true;
+    const x = (a.clientX + b.clientX) / 2;
+    const y = (a.clientY + b.clientY) / 2;
+    if (Math.hypot(x - s.sx, y - s.sy) > 12) s.moved = true;
+    if (s.moved && effectiveNavMode === 'scroll') {
+      const sc = scrollContainerRef.current;
+      if (sc) {
+        sc.scrollTop -= y - s.y;
+        sc.scrollLeft -= x - s.x;
+      }
+    }
+    s.x = x;
+    s.y = y;
   }
   function onTwoTapEnd(e: React.TouchEvent): void {
     const s = twoTapRef.current;
     if (!s || e.touches.length > 0) return;
     twoTapRef.current = null;
-    if (!s.moved && Date.now() - s.t < 350) handleUndo();
+    if (!s.moved) {
+      if (Date.now() - s.t < 350) handleUndo();
+      return;
+    }
+    if (effectiveNavMode !== 'page') return;
+    const dx = s.x - s.sx;
+    const dy = s.y - s.sy;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > 1.5 * Math.abs(dy)) {
+      if (dx < 0) nextPage(); else prevPage();
+    } else if (chunked && Math.abs(dy) > 50 && Math.abs(dy) > 1.5 * Math.abs(dx)) {
+      if (dy < 0) nextPage(); else prevPage();
+    }
   }
 
   function onSwipeStart(e: React.TouchEvent): void {
@@ -784,8 +848,8 @@ export function PdfViewer({
     }
   }
 
-  const canPrev = chunked ? chunkIndex > 0 : currentPage > 1;
-  const canNext = !atEnd || (nextSong !== null && !!onOpenSong);
+  const canPrev = !atStart || prevPart !== null;
+  const canNext = !atEnd || nextPart !== null || (nextSong !== null && !!onOpenSong);
 
   // While a score is open, the page itself must not scroll or bounce: on iOS a
   // drag past the end of the score otherwise carries on into the document and
@@ -980,10 +1044,15 @@ export function PdfViewer({
       return { label: 'Back to start', run: jumpToTop };
     }
     const at = markersInOrder.findIndex((x) => x.id === m.id);
+    if (m.markerKind === 'volta-1') {
+      // Second time through: skip the 1st-time bar for the 2nd. (The repeat
+      // sign before it already takes singers back.)
+      const second = markersInOrder.slice(at + 1).find((x) => x.markerKind === 'volta-2');
+      if (second) return { label: 'Go to the 2nd time bar', run: () => jumpToMarker(second) };
+    }
     if (m.markerKind === 'repeat-end' || m.markerKind === 'volta-1') {
       // Back to the nearest start-repeat before this one; with none, a repeat
-      // goes back to the beginning. A 1st-time bar ends in the repeat, so
-      // singers tap its bracket expecting to go back, not on to the 2nd time.
+      // goes back to the beginning.
       const start = markersInOrder.slice(0, at).reverse().find((x) => x.markerKind === 'repeat-start');
       return start
         ? { label: 'Repeat from start-repeat', run: () => jumpToMarker(start) }
@@ -1211,6 +1280,12 @@ export function PdfViewer({
       </Button>
 
       <Button size="sm" variant="outline" disabled={!canRedo || saving} onClick={() => void redo()}>Redo</Button>
+      {effectiveNavMode === 'scroll' && (
+        <div className="flex items-center gap-1" role="group" aria-label="Scroll the score">
+          <Button size="sm" variant="outline" onClick={() => scrollByScreen(-1)} aria-label="Scroll up" title="Scroll up (or drag with two fingers)">▲</Button>
+          <Button size="sm" variant="outline" onClick={() => scrollByScreen(1)} aria-label="Scroll down" title="Scroll down (or drag with two fingers)">▼</Button>
+        </div>
+      )}
       <div role="group" aria-label="Markup tool" className="flex flex-wrap max-w-full items-center rounded-md border border-border overflow-hidden">
         <ToolButton active={markTool === 'pen'} onClick={() => setMarkTool('pen')}>Pen</ToolButton>
         <ToolButton active={markTool === 'highlighter'} onClick={() => setMarkTool('highlighter')}>Highlighter</ToolButton>
@@ -1304,7 +1379,7 @@ export function PdfViewer({
         {markUp && markUpToolbar}
         {tool === 'marker' && markerToolbar}
         {markUp && <div className="px-3 py-2 text-xs text-muted-foreground" role="status">
-          {saving ? 'Saving…' : annotationsError ? 'Changes could not be saved. Check your connection.' : 'Marks save automatically. Done returns to reading.'}
+          {saving ? 'Saving…' : annotationsError ? 'Changes could not be saved. Check your connection.' : 'Marks save automatically. One finger draws; drag with two fingers to scroll or turn the page, tap with two to undo. Done returns to reading.'}
           {tool === 'erase' && ' Tap one of your strokes or markers to erase it from the selected Private / Shared layer. Redo restores erased marks.'}
           {tool === 'select' && ' Select a marker to edit it, then tap a new position to move it. Move the start-repeat, Segno or Coda sign to change its jump destination. These signs navigate the PDF; they do not change audio playback or loops.'}
         </div>}
@@ -1447,31 +1522,55 @@ export function PdfViewer({
                 />
               ))}
 
-            {pdf && effectiveNavMode === 'scroll' && setListFlow && onOpenSong && !markUp && (
+            {pdf && effectiveNavMode === 'scroll' && !markUp && (setListFlow || nextPart || prevPart) && (
               <div className="w-full max-w-md mx-auto my-6 px-4 flex flex-col gap-2 text-center">
-                <p className="text-sm text-muted-foreground">
-                  {setListFlow.name} · song {setListFlow.position} of {setListFlow.total}
-                </p>
-                {nextSong ? (
+                {setListFlow && (
+                  <p className="text-sm text-muted-foreground">
+                    {setListFlow.name} · song {setListFlow.position} of {setListFlow.total}
+                  </p>
+                )}
+                {nextPart ? (
+                  <Button size="lg" onClick={() => setSelectedPdfId(nextPart.id)} className="h-14 text-base">
+                    Next: {sheetName(nextPart, 'sheet')} <Icon name="arrow_forward" />
+                  </Button>
+                ) : nextSong && onOpenSong ? (
                   <Button size="lg" onClick={() => onOpenSong(nextSong.id)} className="h-14 text-base">
                     Next: {nextSong.title} <Icon name="arrow_forward" />
                   </Button>
-                ) : (
+                ) : setListFlow ? (
                   <p className="text-base font-medium">End of the set list</p>
+                ) : null}
+                {onBackToList && (
+                  <Button size="lg" variant="outline" onClick={onBackToList} className="h-14 text-base">
+                    <Icon name="list" /> Back to {setListFlow?.name ?? 'the set list'}
+                  </Button>
                 )}
-                {prevSong && (
+                {prevPart ? (
+                  <Button size="sm" variant="ghost" onClick={() => setSelectedPdfId(prevPart.id)}>
+                    <Icon name="arrow_back" /> Previous: {sheetName(prevPart, 'sheet')}
+                  </Button>
+                ) : prevSong && onOpenSong ? (
                   <Button size="sm" variant="ghost" onClick={() => onOpenSong(prevSong.id)}>
                     <Icon name="arrow_back" /> Previous: {prevSong.title}
                   </Button>
-                )}
+                ) : null}
               </div>
             )}
           </div>
         </div>
 
-        {effectiveNavMode === 'page' && pageCount > 0 && setListFlow && onOpenSong && !markUp && (
+        {effectiveNavMode === 'page' && pageCount > 0 && !markUp && (
           <>
-            {atEnd && nextSong && (
+            {atEnd && nextPart && (
+              <button
+                type="button"
+                onClick={() => setSelectedPdfId(nextPart.id)}
+                className="absolute right-3 bottom-3 z-20 max-w-[70%] truncate rounded-full bg-primary text-primary-foreground px-4 py-2 text-sm font-medium shadow-md"
+              >
+                Next: {sheetName(nextPart, 'sheet')} ›
+              </button>
+            )}
+            {atEnd && !nextPart && nextSong && onOpenSong && (
               <button
                 type="button"
                 onClick={() => onOpenSong(nextSong.id)}
@@ -1480,18 +1579,28 @@ export function PdfViewer({
                 Next: {nextSong.title} ›
               </button>
             )}
-            {atEnd && !nextSong && (
+            {atEnd && !nextPart && !nextSong && setListFlow && (
               <span className="absolute right-3 bottom-3 z-20 rounded-full bg-card border px-4 py-2 text-sm text-muted-foreground shadow-sm">
                 End of the set list
               </span>
             )}
-            {!canPrev && prevSong && (
+            {/* Rehearsals don't run in order: the way back to the list is right here. */}
+            {atEnd && onBackToList && (
               <button
                 type="button"
-                onClick={() => onOpenSong(prevSong.id)}
-                className="absolute left-3 bottom-3 z-20 max-w-[45%] truncate rounded-full bg-card border px-3 py-2 text-sm text-muted-foreground shadow-sm"
+                onClick={onBackToList}
+                className="absolute left-3 bottom-3 z-20 max-w-[45%] truncate rounded-full bg-card border px-3 py-2 text-sm font-medium shadow-sm"
               >
-                ‹ {prevSong.title}
+                ‹ Back to list
+              </button>
+            )}
+            {atStart && (prevPart || (prevSong && onOpenSong)) && (
+              <button
+                type="button"
+                onClick={() => (prevPart ? setSelectedPdfId(prevPart.id) : onOpenSong!(prevSong!.id))}
+                className={cn('absolute left-3 z-20 max-w-[45%] truncate rounded-full bg-card border px-3 py-2 text-sm text-muted-foreground shadow-sm', atEnd && onBackToList ? 'bottom-14' : 'bottom-3')}
+              >
+                ‹ {prevPart ? sheetName(prevPart, 'sheet') : prevSong!.title}
               </button>
             )}
           </>
@@ -1504,7 +1613,7 @@ export function PdfViewer({
             <button
               type="button"
               aria-label="Previous page"
-              onClick={prevPage}
+              onClick={(e) => tapEdge(e, prevPage)}
               disabled={!canPrev}
               className="absolute left-0 top-0 bottom-0 w-16 z-10 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-black/5 focus-visible:bg-black/10 transition-colors"
               style={{ cursor: canPrev ? 'w-resize' : 'not-allowed' }}
@@ -1512,7 +1621,7 @@ export function PdfViewer({
             <button
               type="button"
               aria-label="Next page"
-              onClick={nextPage}
+              onClick={(e) => tapEdge(e, nextPage)}
               disabled={!canNext}
               className="absolute right-0 top-0 bottom-0 w-16 z-10 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-black/5 focus-visible:bg-black/10 transition-colors"
               style={{ cursor: canNext ? 'e-resize' : 'not-allowed' }}
@@ -1796,7 +1905,7 @@ function PdfSwitcher({
       >
         {files.map((f, i) => (
           <option key={f.id} value={f.id}>
-            {f.label?.trim() || f.filename || `PDF ${i + 1}`}
+            {sheetName(f, f.filename || `PDF ${i + 1}`)}
           </option>
         ))}
       </select>

@@ -549,6 +549,7 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
                 onPlayerHiddenChange={setReadPlayerHidden}
                 setListFlow={setListFlow}
                 onOpenSong={(id) => void openSongInViewer(id)}
+                onBackToList={setListId !== null ? () => navigate({ pieceId: null, viewerFileId: null, readMode: false, tab: 'setlists', setListId }) : undefined}
                 onOpenView={openView}
                 canManage={me.canSeeScores === true}
               />
@@ -571,6 +572,7 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
                 onPlayerHiddenChange={setReadPlayerHidden}
                 setListFlow={setListFlow}
                 onOpenSong={(id) => void openSongInViewer(id)}
+                onBackToList={setListId !== null ? () => navigate({ pieceId: null, viewerFileId: null, readMode: false, tab: 'setlists', setListId }) : undefined}
                 onOpenView={openView}
               />
               )}

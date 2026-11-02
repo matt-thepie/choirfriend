@@ -173,6 +173,12 @@ addColumnIfMissing('annotations', 'deleted_by_user_id INTEGER REFERENCES users(i
 // ChoirMate's metadata; measured in the browser for new uploads. NULL = unknown.
 addColumnIfMissing('files', 'duration_ms INTEGER');
 
+// A long piece split over several PDFs (a medley in three parts): each sheet
+// carries its part number, and the viewer turns from the end of part 1 into
+// part 2 before going on to the next song. NULL = a single sheet or an
+// alternative (a different edition, a lyric sheet).
+addColumnIfMissing('files', 'part INTEGER');
+
 // "My line": a soft band behind the member's own stave. One on/off switch per
 // member (it follows them round every score) plus their per-file corrections.
 addColumnIfMissing('users', 'part_line INTEGER NOT NULL DEFAULT 0');

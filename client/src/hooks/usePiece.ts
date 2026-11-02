@@ -48,6 +48,20 @@ export interface PieceFile {
   mine?: boolean;
   /** The signed-in member may rename, share, replace or delete it. */
   canManage?: boolean;
+  /** Sheet music only: this PDF's place in a piece split over several
+   *  (part 1, 2, 3 of a medley). Null = a single sheet or an alternative. */
+  part: number | null;
+}
+
+/** The sheets of a piece that are numbered parts, in order. */
+export function sheetParts(files: PieceFile[]): PieceFile[] {
+  return files.filter((f) => f.kind === 'pdf' && f.part !== null).sort((a, b) => a.part! - b.part! || a.sortOrder - b.sortOrder || a.id - b.id);
+}
+
+/** How a sheet is named in lists and menus: its part number first. */
+export function sheetName(f: PieceFile, fallback = f.filename): string {
+  const name = f.label?.trim() || fallback;
+  return f.part !== null && f.kind === 'pdf' ? `Part ${f.part} · ${name}` : name;
 }
 
 export interface Remark {

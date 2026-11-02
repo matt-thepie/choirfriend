@@ -44,6 +44,8 @@ export interface FileRow {
   visibility?: FileVisibility;
   section_id: number | null;
   duration_ms: number | null;
+  /** Part number of a sheet in a piece split over several PDFs; NULL otherwise. */
+  part?: number | null;
 }
 
 /** A FileRow joined to the uploader's display name. The list/get queries
@@ -88,6 +90,9 @@ export interface FileDTO {
   sectionId: number | null;
   /** Track length in milliseconds (audio only). Null = unknown. */
   durationMs: number | null;
+  /** Sheet music only: this PDF's place in a piece split over several
+   *  (part 1, 2, 3 of a medley). Null = a single sheet or an alternative. */
+  part: number | null;
 }
 
 export interface PieceWithFiles extends PieceDTO {
@@ -137,6 +142,7 @@ function toFileDTO(row: FileRow | FileRowWithCreator): FileDTO {
     sectionId: row.section_id ?? null,
     visibility: row.visibility ?? 'shared',
     durationMs: row.duration_ms ?? null,
+    part: row.part ?? null,
   };
 }
 
@@ -329,9 +335,10 @@ export interface UpdateFileInput {
   kind?: FileKind;
   durationMs?: number | null;
   visibility?: FileVisibility;
+  part?: number | null;
 }
 
-/** Patch a file's label, section, kind and/or duration. Only provided keys change. */
+/** Patch a file's label, section, kind, duration and/or part. Only provided keys change. */
 export function updateFile(id: number, input: UpdateFileInput): FileDTO | null {
   const sets: string[] = [];
   const params: Array<string | number | null> = [];
@@ -354,6 +361,10 @@ export function updateFile(id: number, input: UpdateFileInput): FileDTO | null {
   if (input.sectionId !== undefined) {
     sets.push('section_id = ?');
     params.push(input.sectionId);
+  }
+  if (input.part !== undefined) {
+    sets.push('part = ?');
+    params.push(input.part);
   }
   if (sets.length === 0) {
     const row = getFileByIdStmt.get(id) as FileRow | undefined;

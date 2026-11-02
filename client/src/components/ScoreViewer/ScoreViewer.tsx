@@ -46,6 +46,8 @@ interface ScoreViewerProps {
   onPlayerHiddenChange?: (hidden: boolean) => void;
   setListFlow?: SetListFlow | null;
   onOpenSong?: (pieceId: number) => void;
+  /** Opened from a set list: go straight back to it. */
+  onBackToList?: () => void;
   /** Switch to a PDF or another flowing score. */
   onOpenView: (target: ViewTarget) => void;
   /** Score managers: convert this score again. */
@@ -122,6 +124,7 @@ export function ScoreViewer({
   onPlayerHiddenChange,
   setListFlow = null,
   onOpenSong,
+  onBackToList,
   onOpenView,
   canManage = false,
 }: ScoreViewerProps) {
@@ -1248,6 +1251,11 @@ export function ScoreViewer({
               ) : (
                 <p className="text-base font-medium">End of the set list</p>
               )}
+              {onBackToList && (
+                <Button size="lg" variant="outline" onClick={onBackToList} className="h-14 text-base">
+                  <Icon name="list" /> Back to {setListFlow.name}
+                </Button>
+              )}
               {prevSong && (
                 <Button size="sm" variant="ghost" onClick={() => onOpenSong(prevSong.id)}>
                   <Icon name="arrow_back" /> Previous: {prevSong.title}
@@ -1273,11 +1281,20 @@ export function ScoreViewer({
                 End of the set list
               </span>
             )}
+            {atEnd && onBackToList && (
+              <button
+                type="button"
+                onClick={onBackToList}
+                className="absolute left-3 bottom-3 z-20 max-w-[45%] truncate rounded-full bg-card border px-3 py-2 text-sm font-medium shadow-sm"
+              >
+                ‹ Back to list
+              </button>
+            )}
             {!canPrev && prevSong && (
               <button
                 type="button"
                 onClick={() => onOpenSong(prevSong.id)}
-                className="absolute left-3 bottom-3 z-20 max-w-[45%] truncate rounded-full bg-card border px-3 py-2 text-sm text-muted-foreground shadow-sm"
+                className={cn('absolute left-3 z-20 max-w-[45%] truncate rounded-full bg-card border px-3 py-2 text-sm text-muted-foreground shadow-sm', atEnd && onBackToList ? 'bottom-14' : 'bottom-3')}
               >
                 ‹ {prevSong.title}
               </button>

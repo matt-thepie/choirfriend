@@ -5,6 +5,7 @@ import {
   addPieceLink,
   deletePieceLink,
   isPdfFile,
+  sheetName,
   LINK_TYPE_LABEL,
   saveMemberPieceState,
   saveRemark,
@@ -84,7 +85,12 @@ export function SongScreen({
   const [onlyMine, setOnlyMine] = useState(false);
 
   const audio = useMemo(() => piece?.files.filter((f) => f.kind === 'audio') ?? [], [piece]);
-  const sheet = useMemo(() => piece?.files.filter((f) => f.kind === 'pdf' || f.kind === 'lyrics') ?? [], [piece]);
+  // Numbered parts of a piece split over several PDFs come first, in order.
+  const sheet = useMemo(() => {
+    const all = piece?.files.filter((f) => f.kind === 'pdf' || f.kind === 'lyrics') ?? [];
+    const rank = (f: PieceFile): number => (f.kind === 'pdf' && f.part !== null ? f.part : 1e9);
+    return [...all].sort((a, b) => rank(a) - rank(b));
+  }, [piece]);
   const scores = useMemo(() => piece?.files.filter((f) => f.kind === 'score') ?? [], [piece]);
 
   const section = sections.find((s) => s.id === sectionId) ?? null;
@@ -323,7 +329,7 @@ function DocumentRow({
   onMutated: () => void;
 }) {
   const viewable = isPdfFile(file);
-  const name = file.label?.trim() || file.filename;
+  const name = sheetName(file);
   return (
     <li className="inset-row flex items-center gap-3 px-4 py-2 hover:shadow-card hover:-translate-y-px">
       <Icon name={file.kind === 'score' ? 'piano' : file.kind === 'lyrics' ? 'description' : 'music_note'} className="text-muted-foreground shrink-0" />
@@ -574,6 +580,21 @@ function RowMenu({
                       {file.sectionId === null && <option value="" disabled>Choose a section</option>}
                       {sections.map((s) => (
                         <option key={s.id} value={s.id}>{s.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                {editing && file.kind === 'pdf' && (
+                  <label className="block px-3 py-1.5 text-xs text-muted-foreground" title="A piece split over several PDFs: the viewer turns from the end of part 1 into part 2">
+                    Part of a piece in several PDFs
+                    <select
+                      value={file.part ?? ''}
+                      onChange={(e) => void patch({ part: e.target.value === '' ? null : Number(e.target.value) })}
+                      className="mt-0.5 w-full h-7 px-1 rounded border border-border bg-background text-xs text-foreground"
+                    >
+                      <option value="">Not a part (whole piece)</option>
+                      {Array.from({ length: 9 }, (_, i) => i + 1).map((n) => (
+                        <option key={n} value={n}>Part {n}</option>
                       ))}
                     </select>
                   </label>

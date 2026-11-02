@@ -71,6 +71,12 @@ export function pageRaster(pdf: PDFDocumentProxy, pageNumber: number): Promise<P
   return p;
 }
 
+/** Forget a document's kept rasters: they are by far the most memory a
+ *  score holds, so the viewer drops them as soon as the score closes. */
+export function dropRasters(pdf: PDFDocumentProxy): void {
+  rasters.delete(pdf);
+}
+
 async function rasterise(pdf: PDFDocumentProxy, pageNumber: number): Promise<PageRaster> {
   const page = await pdf.getPage(pageNumber);
   const base = page.getViewport({ scale: 1 });
