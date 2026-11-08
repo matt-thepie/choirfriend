@@ -6,8 +6,8 @@ import { requireAuth } from '../auth/middleware.ts';
 /**
  * Score list for the offline sync. The service worker keeps sheet music
  * (kind 'pdf') available without a connection; audio stays online-only.
- * `inSetList` marks scores on songs in an active set list, which is what
- * the client syncs by default. Sheet music is never private, so every
+ * `inSetList` marks scores on songs in an active set list (the choir's, or
+ * one of the member's own), which is what the client syncs by default. Sheet music is never private, so every
  * signed-in member may see every row.
  */
 const scoresStmt = db.prepare(`
@@ -15,6 +15,7 @@ const scoresStmt = db.prepare(`
     EXISTS (
       SELECT 1 FROM set_list_items i JOIN set_lists s ON s.id = i.set_list_id
       WHERE i.piece_id = f.piece_id AND s.status = 'active'
+        AND (s.owner_user_id IS NULL OR s.owner_user_id = ?)
     ) AS in_set_list
   FROM files f JOIN pieces p ON p.id = f.piece_id
   WHERE f.kind = 'pdf'
@@ -29,6 +30,7 @@ const flowingStmt = db.prepare(`
     EXISTS (
       SELECT 1 FROM set_list_items i JOIN set_lists s ON s.id = i.set_list_id
       WHERE i.piece_id = f.piece_id AND s.status = 'active'
+        AND (s.owner_user_id IS NULL OR s.owner_user_id = ?)
     ) AS in_set_list
   FROM score_renditions r JOIN files f ON f.id = r.file_id JOIN pieces p ON p.id = f.piece_id
   WHERE r.status = 'ready' AND r.storage_key IS NOT NULL
@@ -46,8 +48,8 @@ interface FlowingRow {
 }
 
 export const offlineRoutes: FastifyPluginAsync = async (app) => {
-  app.get('/offline/scores', { preHandler: requireAuth }, async () => {
-    const rows = scoresStmt.all() as unknown as ScoreRow[];
+  app.get('/offline/scores', { preHandler: requireAuth }, async (req) => {
+    const rows = scoresStmt.all(req.user!.internalId) as unknown as ScoreRow[];
     return {
       scores: rows.map((r) => ({
         fileId: r.id,
@@ -57,7 +59,7 @@ export const offlineRoutes: FastifyPluginAsync = async (app) => {
         sizeBytes: r.size_bytes ?? null,
         inSetList: r.in_set_list === 1,
       })).concat(
-        (flowingStmt.all() as unknown as FlowingRow[]).map((r) => ({
+        (flowingStmt.all(req.user!.internalId) as unknown as FlowingRow[]).map((r) => ({
           fileId: r.file_id,
           pieceId: r.piece_id,
           pieceTitle: r.piece_title,

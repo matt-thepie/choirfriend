@@ -13,6 +13,7 @@ import {
   type SetListSong,
 } from '@/hooks/useSetLists.ts';
 import { usePlayer, type Queue } from '@/player/PlayerContext.tsx';
+import { deleteImage, IMAGE_ACCEPT, uploadImage, useImages, type CoverImage } from '@/hooks/useImages.ts';
 import { toQueueTrack } from '@/components/AudioPlayer/AudioPlayer.tsx';
 
 interface SetListScreenProps {
@@ -35,7 +36,8 @@ interface SetListScreenProps {
  * One set list. Members: numbered song list, a section picker (defaulting to
  * their own part) and a Play button that queues one track per song. Admins
  * additionally get edit mode: rename, reorder, add/remove songs, archive,
- * copy, delete.
+ * copy, delete. A member's own personal list gives them the same editor;
+ * on a choir list they get "Copy to my set lists" instead.
  */
 export function SetListScreen({
   setListId,
@@ -72,6 +74,10 @@ export function SetListScreen({
 
   const list = isVirtual ? all : setList;
   const err = isVirtual ? allError : error;
+  // Admins (in edit mode) manage choir lists; the owner manages a personal one.
+  const canEdit = !isVirtual && list !== null && (list.mine || (isAdmin && !list.personal));
+  const [copyBusy, setCopyBusy] = useState(false);
+  const [copyError, setCopyError] = useState<string | null>(null);
 
   const player = usePlayer();
   const [editing, setEditing] = useState(false);
@@ -105,11 +111,12 @@ export function SetListScreen({
     return <div className="p-6 text-base text-on-field-muted">{loading || isVirtual ? 'Loading…' : ''}</div>;
   }
 
-  if (editing && isAdmin && !isVirtual) {
+  if (editing && canEdit) {
     return (
       <SetListEditor
         setList={list}
         pieces={pieces}
+        isAdmin={isAdmin}
         onSaved={(updated) => {
           setSetList(updated);
           onMutated();
@@ -143,11 +150,34 @@ export function SetListScreen({
             {list.name}
             {list.pinned && <span className="ml-3 text-sm font-medium uppercase tracking-wide text-on-field-muted align-middle">this week</span>}
             {list.status === 'archived' && <span className="ml-3 text-sm font-medium uppercase tracking-wide text-on-field-muted align-middle">archived</span>}
+            {list.personal && <span className="ml-3 text-sm font-medium uppercase tracking-wide text-on-field-muted align-middle">only you can see this</span>}
           </h1>
-          {isAdmin && !isVirtual && (
+          {canEdit && (
             <Button variant="outline" onClick={() => setEditing(true)}>Edit set list</Button>
           )}
+          {!canEdit && !isVirtual && !list.personal && (
+            <Button
+              variant="outline"
+              disabled={copyBusy}
+              title="Make your own private copy of this list to rearrange or trim"
+              onClick={() => {
+                setCopyBusy(true);
+                setCopyError(null);
+                copySetList(list.id)
+                  .then((copy) => {
+                    onMutated();
+                    onOpenSetList(copy.id);
+                  })
+                  .catch((e: Error) => setCopyError(e.message))
+                  .finally(() => setCopyBusy(false));
+              }}
+            >
+              <Icon name="content_copy" className="text-xl" />
+              {copyBusy ? 'Copying…' : 'Copy to my set lists'}
+            </Button>
+          )}
         </div>
+        {copyError && <p className="text-sm text-destructive">{copyError}</p>}
 
         <div className="grid grid-cols-1 gap-6 md:grid-cols-[minmax(0,1fr)_320px] items-start">
         {/* Practice list panel */}
@@ -189,7 +219,7 @@ export function SetListScreen({
 
         {list.songs.length === 0 ? (
           <p className="text-base text-muted-foreground text-center py-6">
-            {isAdmin ? 'No songs yet. Use Edit set list to add some.' : 'No songs in this set list yet.'}
+            {canEdit ? 'No songs yet. Use Edit set list to add some.' : 'No songs in this set list yet.'}
           </p>
         ) : (
           <>
@@ -255,17 +285,22 @@ export function SetListScreen({
 interface SetListEditorProps {
   setList: SetList;
   pieces: PieceSummary[];
+  /** Admin in edit mode. Pinning and ordering are choir-list controls. */
+  isAdmin: boolean;
   onSaved: (updated: SetList) => void;
   onClose: () => void;
   onDeleted: () => void;
   onCopied: (copy: SetList) => void;
 }
 
-function SetListEditor({ setList, pieces, onSaved, onClose, onDeleted, onCopied }: SetListEditorProps) {
+function SetListEditor({ setList, pieces, isAdmin, onSaved, onClose, onDeleted, onCopied }: SetListEditorProps) {
+  // A personal list can't be "this week" and its order is its own business.
+  const choirControls = isAdmin && !setList.personal;
   const [name, setName] = useState(setList.name);
   const [status, setStatus] = useState(setList.status);
   const [pinned, setPinned] = useState(setList.pinned);
   const [order, setOrder] = useState(String(setList.sortOrder));
+  const [imageId, setImageId] = useState<number | null>(setList.imageId);
   const [songs, setSongs] = useState<SetListSong[]>(setList.songs);
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
@@ -278,6 +313,7 @@ function SetListEditor({ setList, pieces, onSaved, onClose, onDeleted, onCopied 
     status !== setList.status ||
     pinned !== setList.pinned ||
     Number(order) !== setList.sortOrder ||
+    imageId !== setList.imageId ||
     songs.length !== setList.songs.length ||
     songs.some((s, i) => s.id !== setList.songs[i]?.id);
 
@@ -320,7 +356,7 @@ function SetListEditor({ setList, pieces, onSaved, onClose, onDeleted, onCopied 
   }
 
   const save = (): Promise<void> =>
-    run('save', () => patchSetList(setList.id, { name: name.trim(), status, pinned, sortOrder: Number.isInteger(Number(order)) ? Number(order) : setList.sortOrder, pieceIds: songs.map((s) => s.id) }), (updated) => {
+    run('save', () => patchSetList(setList.id, { name: name.trim(), status, ...(choirControls && { pinned }), sortOrder: Number.isInteger(Number(order)) ? Number(order) : setList.sortOrder, imageId, pieceIds: songs.map((s) => s.id) }), (updated) => {
       onSaved(updated);
       setSongs(updated.songs);
     });
@@ -359,23 +395,33 @@ function SetListEditor({ setList, pieces, onSaved, onClose, onDeleted, onCopied 
               <option value="archived">Archived</option>
             </select>
           </label>
-          <label className="text-xs space-y-1">
-            <span className="text-muted-foreground">Order</span>
-            <input
-              type="number"
-              value={order}
-              onChange={(e) => setOrder(e.target.value)}
-              className="w-24 h-9 px-2 rounded-md border border-border bg-background text-sm"
-            />
-          </label>
-          <label className="text-xs flex items-center gap-2 sm:col-span-3 cursor-pointer select-none">
-            <input type="checkbox" checked={pinned} onChange={(e) => setPinned(e.target.checked)} />
-            <span>
-              <span className="font-medium">This week's rehearsal</span>
-              <span className="text-muted-foreground"> — show this list at the top of everyone's home screen. Pinning it unpins any other.</span>
-            </span>
-          </label>
+          {choirControls ? (
+            <label className="text-xs space-y-1">
+              <span className="text-muted-foreground">Order</span>
+              <input
+                type="number"
+                value={order}
+                onChange={(e) => setOrder(e.target.value)}
+                className="w-24 h-9 px-2 rounded-md border border-border bg-background text-sm"
+              />
+            </label>
+          ) : (
+            <span />
+          )}
+          {choirControls ? (
+            <label className="text-xs flex items-center gap-2 sm:col-span-3 cursor-pointer select-none">
+              <input type="checkbox" checked={pinned} onChange={(e) => setPinned(e.target.checked)} />
+              <span>
+                <span className="font-medium">This week's rehearsal</span>
+                <span className="text-muted-foreground"> — show this list at the top of everyone's home screen. Pinning it unpins any other.</span>
+              </span>
+            </label>
+          ) : (
+            <p className="text-xs text-muted-foreground sm:col-span-3">A personal set list. Only you can see it.</p>
+          )}
         </div>
+
+        <CoverPicker value={imageId} onChange={setImageId} canUpload={isAdmin} />
 
         <section className="card p-4 sm:p-6 space-y-3">
           <h2 className="text-base font-semibold">Songs <span className="text-muted-foreground font-normal">({songs.length})</span></h2>
@@ -466,5 +512,114 @@ function SetListEditor({ setList, pieces, onSaved, onClose, onDeleted, onCopied 
         </section>
       </div>
     </div>
+  );
+}
+
+/**
+ * Pick the list's cover from the shared pool of pictures. Admins can add to
+ * the pool (upload goes straight to B2) and remove pictures nobody uses.
+ */
+function CoverPicker({ value, onChange, canUpload }: { value: number | null; onChange: (id: number | null) => void; canUpload: boolean }) {
+  const { images, loading, setImages } = useImages(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onPick(e: React.ChangeEvent<HTMLInputElement>): Promise<void> {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const created = await uploadImage(file);
+      setImages((prev) => [created, ...prev]);
+      onChange(created.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove(img: CoverImage): Promise<void> {
+    if (!window.confirm(`Remove "${img.filename}" from the picture pool?`)) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await deleteImage(img.id);
+      setImages((prev) => prev.filter((i) => i.id !== img.id));
+      if (value === img.id) onChange(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="card p-4 sm:p-6 space-y-3">
+      <div className="flex items-center gap-3">
+        <h2 className="text-base font-semibold flex-1">Cover picture</h2>
+        {canUpload && (
+          <label className={cn('inline-flex items-center gap-1 h-8 px-3 rounded-md border border-border text-xs cursor-pointer hover:bg-accent/60', busy && 'opacity-50 pointer-events-none')}>
+            <Icon name="add_photo_alternate" className="text-base" />
+            {busy ? 'Working…' : 'Upload picture'}
+            <input type="file" accept={IMAGE_ACCEPT} className="sr-only" onChange={(e) => void onPick(e)} disabled={busy} />
+          </label>
+        )}
+      </div>
+      {error && <p className="text-xs text-destructive">{error}</p>}
+      {loading ? (
+        <p className="text-sm text-muted-foreground">Loading pictures…</p>
+      ) : images.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          {canUpload ? 'No pictures yet. Upload one to use it here and on other set lists.' : 'No pictures have been uploaded yet. The committee can add some.'}
+        </p>
+      ) : (
+        <ul className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
+          <li>
+            <button
+              type="button"
+              onClick={() => onChange(null)}
+              aria-pressed={value === null}
+              className={cn(
+                'relative w-full aspect-video rounded-md overflow-hidden border-2 bg-linear-to-br from-primary-hover to-primary-active',
+                value === null ? 'border-primary ring-2 ring-primary/40' : 'border-transparent hover:border-border',
+              )}
+            >
+              <Icon name="music_note" className="absolute inset-0 m-auto w-fit h-fit text-3xl text-white/40" />
+              <span className="absolute inset-x-0 bottom-0 text-[10px] text-white/90 bg-black/40 py-0.5">No picture</span>
+            </button>
+          </li>
+          {images.map((img) => (
+            <li key={img.id} className="relative group">
+              <button
+                type="button"
+                onClick={() => onChange(img.id)}
+                aria-pressed={value === img.id}
+                title={img.filename}
+                className={cn(
+                  'block w-full aspect-video rounded-md overflow-hidden border-2',
+                  value === img.id ? 'border-primary ring-2 ring-primary/40' : 'border-transparent hover:border-border',
+                )}
+              >
+                <img src={img.url} alt={img.filename} loading="lazy" className="w-full h-full object-cover" />
+              </button>
+              {canUpload && img.usedBy === 0 && value !== img.id && (
+                <button
+                  type="button"
+                  aria-label={`Remove ${img.filename}`}
+                  onClick={() => void remove(img)}
+                  disabled={busy}
+                  className="absolute top-1 right-1 rounded-full bg-black/60 text-white w-6 h-6 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 focus:opacity-100"
+                >
+                  ✕
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }

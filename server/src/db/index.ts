@@ -226,9 +226,32 @@ db.exec(`
   );
 `);
 
+// Personal set lists. NULL = a choir list (admins manage it, everyone sees
+// it). Set = a member's own list: only they can see or edit it. Nobody else,
+// admins included, is shown it.
+addColumnIfMissing('set_lists', 'owner_user_id INTEGER REFERENCES users(id)');
+db.exec('CREATE INDEX IF NOT EXISTS idx_set_lists_owner ON set_lists(owner_user_id)');
+
 // A set list the MD has pinned as "this week's rehearsal". Shown first on the
 // home screen. At most one is meant to be pinned at a time (enforced in code).
 addColumnIfMissing('set_lists', 'pinned INTEGER NOT NULL DEFAULT 0');
+
+// Cover pictures. A shared pool: the committee uploads pictures once and any
+// set list (choir or personal) can wear one. Deleting a picture clears it from
+// the lists using it rather than deleting them.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS images (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    storage TEXT NOT NULL CHECK(storage IN ('b2', 'local')),
+    storage_key TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    mime_type TEXT NOT NULL,
+    size_bytes INTEGER,
+    created_by_user_id INTEGER REFERENCES users(id),
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+  );
+`);
+addColumnIfMissing('set_lists', 'image_id INTEGER REFERENCES images(id) ON DELETE SET NULL');
 
 // files.kind gained 'lyrics' and 'score'. SQLite can't alter a CHECK
 // constraint, so a DB created before that change gets its files table rebuilt

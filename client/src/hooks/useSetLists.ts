@@ -12,8 +12,15 @@ export interface SetListSummary {
   name: string;
   status: SetListStatus;
   sortOrder: number;
-  /** "This week's rehearsal" — shown first on the home screen. Only one at a time. */
+  /** "This week's rehearsal" — shown first on the home screen. Only one at a time. Choir lists only. */
   pinned: boolean;
+  /** A member's own list, seen only by them, rather than one of the choir's. */
+  personal: boolean;
+  /** Owned by the signed-in member. */
+  mine: boolean;
+  /** Cover picture from the shared pool, if one is set. */
+  imageId: number | null;
+  imageUrl: string | null;
   songCount: number;
   createdAt: number;
   updatedAt: number;
@@ -104,9 +111,13 @@ export interface SetListPatch {
   sortOrder?: number;
   pinned?: boolean;
   pieceIds?: number[];
+  /** Cover picture from the shared pool; null clears it. */
+  imageId?: number | null;
 }
 
-export async function createSetList(input: { name: string; pieceIds?: number[] }): Promise<SetList> {
+/** `personal` makes an admin's list their own rather than the choir's;
+ *  members' lists are always personal whatever is sent. */
+export async function createSetList(input: { name: string; pieceIds?: number[]; personal?: boolean }): Promise<SetList> {
   const res = await fetch('/api/setlists', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -128,6 +139,8 @@ export async function patchSetList(id: number, patch: SetListPatch): Promise<Set
   return (await res.json()) as SetList;
 }
 
+/** Admins copying a choir list get another choir list; anyone else gets a
+ *  personal copy of their own ("Copy to my set lists"). */
 export async function copySetList(id: number): Promise<SetList> {
   const res = await fetch(`/api/setlists/${id}/copy`, { method: 'POST', credentials: 'include' });
   if (!res.ok) throw await parseError(res);

@@ -114,15 +114,20 @@ function toPieceDTO(row: PieceRow): PieceDTO {
 }
 
 export function resolveFileUrl(row: FileRow): string {
-  if (row.storage === 'local') {
+  return storageUrl(row.storage, row.storage_key);
+}
+
+/** Public URL for any stored object (files, cover pictures). */
+export function storageUrl(storage: 'b2' | 'local', storageKey: string): string {
+  if (storage === 'local') {
     // Served by the client (Vite dev server in dev, the static-served
     // bundle in prod). Always rooted at /.
-    return row.storage_key.startsWith('/') ? row.storage_key : `/${row.storage_key}`;
+    return storageKey.startsWith('/') ? storageKey : `/${storageKey}`;
   }
   // B2: public URL behind the CDN domain, including the choirfriend prefix.
   const { b2 } = getConfig();
   const base = b2.publicBaseUrl.replace(/\/+$/, '');
-  return `${base}/${b2.keyPrefix}${row.storage_key}`;
+  return `${base}/${b2.keyPrefix}${storageKey}`;
 }
 
 function toFileDTO(row: FileRow | FileRowWithCreator): FileDTO {
