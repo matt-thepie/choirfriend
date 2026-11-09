@@ -30,6 +30,10 @@ const MARKER_KINDS: readonly MarkerKind[] = [
   'volta-2',
   'bar',
   'custom',
+  'flat',
+  'natural',
+  'sharp',
+  'note',
 ];
 
 interface CreateBodyCommon {

@@ -33,7 +33,11 @@ export type MarkerKind =
   | 'volta-1'
   | 'volta-2'
   | 'bar' // bar number / rehearsal letter ("bar 24", "Letter B")
-  | 'custom';
+  | 'custom'
+  | 'flat' // ♭ ♮ ♯ courtesy-accidental reminders on a note
+  | 'natural'
+  | 'sharp'
+  | 'note'; // the MD changed this note; label is the new note name
 
 interface AnnotationCommon {
   id: string;

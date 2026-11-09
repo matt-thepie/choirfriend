@@ -1,4 +1,4 @@
-import { ReadModeControls, ReadModeHideTab } from '@/components/ReadModeControls.tsx';
+import { EdgeTurnZones, ReadModeControls, ReadModeHideTab, useTurnMode } from '@/components/ReadModeControls.tsx';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { openPdf, type PDFDocumentProxy } from '@/lib/pdfjs.ts';
 import { Button, Icon } from '@/components/ui/button.tsx';
@@ -11,6 +11,7 @@ import {
   INK_WIDTH,
   MARKER_KIND_ORDER,
   MARKER_PICKER_LABEL,
+  isReminderKind,
   markerLabel,
   type Annotation,
   type AnnotationLayer,
@@ -86,6 +87,10 @@ const KIND_TAKES_LABEL: Record<MarkerKind, boolean> = {
   'volta-2': false,
   bar: true,
   custom: true,
+  flat: false,
+  natural: false,
+  sharp: false,
+  note: true,
 };
 
 type NavMode = 'scroll' | 'page';
@@ -328,6 +333,7 @@ export function PdfViewer({
       // not remembered this time
     }
   };
+  const [turnMode, setTurnMode] = useTurnMode();
   const [currentPage, setCurrentPage] = useState(1);
   // Read mode: what to show per step, and the top of the current step on
   // its page (a fraction), so re-analysis never loses your place.
@@ -744,17 +750,6 @@ export function PdfViewer({
     if (chunked) return goToChunk(chunks[chunkIndex - 1]);
     setCurrentPage((p) => Math.max(1, p - 1));
   }, [chunked, chunks, chunkIndex, goToChunk, atStart, prevPart]);
-  /** A marker badge under a tap in an edge zone wins over the page turn:
-   *  singers put jump marks right at the margin, where the zone covers them. */
-  function tapEdge(e: React.MouseEvent, turn: () => void): void {
-    if (e.detail > 0) {
-      const badge = document
-        .elementsFromPoint(e.clientX, e.clientY)
-        .find((el): el is HTMLElement => el instanceof HTMLElement && el.dataset.markerBadge !== undefined);
-      if (badge) return badge.click();
-    }
-    turn();
-  }
   /** Scroll view: move most of a screen; for marking up, when a finger draws. */
   const scrollByScreen = (dir: 1 | -1): void => {
     const sc = scrollContainerRef.current;
@@ -848,6 +843,9 @@ export function PdfViewer({
       if (target) sc.scrollTo({ top: sc.scrollTop + target.getBoundingClientRect().top - top - 4, behavior: 'smooth' });
       return;
     }
+    // In "tap edges" mode the edge zones turn and a flick does nothing, so
+    // one gesture can never turn twice.
+    if (turnMode !== 'swipe') return;
     if (Math.abs(dx) > MIN && Math.abs(dx) > 1.5 * Math.abs(dy)) {
       if (sc && dx < 0 && sc.scrollLeft + sc.clientWidth < sc.scrollWidth - 2) return;
       if (sc && dx > 0 && sc.scrollLeft > 2) return;
@@ -1146,7 +1144,7 @@ export function PdfViewer({
   const jumpTo = (open: boolean, onOpenChange: (o: boolean) => void) =>
     !markUp && (
       <JumpToDropdown
-        markers={markersInOrder}
+        markers={markersInOrder.filter((m) => !isReminderKind(m.markerKind))}
         sectionsById={sectionsById}
         open={open}
         onOpenChange={onOpenChange}
@@ -1237,6 +1235,16 @@ export function PdfViewer({
           <ToolButton active={navMode === 'scroll'} onClick={() => setNavMode('scroll')}>Scroll</ToolButton>
           <ToolButton active={navMode === 'page'} onClick={() => setNavMode('page')}>Pages</ToolButton>
         </div>
+
+        {effectiveNavMode === 'page' && (
+          <div className="flex items-center gap-1">
+            <span className="text-sm text-muted-foreground">Turn by</span>
+            <div className="flex items-center rounded-md border border-border overflow-hidden" role="group" aria-label="How to turn pages">
+              <ToolButton active={turnMode === 'swipe'} onClick={() => setTurnMode('swipe')} title="Flick sideways to turn; tap anywhere for the controls">Swipe</ToolButton>
+              <ToolButton active={turnMode === 'edges'} onClick={() => setTurnMode('edges')} title="Tap the left or right quarter of the screen to turn; swipes do nothing">Tap edges</ToolButton>
+            </div>
+          </div>
+        )}
 
         {effectiveNavMode === 'page' && (
           <div className="flex items-center gap-1">
@@ -1356,6 +1364,7 @@ export function PdfViewer({
           placeholder={
             markerKind === 'bar' ? 'e.g. "Bar 24" or "Letter B"' :
             markerKind === 'custom' ? 'Label' :
+            markerKind === 'note' ? 'New note, e.g. "D"' :
             'e.g. "al Coda"'
           }
           className="text-xs h-8 px-2 rounded-md border border-border bg-background w-40 ml-1"
@@ -1380,7 +1389,10 @@ export function PdfViewer({
         onPointerDown={touchTools}
         onKeyDown={touchTools}
         className={cn(
-          'top-0 bg-background/95 backdrop-blur border-b border-border',
+          'bg-background/95 backdrop-blur border-border',
+          // Read mode keeps its controls at the bottom: a drawer at the top
+          // kept pulling down Android's notification shade.
+          readMode ? 'bottom-0 border-t order-last pb-[env(safe-area-inset-bottom)]' : 'top-0 border-b',
           readMode && !markUp && !adjustingLine ? 'absolute inset-x-0 z-30 shadow-card' : 'sticky z-30 shrink-0',
           readMode && !toolsOpen && 'hidden',
         )}
@@ -1617,29 +1629,12 @@ export function PdfViewer({
           </>
         )}
 
-        {/* Edge tap zones for page-turn nav: a quarter of the width each, so
-            a turn aimed near the edge doesn't land on the stage and open the
-            toolbar instead. Off while marking up so a stroke or marker at
-            the page edge doesn't flip the page. */}
-        {effectiveNavMode === 'page' && pageCount > 0 && !markUp && (
-          <>
-            <button
-              type="button"
-              aria-label="Previous page"
-              onClick={(e) => tapEdge(e, prevPage)}
-              disabled={!canPrev}
-              className="absolute left-0 top-0 bottom-0 w-1/4 min-w-16 z-10 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-black/5 focus-visible:bg-black/10 transition-colors"
-              style={{ cursor: canPrev ? 'w-resize' : 'not-allowed' }}
-            />
-            <button
-              type="button"
-              aria-label="Next page"
-              onClick={(e) => tapEdge(e, nextPage)}
-              disabled={!canNext}
-              className="absolute right-0 top-0 bottom-0 w-1/4 min-w-16 z-10 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-black/5 focus-visible:bg-black/10 transition-colors"
-              style={{ cursor: canNext ? 'e-resize' : 'not-allowed' }}
-            />
-          </>
+        {/* Edge tap zones for page-turn nav, only in "tap edges" mode: a
+            quarter of the width each, so a turn aimed near the edge doesn't
+            land on the stage and open the toolbar instead. Off while marking
+            up so a stroke or marker at the page edge doesn't flip the page. */}
+        {effectiveNavMode === 'page' && turnMode === 'edges' && pageCount > 0 && !markUp && (
+          <EdgeTurnZones canPrev={canPrev} canNext={canNext} onPrev={prevPage} onNext={nextPage} />
         )}
       </div>
     </div>

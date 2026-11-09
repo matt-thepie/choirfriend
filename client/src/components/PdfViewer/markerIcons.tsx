@@ -46,8 +46,41 @@ export function VoltaIcon({ n, className }: { n: number; className?: string }) {
   );
 }
 
+/** Sharp ♯ — two uprights crossed by two rising bars. */
+export function SharpIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden>
+      <line x1="9.5" y1="3.5" x2="9.5" y2="20.5" />
+      <line x1="14.5" y1="3.5" x2="14.5" y2="20.5" />
+      <path d="M5.5 10.2 18.5 7.8M5.5 16.4 18.5 14" strokeWidth="2.6" />
+    </svg>
+  );
+}
+
+/** Natural ♮ — a left upright from the top, a right upright to the bottom,
+ *  joined by two rising bars. */
+export function NaturalIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden>
+      <line x1="9" y1="3.5" x2="9" y2="16" />
+      <line x1="15" y1="8" x2="15" y2="20.5" />
+      <path d="M9 10.4 15 8.6M9 16.2 15 14.4" strokeWidth="2.6" />
+    </svg>
+  );
+}
+
+/** Flat ♭ — a stem with a bowl at its foot. */
+export function FlatIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <line x1="9" y1="3" x2="9" y2="20" />
+      <path d="M9 12.5c3-2.4 6.5-1.2 6.5 1.4 0 2.4-3.5 4.6-6.5 6.1" />
+    </svg>
+  );
+}
+
 /** Short text labels for the kinds that aren't drawn as icons. */
-const SHORT_TEXT: Partial<Record<MarkerKind, string>> = { bar: 'Bar', custom: 'Text' };
+const SHORT_TEXT: Partial<Record<MarkerKind, string>> = { bar: 'Bar', custom: 'Text', note: 'Note' };
 
 /** Renders a marker kind's glyph. `label` (a resolved badge label) overrides the
  *  text for the non-icon kinds — pass it for badges, omit it for the toolbar. */
@@ -63,5 +96,16 @@ export function MarkerGlyph({ kind, label, className }: { kind: MarkerKind; labe
   }
   if (kind === 'volta-1') return <VoltaIcon n={1} className={className} />;
   if (kind === 'volta-2') return <VoltaIcon n={2} className={className} />;
+  if (kind === 'sharp') return <SharpIcon className={className} />;
+  if (kind === 'natural') return <NaturalIcon className={className} />;
+  if (kind === 'flat') return <FlatIcon className={className} />;
+  if (kind === 'note' && label === undefined) {
+    // Toolbar: a small ring, as the mark looks on the score.
+    return (
+      <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden>
+        <circle cx="12" cy="12" r="7.5" />
+      </svg>
+    );
+  }
   return <span>{label ?? SHORT_TEXT[kind] ?? MARKER_DEFAULT_LABEL[kind]}</span>;
 }

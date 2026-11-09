@@ -47,12 +47,24 @@ export type MarkerKind =
   | 'volta-1'
   | 'volta-2'
   | 'bar' // bar number or rehearsal letter — label required
-  | 'custom'; // arbitrary text — label required
+  | 'custom' // arbitrary text — label required
+  // Reminders: these sit on a note and never navigate.
+  | 'flat' // ♭ courtesy accidental
+  | 'natural' // ♮
+  | 'sharp' // ♯
+  | 'note'; // the MD changed this note — label is the new note name
+
+/** Reminder marks sit on a note and are not jumps: they stay out of the
+ *  Jump list and never follow anywhere when tapped. */
+export const REMINDER_KINDS: ReadonlySet<MarkerKind> = new Set<MarkerKind>(['flat', 'natural', 'sharp', 'note']);
+export const isReminderKind = (k: MarkerKind): boolean => REMINDER_KINDS.has(k);
 
 /** Default badge text for each marker kind. `bar` and `custom` always use
  *  the user-supplied label; the others fall back here when no label is set. */
 // NB: plain text, not musical Unicode glyphs (𝄋 𝄌 𝄆 𝄇) — those aren't in
-// standard system fonts and render as tofu boxes.
+// standard system fonts and render as tofu boxes. ♭ ♮ ♯ are in the
+// Miscellaneous Symbols block and do show, but the badges draw them as SVG
+// for a consistent weight; the text here is for titles and lists.
 export const MARKER_DEFAULT_LABEL: Record<MarkerKind, string> = {
   segno: 'Segno',
   coda: 'Coda',
@@ -66,6 +78,10 @@ export const MARKER_DEFAULT_LABEL: Record<MarkerKind, string> = {
   'volta-2': '2.',
   bar: '?',
   custom: '?',
+  flat: 'Flat',
+  natural: 'Natural',
+  sharp: 'Sharp',
+  note: '?',
 };
 
 /** Human label for the toolbar marker-kind picker. */
@@ -82,6 +98,10 @@ export const MARKER_PICKER_LABEL: Record<MarkerKind, string> = {
   'volta-2': 'Volta 2',
   bar: 'Bar / letter',
   custom: 'Custom label',
+  flat: 'Flat reminder ♭',
+  natural: 'Natural reminder ♮',
+  sharp: 'Sharp reminder ♯',
+  note: 'Note changed (ring + new note)',
 };
 
 export const MARKER_KIND_ORDER: readonly MarkerKind[] = [
@@ -97,6 +117,10 @@ export const MARKER_KIND_ORDER: readonly MarkerKind[] = [
   'volta-2',
   'bar',
   'custom',
+  'flat',
+  'natural',
+  'sharp',
+  'note',
 ];
 
 // ---------------------------------------------------------------------------

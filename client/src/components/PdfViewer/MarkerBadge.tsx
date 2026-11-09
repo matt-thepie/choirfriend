@@ -18,7 +18,15 @@ export const KIND_STYLES: Record<MarkerKind, string> = {
   'volta-2': 'bg-sky-100 text-sky-900 border-sky-400',
   bar: 'bg-slate-100 text-slate-900 border-slate-400',
   custom: 'bg-slate-100 text-slate-900 border-slate-400',
+  flat: 'bg-red-50 text-red-700 border-red-400',
+  natural: 'bg-red-50 text-red-700 border-red-400',
+  sharp: 'bg-red-50 text-red-700 border-red-400',
+  note: 'text-red-600 border-red-600',
 };
+
+/** Accidental reminders are small square badges showing only the glyph, so
+ *  they sit beside a note without covering its neighbours. */
+const ACCIDENTAL_KINDS: ReadonlySet<MarkerKind> = new Set<MarkerKind>(['flat', 'natural', 'sharp']);
 
 interface MarkerBadgeProps {
   marker: MarkerAnnotation;
@@ -40,6 +48,10 @@ export function MarkerBadge({ marker, pageWidth, pageHeight, interactive, follow
   const styles = KIND_STYLES[marker.markerKind];
   const label = markerLabel(marker);
   const canDelete = onDelete && (marker.layer === 'shared' || marker.isMine !== false);
+  const accidental = ACCIDENTAL_KINDS.has(marker.markerKind);
+  // "Note changed": a ring around the note with the new note name beside it,
+  // drawn without a pill so the ring reads as part of the score.
+  const noteRing = marker.markerKind === 'note';
 
   return (
     <div
@@ -63,18 +75,26 @@ export function MarkerBadge({ marker, pageWidth, pageHeight, interactive, follow
           follow?.run(); // single tap jumps; no-op for markers that aren't a jump source
         }}
         className={cn(
-          'inline-flex items-center px-2 py-0.5 rounded-md border text-xs font-semibold shadow-sm whitespace-nowrap select-none',
+          'inline-flex items-center text-xs font-semibold whitespace-nowrap select-none',
+          noteRing ? 'relative w-7 h-7 justify-center rounded-full border-[2.5px] border-red-600 bg-transparent' : 'px-2 py-0.5 rounded-md border shadow-sm',
+          accidental && 'px-1',
           styles,
           selected && 'ring-4 ring-primary',
-          (editing || erasing) && 'min-w-11 min-h-11 justify-center',
+          (editing || erasing) && !noteRing && 'min-w-11 min-h-11 justify-center',
           // Pad the hit area well beyond the small badge so a finger can find it.
           interactive && follow && !editing && !erasing ? "relative cursor-pointer hover:shadow-md after:absolute after:-inset-3 after:content-['']" : 'cursor-default',
         )}
         tabIndex={interactive ? 0 : -1}
-        aria-label={editing ? `Edit ${label} marker` : erasing ? `Erase ${label} marker` : undefined}
-        title={follow ? follow.label : `${marker.markerKind}${marker.label ? ` · ${marker.label}` : ''}`}
+        aria-label={editing ? `Edit ${label} marker` : erasing ? `Erase ${label} marker` : noteRing ? `Note changed to ${label}` : undefined}
+        title={follow ? follow.label : noteRing ? `Note changed to ${label}` : `${marker.markerKind}${marker.label ? ` · ${marker.label}` : ''}`}
       >
-        <MarkerGlyph kind={marker.markerKind} label={label} className="w-4 h-4" />
+        {noteRing ? (
+          <span className="absolute left-full top-0 -translate-y-1/2 ml-0.5 px-1 rounded bg-background/85 text-sm font-bold leading-none text-red-600">
+            {label}
+          </span>
+        ) : (
+          <MarkerGlyph kind={marker.markerKind} label={label} className={accidental ? 'w-5 h-5' : 'w-4 h-4'} />
+        )}
         {follow && !editing && !erasing && <span className="ml-1 opacity-70">→</span>}
       </button>
 

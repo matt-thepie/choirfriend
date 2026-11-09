@@ -1,4 +1,4 @@
-import { ReadModeControls, ReadModeHideTab } from '@/components/ReadModeControls.tsx';
+import { EdgeTurnZones, ReadModeControls, ReadModeHideTab, useTurnMode } from '@/components/ReadModeControls.tsx';
 /**
  * Flowing score viewer: the music engraved live (Verovio) from MusicXML to
  * fit the screen, rather than a fixed PDF page. Same reading controls as the
@@ -190,6 +190,7 @@ export function ScoreViewer({
     }
   };
   const effectiveNavMode: NavMode = readMode ? navMode : 'scroll';
+  const [turnMode, setTurnMode] = useTurnMode();
 
   const [scale, setScaleState] = useState<number>(() =>
     load(SCALE_KEY, window.innerWidth < 600 ? 34 : 42, (v) => typeof v === 'number' && v >= 20 && v <= 90),
@@ -813,7 +814,7 @@ export function ScoreViewer({
   function onTouchEnd(e: React.TouchEvent): void {
     const s = swipeRef.current;
     swipeRef.current = null;
-    if (!s || effectiveNavMode !== 'page' || (window.visualViewport?.scale ?? 1) > 1.05) return;
+    if (!s || effectiveNavMode !== 'page' || turnMode !== 'swipe' || (window.visualViewport?.scale ?? 1) > 1.05) return;
     const t = e.changedTouches[0];
     if (!t || Date.now() - s.t > 800) return;
     const dx = t.clientX - s.x;
@@ -908,16 +909,6 @@ export function ScoreViewer({
       return start ? go(start.measure, 'Repeat from start-repeat') : go(0, 'Repeat from the beginning');
     }
     return null;
-  }
-  /** A sign under a tap in an edge zone wins over the page turn. */
-  function tapEdge(e: React.MouseEvent, turn: () => void): void {
-    if (e.detail > 0) {
-      const badge = document
-        .elementsFromPoint(e.clientX, e.clientY)
-        .find((el): el is HTMLElement => el instanceof HTMLElement && el.dataset.markerBadge !== undefined);
-      if (badge) return badge.click();
-    }
-    turn();
   }
 
   function jumpToMeasure(i: number): void {
@@ -1086,6 +1077,12 @@ export function ScoreViewer({
           <ToolButton active={navMode === 'page'} onClick={() => setNavMode('page')}>Pages</ToolButton>
         </div>
       )}
+      {readMode && navMode === 'page' && (
+        <div className="flex items-center rounded-md border border-border overflow-hidden" role="group" aria-label="How to turn pages">
+          <ToolButton active={turnMode === 'swipe'} onClick={() => setTurnMode('swipe')} title="Flick sideways to turn; tap anywhere for the controls">Swipe</ToolButton>
+          <ToolButton active={turnMode === 'edges'} onClick={() => setTurnMode('edges')} title="Tap the left or right quarter of the screen to turn; swipes do nothing">Tap edges</ToolButton>
+        </div>
+      )}
       {canOriginal && (
         <div className="flex items-center rounded-md border border-border overflow-hidden" title="Flow fits the music to your screen; Original keeps the score’s own lines and pages">
           <ToolButton active={layout === 'flow'} onClick={() => setLayout('flow')}>Flow</ToolButton>
@@ -1219,8 +1216,10 @@ export function ScoreViewer({
         onPointerDown={touchTools}
         onKeyDown={touchTools}
         className={cn(
-          'top-0 bg-background/95 backdrop-blur border-b border-border',
-          readMode ? 'absolute inset-x-0 z-30 shadow-card' : 'sticky z-10',
+          'bg-background/95 backdrop-blur border-border',
+          // Read mode keeps its controls at the bottom: a drawer at the top
+          // kept pulling down Android's notification shade.
+          readMode ? 'absolute inset-x-0 bottom-0 z-30 shadow-card border-t pb-[env(safe-area-inset-bottom)]' : 'sticky top-0 z-10 border-b',
           readMode && !toolsOpen && 'hidden',
         )}
       >
@@ -1395,23 +1394,8 @@ export function ScoreViewer({
 
         {/* Edge tap zones: a quarter of the width each, so a turn aimed near
             the edge doesn't land on the music and open the toolbar instead. */}
-        {effectiveNavMode === 'page' && pages.length > 1 && (
-          <>
-            <button
-              type="button"
-              aria-label="Previous page"
-              onClick={(e) => tapEdge(e, prevPage)}
-              disabled={!canPrev}
-              className="absolute left-0 top-0 bottom-0 w-1/4 min-w-16 z-10 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-black/5 focus-visible:bg-black/10 transition-colors"
-            />
-            <button
-              type="button"
-              aria-label="Next page"
-              onClick={(e) => tapEdge(e, nextPage)}
-              disabled={!canNext}
-              className="absolute right-0 top-0 bottom-0 w-1/4 min-w-16 z-10 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-black/5 focus-visible:bg-black/10 transition-colors"
-            />
-          </>
+        {effectiveNavMode === 'page' && turnMode === 'edges' && pages.length > 1 && (
+          <EdgeTurnZones canPrev={canPrev} canNext={canNext} onPrev={prevPage} onNext={nextPage} />
         )}
       </div>
 
