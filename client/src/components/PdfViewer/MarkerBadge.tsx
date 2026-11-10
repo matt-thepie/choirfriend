@@ -66,6 +66,7 @@ export function MarkerBadge({ marker, pageWidth, pageHeight, interactive, follow
       <button
         type="button"
         data-marker-badge=""
+        data-marker-jump={interactive && follow && !editing && !erasing ? "" : undefined}
         onClick={(e) => {
           if (!interactive) return;
           e.stopPropagation();

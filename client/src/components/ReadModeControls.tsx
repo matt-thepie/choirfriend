@@ -8,13 +8,15 @@ const isMouseOrPen = (e: React.PointerEvent) => e.pointerType === 'mouse' || e.p
  *  release, however long the press: Android turns a press of over half a
  *  second into a long-press and sends no click, and slow, deliberate presses
  *  are common. A finger that moves more than 12px is not a tap. */
-function usePressTap(dir: 1 | -1 | null, onTap: () => void) {
+function usePressTap(dir: 1 | -1 | null, onTap: () => void, intercept?: (x: number, y: number) => boolean) {
   const dragRef = useRef<{ x: number; y: number } | null>(null);
   const reset = () => { dragRef.current = null; };
   const tapped = (x: number, y: number) => {
     const s = dragRef.current;
     reset();
-    if (s && Math.hypot(x - s.x, y - s.y) <= 12) onTap();
+    if (!s || Math.hypot(x - s.x, y - s.y) > 12) return;
+    if (intercept?.(x, y)) return;
+    onTap();
   };
   return {
     // Pointers are handled on release; this is Enter or Space (detail 0).
@@ -137,11 +139,39 @@ export function useTurnMode(): [TurnMode, (m: TurnMode) => void] {
   return [mode, setMode];
 }
 
+/** True for a definite sideways flick: at least 60px, and at least two and a
+ *  half times as far across as up or down. Anything else is not a page turn. */
+export function isHorizontalFlick(dx: number, dy: number): boolean {
+  return Math.abs(dx) > 60 && Math.abs(dx) > 2.5 * Math.abs(dy);
+}
+
+/** The jump badge (D.S., repeat end...) whose own box is under the point, if
+ *  any. Only the badge itself counts, not a halo round it: following a badge
+ *  that was merely near the finger used to send readers back pages. */
+function jumpBadgeAt(x: number, y: number): HTMLElement | null {
+  for (const el of document.elementsFromPoint(x, y)) {
+    const badge = (el as HTMLElement).closest?.<HTMLElement>('[data-marker-jump]');
+    if (badge) return badge;
+  }
+  // The zone sits above the badges, so elementsFromPoint stops at it on some
+  // browsers; fall back to a geometric test over the visible jump badges.
+  for (const badge of document.querySelectorAll<HTMLElement>('[data-marker-jump]')) {
+    const r = badge.getBoundingClientRect();
+    if (x >= r.left - 4 && x <= r.right + 4 && y >= r.top - 4 && y <= r.bottom + 4) return badge;
+  }
+  return null;
+}
+
 /** A page-turn zone: the outer quarter of the stage. Turns on release so a
- *  slow press counts (see usePressTap); a marker badge under the zone is not
- *  followed from here, since margin marks used to send readers back pages. */
+ *  slow press counts (see usePressTap). The zone lies over the page, so a tap
+ *  that lands on a jump badge is handed to the badge instead of turning. */
 function EdgeZone({ side, label, enabled, onTurn }: { side: 'left' | 'right'; label: string; enabled: boolean; onTurn: () => void }) {
-  const press = usePressTap(null, onTurn);
+  const press = usePressTap(null, onTurn, (x, y) => {
+    const badge = jumpBadgeAt(x, y);
+    if (!badge) return false;
+    badge.click();
+    return true;
+  });
   return (
     <button
       type="button"

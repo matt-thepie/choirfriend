@@ -1,4 +1,4 @@
-import { EdgeTurnZones, ReadModeControls, ReadModeHideTab, useTurnMode } from '@/components/ReadModeControls.tsx';
+import { EdgeTurnZones, isHorizontalFlick, ReadModeControls, ReadModeHideTab, useTurnMode } from '@/components/ReadModeControls.tsx';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { openPdf, type PDFDocumentProxy } from '@/lib/pdfjs.ts';
 import { dropWarmPdf, takeWarmPdf, warmPdf } from '@/lib/pdfWarm.ts';
@@ -893,14 +893,12 @@ export function PdfViewer({
     // In "tap edges" mode the edge zones turn and a flick does nothing, so
     // one gesture can never turn twice.
     if (turnMode !== 'swipe') return;
-    if (Math.abs(dx) > MIN && Math.abs(dx) > 1.5 * Math.abs(dy)) {
+    // Only a definite sideways flick turns. An up or down flick does nothing:
+    // it used to turn too, which made a stray thumb movement change page.
+    if (isHorizontalFlick(dx, dy)) {
       if (sc && dx < 0 && sc.scrollLeft + sc.clientWidth < sc.scrollWidth - 2) return;
       if (sc && dx > 0 && sc.scrollLeft > 2) return;
       if (dx < 0) nextPage(); else prevPage();
-    } else if (chunked && Math.abs(dy) > MIN && Math.abs(dy) > 1.5 * Math.abs(dx)) {
-      if (sc && dy < 0 && sc.scrollTop + sc.clientHeight < sc.scrollHeight - 2) return;
-      if (sc && dy > 0 && sc.scrollTop > 2) return;
-      if (dy < 0) nextPage(); else prevPage();
     }
   }
 

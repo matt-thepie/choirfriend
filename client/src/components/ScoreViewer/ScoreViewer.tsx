@@ -1,4 +1,4 @@
-import { EdgeTurnZones, ReadModeControls, ReadModeHideTab, useTurnMode } from '@/components/ReadModeControls.tsx';
+import { EdgeTurnZones, isHorizontalFlick, ReadModeControls, ReadModeHideTab, useTurnMode } from '@/components/ReadModeControls.tsx';
 /**
  * Flowing score viewer: the music engraved live (Verovio) from MusicXML to
  * fit the screen, rather than a fixed PDF page. Same reading controls as the
@@ -819,9 +819,8 @@ export function ScoreViewer({
     if (!t || Date.now() - s.t > 800) return;
     const dx = t.clientX - s.x;
     const dy = t.clientY - s.y;
-    const MIN = 50;
-    if (Math.abs(dx) > MIN && Math.abs(dx) > 1.5 * Math.abs(dy)) (dx < 0 ? nextPage : prevPage)();
-    else if (Math.abs(dy) > MIN && Math.abs(dy) > 1.5 * Math.abs(dx)) (dy < 0 ? nextPage : prevPage)();
+    // Only a definite sideways flick turns; up or down does nothing.
+    if (isHorizontalFlick(dx, dy)) (dx < 0 ? nextPage : prevPage)();
   }
   useEffect(() => {
     function onKey(e: KeyboardEvent): void {
