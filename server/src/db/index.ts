@@ -252,6 +252,10 @@ db.exec(`
   );
 `);
 addColumnIfMissing('set_lists', 'image_id INTEGER REFERENCES images(id) ON DELETE SET NULL');
+// Pictures adopted from the bucket root (the website's photo library) rather
+// than uploaded into music/images/. Their key has no prefix and they are
+// never deleted from B2 by choirfriend.
+addColumnIfMissing('images', 'shared INTEGER NOT NULL DEFAULT 0');
 
 // files.kind gained 'lyrics' and 'score'. SQLite can't alter a CHECK
 // constraint, so a DB created before that change gets its files table rebuilt

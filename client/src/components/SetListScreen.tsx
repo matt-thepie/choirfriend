@@ -13,7 +13,7 @@ import {
   type SetListSong,
 } from '@/hooks/useSetLists.ts';
 import { usePlayer, type Queue } from '@/player/PlayerContext.tsx';
-import { deleteImage, IMAGE_ACCEPT, uploadImage, useImages, type CoverImage } from '@/hooks/useImages.ts';
+import { adoptSharedPicture, deleteImage, IMAGE_ACCEPT, listSharedPictures, uploadImage, useImages, type CoverImage, type SharedPicture } from '@/hooks/useImages.ts';
 import { toQueueTrack } from '@/components/AudioPlayer/AudioPlayer.tsx';
 
 interface SetListScreenProps {
@@ -523,6 +523,42 @@ function CoverPicker({ value, onChange, canUpload }: { value: number | null; onC
   const { images, loading, setImages } = useImages(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The website's photo library, shown on request so the editor doesn't list the bucket every time.
+  const [shared, setShared] = useState<SharedPicture[] | null>(null);
+  const [sharedOpen, setSharedOpen] = useState(false);
+  const [sharedLoading, setSharedLoading] = useState(false);
+  const adoptedKeys = useMemo(() => new Set(images.map((i) => i.sharedKey).filter((k): k is string => k !== null)), [images]);
+
+  async function openShared(): Promise<void> {
+    if (sharedOpen) { setSharedOpen(false); return; }
+    setSharedOpen(true);
+    if (shared !== null) return;
+    setSharedLoading(true);
+    setError(null);
+    try {
+      setShared(await listSharedPictures());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setSharedOpen(false);
+    } finally {
+      setSharedLoading(false);
+    }
+  }
+
+  async function adopt(pic: SharedPicture): Promise<void> {
+    setBusy(true);
+    setError(null);
+    try {
+      const img = await adoptSharedPicture(pic.key);
+      setImages((prev) => (prev.some((i) => i.id === img.id) ? prev : [img, ...prev]));
+      onChange(img.id);
+      setSharedOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function onPick(e: React.ChangeEvent<HTMLInputElement>): Promise<void> {
     const file = e.target.files?.[0];
@@ -561,6 +597,18 @@ function CoverPicker({ value, onChange, canUpload }: { value: number | null; onC
       <div className="flex items-center gap-3">
         <h2 className="text-base font-semibold flex-1">Cover picture</h2>
         {canUpload && (
+          <button
+            type="button"
+            onClick={() => void openShared()}
+            aria-expanded={sharedOpen}
+            disabled={busy}
+            className={cn('inline-flex items-center gap-1 h-8 px-3 rounded-md border border-border text-xs hover:bg-accent/60', sharedOpen && 'bg-accent/60', busy && 'opacity-50')}
+          >
+            <Icon name="photo_library" className="text-base" />
+            From website
+          </button>
+        )}
+        {canUpload && (
           <label className={cn('inline-flex items-center gap-1 h-8 px-3 rounded-md border border-border text-xs cursor-pointer hover:bg-accent/60', busy && 'opacity-50 pointer-events-none')}>
             <Icon name="add_photo_alternate" className="text-base" />
             {busy ? 'Working…' : 'Upload picture'}
@@ -569,6 +617,39 @@ function CoverPicker({ value, onChange, canUpload }: { value: number | null; onC
         )}
       </div>
       {error && <p className="text-xs text-destructive">{error}</p>}
+      {sharedOpen && (
+        <div className="rounded-md border border-border p-3 space-y-2 bg-muted/30">
+          <p className="text-xs text-muted-foreground">
+            Pictures from the SGMC website. Tap one to use it here; it joins the pool for other set lists too.
+          </p>
+          {sharedLoading ? (
+            <p className="text-sm text-muted-foreground">Looking in the picture library…</p>
+          ) : !shared || shared.length === 0 ? (
+            <p className="text-sm text-muted-foreground">The website has no pictures to borrow.</p>
+          ) : (
+            <ul className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2 max-h-80 overflow-y-auto">
+              {shared.map((pic) => (
+                <li key={pic.key}>
+                  <button
+                    type="button"
+                    onClick={() => void adopt(pic)}
+                    disabled={busy}
+                    title={pic.name}
+                    className={cn(
+                      'relative block w-full aspect-video rounded-md overflow-hidden border-2 border-transparent hover:border-border',
+                      adoptedKeys.has(pic.key) && 'opacity-60',
+                    )}
+                  >
+                    <img src={pic.thumbUrl} alt={pic.name} loading="lazy" className="w-full h-full object-cover" />
+                    <span className="absolute inset-x-0 bottom-0 truncate text-[10px] text-white/90 bg-black/50 px-1 py-0.5">{pic.name}</span>
+                    {adoptedKeys.has(pic.key) && <span className="absolute top-1 right-1 rounded-full bg-black/60 text-white text-[10px] px-1.5">in pool</span>}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
       {loading ? (
         <p className="text-sm text-muted-foreground">Loading pictures…</p>
       ) : images.length === 0 ? (

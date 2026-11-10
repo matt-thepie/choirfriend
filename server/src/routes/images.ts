@@ -6,8 +6,8 @@
 
 import type { FastifyPluginAsync } from 'fastify';
 import { isAdmin, requireAdmin, requireAuth } from '../auth/middleware.ts';
-import { createImage, deleteImage, getImageStorage, listImages } from '../db/images.ts';
-import { deleteObject, isB2Configured, presignPut } from '../storage/b2.ts';
+import { createImage, deleteImage, getImageBySharedKey, getImageStorage, listImages } from '../db/images.ts';
+import { deleteObject, isB2Configured, isSharedPictureKey, listSharedPictures, presignPut, sharedUrl } from '../storage/b2.ts';
 import { readableStoredName } from '../import/storage.ts';
 
 const ALLOWED_IMAGE_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif']);
@@ -69,6 +69,38 @@ export const imagesRoutes: FastifyPluginAsync = async (app) => {
     return reply.code(201).send(dto);
   });
 
+  /** The website's photo library at the bucket root, for picking a cover without re-uploading. */
+  app.get('/images/shared', { preHandler: requireAdmin }, async (_req, reply) => {
+    if (!isB2Configured()) {
+      return reply.code(503).send({ error: 'b2_not_configured', message: 'Backblaze B2 is not configured on this server.' });
+    }
+    const pics = await listSharedPictures();
+    return pics.map((p) => ({ ...p, url: sharedUrl(p.key), thumbUrl: sharedUrl(p.thumbKey) }));
+  });
+
+  /** Bring one of the website's pictures into the pool (idempotent per key). */
+  app.post<{ Body: { key?: unknown } }>('/images/adopt', { preHandler: requireAdmin }, async (req, reply) => {
+    if (!isB2Configured()) {
+      return reply.code(503).send({ error: 'b2_not_configured', message: 'Backblaze B2 is not configured on this server.' });
+    }
+    const key = req.body?.key;
+    if (typeof key !== 'string' || !isSharedPictureKey(key)) return reply.code(400).send({ error: 'not a picture at the bucket root' });
+    const existing = getImageBySharedKey(key);
+    if (existing) return existing;
+    const pic = (await listSharedPictures()).find((p) => p.key === key);
+    if (!pic) return reply.code(404).send({ error: 'not found in bucket' });
+    const dto = createImage({
+      storage: 'b2',
+      storageKey: key,
+      filename: key,
+      mimeType: pic.mimeType,
+      sizeBytes: pic.sizeBytes,
+      createdByUserId: req.user!.internalId,
+      shared: true,
+    });
+    return reply.code(201).send(dto);
+  });
+
   app.delete<{ Params: { id: string } }>('/images/:id', { preHandler: requireAuth }, async (req, reply) => {
     if (!isAdmin(req.user!)) return reply.code(403).send({ error: 'forbidden', message: 'admin role required' });
     const id = Number(req.params.id);
@@ -76,7 +108,8 @@ export const imagesRoutes: FastifyPluginAsync = async (app) => {
     const loc = getImageStorage(id);
     if (!loc) return reply.code(404).send({ error: 'not found' });
     if (!deleteImage(id)) return reply.code(404).send({ error: 'not found' });
-    if (loc.storage === 'b2' && isB2Configured()) {
+    // Website pictures belong to the website; only the pool entry goes.
+    if (loc.storage === 'b2' && !loc.shared && isB2Configured()) {
       await deleteObject(loc.storageKey).catch((e) => req.log.warn({ err: e, key: loc.storageKey }, 'failed to delete picture from B2'));
     }
     return reply.code(204).send();

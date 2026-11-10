@@ -6,6 +6,8 @@
 import { useCallback, useEffect, useState } from 'react';
 
 export interface CoverImage {
+  /** Set when the picture is one of the website's, from the shared bucket. */
+  sharedKey: string | null;
   id: number;
   url: string;
   filename: string;
@@ -78,4 +80,33 @@ export async function uploadImage(file: File): Promise<CoverImage> {
 export async function deleteImage(id: number): Promise<void> {
   const res = await fetch(`/api/images/${id}`, { method: 'DELETE', credentials: 'include' });
   if (!res.ok) throw await parseError(res, 'delete failed');
+}
+
+/** A picture from the website's library at the root of the shared bucket. */
+export interface SharedPicture {
+  key: string;
+  name: string;
+  url: string;
+  thumbUrl: string;
+  mimeType: string;
+  sizeBytes: number | null;
+  lastModified: number | null;
+}
+
+export async function listSharedPictures(): Promise<SharedPicture[]> {
+  const res = await fetch('/api/images/shared', { credentials: 'include' });
+  if (!res.ok) throw new Error(res.status === 503 ? 'Picture storage is not configured on this server.' : `Could not list the website's pictures (HTTP ${res.status})`);
+  return (await res.json()) as SharedPicture[];
+}
+
+/** Bring a website picture into the pool; returns the (possibly pre-existing) pool entry. */
+export async function adoptSharedPicture(key: string): Promise<CoverImage> {
+  const res = await fetch('/api/images/adopt', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ key }),
+  });
+  if (!res.ok) throw new Error(`Could not add the picture (HTTP ${res.status})`);
+  return (await res.json()) as CoverImage;
 }

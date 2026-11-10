@@ -11,7 +11,7 @@
  * reject virtual-hosted-style).
  */
 
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import type { Buffer } from 'node:buffer';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { getConfig } from '../config.ts';
@@ -135,4 +135,86 @@ export async function deleteObject(unprefixedKey: string): Promise<void> {
     // Swallow — the row will still be removed. Log so it's visible.
     console.error('[b2] delete failed for', unprefixedKey, '-', (err as Error).message);
   }
+}
+
+/**
+ * Pictures the rest of SGMC keeps at the root of the shared bucket (the
+ * website's photo library). They sit outside B2_KEY_PREFIX, so this module's
+ * prefixing does not apply: keys here are the bucket's own, and their public
+ * URL is simply publicBaseUrl + key.
+ */
+export interface SharedPicture {
+  /** Bucket key of the original (no prefix). */
+  key: string;
+  /** Key of the smallest resized derivative, or the original if none. */
+  thumbKey: string;
+  /** Display name: the file name without the extension. */
+  name: string;
+  mimeType: string;
+  sizeBytes: number | null;
+  lastModified: number | null;
+}
+
+const PICTURE_EXT: Record<string, string> = {
+  jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif', avif: 'image/avif',
+};
+/** The website stores resized copies as "<name>-400x300.jpg" beside the original. */
+const DERIVATIVE = /^(.*)-(\d{2,4})x(\d{2,4})$/;
+
+/** Public URL of a bucket-root object. */
+export function sharedUrl(key: string): string {
+  const { b2 } = getConfig();
+  return `${b2.publicBaseUrl.replace(/\/+$/, '')}/${encodeURI(key)}`;
+}
+
+/** True if the key is a root-level picture (no folder, known image extension). */
+export function isSharedPictureKey(key: string): boolean {
+  return !key.includes('/') && Boolean(PICTURE_EXT[key.split('.').pop()!.toLowerCase()]);
+}
+
+export async function listSharedPictures(): Promise<SharedPicture[]> {
+  const { b2 } = getConfig();
+  const client = makeClient();
+  interface Obj { key: string; size: number | null; modified: number | null }
+  const objects: Obj[] = [];
+  let token: string | undefined;
+  do {
+    const res = await client.send(new ListObjectsV2Command({ Bucket: b2.bucket, Delimiter: '/', ContinuationToken: token }));
+    for (const o of res.Contents ?? []) {
+      if (o.Key && isSharedPictureKey(o.Key)) objects.push({ key: o.Key, size: o.Size ?? null, modified: o.LastModified ? Math.floor(o.LastModified.getTime() / 1000) : null });
+    }
+    token = res.IsTruncated ? res.NextContinuationToken : undefined;
+  } while (token);
+
+  // Group the resized copies under their original by stem.
+  const stem = (key: string) => key.replace(/\.[^.]+$/, '');
+  const stems = new Set(objects.map((o) => stem(o.key)));
+  const groups = new Map<string, { original: Obj | null; smallest: { obj: Obj; w: number } | null }>();
+  for (const o of objects) {
+    const st = stem(o.key);
+    const m = DERIVATIVE.exec(st);
+    const base = m && stems.has(m[1]!) ? m[1]! : st;
+    const g = groups.get(base) ?? { original: null, smallest: null };
+    if (base === st) g.original = o;
+    else {
+      const w = Number(m![2]);
+      if (!g.smallest || w < g.smallest.w) g.smallest = { obj: o, w };
+    }
+    groups.set(base, g);
+  }
+  const out: SharedPicture[] = [];
+  for (const [base, g] of groups) {
+    const orig = g.original ?? g.smallest?.obj;
+    if (!orig) continue;
+    out.push({
+      key: orig.key,
+      thumbKey: g.smallest?.obj.key ?? orig.key,
+      name: base,
+      mimeType: PICTURE_EXT[orig.key.split('.').pop()!.toLowerCase()]!,
+      sizeBytes: orig.size,
+      lastModified: orig.modified,
+    });
+  }
+  out.sort((a, b) => (b.lastModified ?? 0) - (a.lastModified ?? 0) || a.name.localeCompare(b.name));
+  return out;
 }

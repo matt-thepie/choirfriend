@@ -279,7 +279,12 @@ function SignedInApp({ me, health }: { me: MeResponse; health: HealthResponse | 
             </button>
           ) : (
             <>
-              <span className="inline-flex items-center shrink-0"><img src="/brand/choirfriend-icon.svg" alt="choirfriend" width="28" height="28" className="rounded-md sm:hidden" /><img src="/brand/choirfriend-logo.svg" alt="choirfriend — Solent Gay Men’s Chorus" className="h-9 md:h-10 hidden sm:block dark:sm:hidden" /><img src="/brand/choirfriend-logo-white.svg" alt="choirfriend — Solent Gay Men’s Chorus" className="h-9 md:h-10 hidden dark:sm:block" /></span>
+              <button
+                type="button"
+                onClick={() => navigate({ pieceId: null, viewerFileId: null, readMode: false, tab: 'setlists', setListId: null })}
+                aria-label="Home"
+                className="inline-flex items-center shrink-0 h-11 -ml-2 px-2 rounded-md hover:bg-accent/60"
+              ><img src="/brand/choirfriend-icon.svg" alt="choirfriend" width="28" height="28" className="rounded-md sm:hidden" /><img src="/brand/choirfriend-logo.svg" alt="choirfriend — Solent Gay Men’s Chorus" className="h-9 md:h-10 hidden sm:block dark:sm:hidden" /><img src="/brand/choirfriend-logo-white.svg" alt="choirfriend — Solent Gay Men’s Chorus" className="h-9 md:h-10 hidden dark:sm:block" /></button>
             </>
           )}
 

@@ -88,12 +88,12 @@ export function SetListsScreen({ setLists, loading, isAdmin, onOpen, onMutated }
         )}
 
         {loading && setLists.length === 0 && (
-          <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            {[0, 1, 2].map((i) => <li key={i} className="card h-56 animate-pulse" aria-hidden />)}
+          <ul className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-4 sm:gap-6">
+            {[0, 1, 2].map((i) => <li key={i} className="card h-44 animate-pulse" aria-hidden />)}
           </ul>
         )}
 
-        <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        <ul className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-4 sm:gap-6">
           {active.map((s) => (
             <Tile key={s.id} list={s} onClick={() => onOpen(s.id)} />
           ))}
@@ -103,10 +103,10 @@ export function SetListsScreen({ setLists, loading, isAdmin, onOpen, onMutated }
               <button
                 type="button"
                 onClick={() => setCreating(true)}
-                className="w-full h-full min-h-56 card flex flex-col items-center justify-center gap-3 hover:shadow-float transition-shadow"
+                className="w-full h-full min-h-40 card flex flex-col items-center justify-center gap-2 hover:shadow-float transition-shadow"
               >
-                <span className="w-24 h-24 rounded-full bg-primary text-primary-foreground inline-flex items-center justify-center shadow-card">
-                  <Icon name="add" className="text-5xl" />
+                <span className="w-16 h-16 rounded-full bg-primary text-primary-foreground inline-flex items-center justify-center shadow-card">
+                  <Icon name="add" className="text-4xl" />
                 </span>
                 <span className="text-base font-medium">New set list</span>
               </button>
@@ -124,7 +124,7 @@ export function SetListsScreen({ setLists, loading, isAdmin, onOpen, onMutated }
               My set lists
               <span className="ml-3 text-sm font-normal text-on-field-muted">only you can see these</span>
             </h2>
-            <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            <ul className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-4 sm:gap-6">
               {mineActive.map((s) => (
                 <Tile key={s.id} list={s} onClick={() => onOpen(s.id)} />
               ))}
@@ -144,7 +144,7 @@ export function SetListsScreen({ setLists, loading, isAdmin, onOpen, onMutated }
               Archived set lists ({archived.length + mineArchived.length})
             </button>
             {showArchived && (
-              <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+              <ul className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-4 sm:gap-6">
                 {[...archived, ...mineArchived].map((s) => (
                   <Tile key={s.id} list={s} onClick={() => onOpen(s.id)} muted />
                 ))}
