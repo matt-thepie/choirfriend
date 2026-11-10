@@ -26,14 +26,34 @@ export type { Box, Stave, PageLayout } from './pageBitmap.ts';
 export { analyseBitmap } from './pageBitmap.ts';
 
 const ANALYSIS_WIDTH = 1400;
-const cache = new Map<string, Promise<PageLayout>>();
+
+/** Finished layouts by file id and page. Only successes are kept, so a page
+ *  whose analysis failed (or was cut short) is tried again next time. */
+const settled = new Map<string, PageLayout>();
+/** Analyses under way, per document. pdf.js never settles a call made on a
+ *  document that is then destroyed, so an in-flight promise must not outlive
+ *  its document: keyed by file id it would be handed back on the next open
+ *  of the same file and hang "Preparing pages" until a reload. */
+const inFlight = new WeakMap<PDFDocumentProxy, Map<number, Promise<PageLayout>>>();
+const FALLBACK: PageLayout = { content: { x0: 0, y0: 0, x1: 1, y1: 1 }, systems: [] };
 
 export function analysePage(pdf: PDFDocumentProxy, pageNumber: number, cacheKey: string): Promise<PageLayout> {
   const key = `${cacheKey}:${pageNumber}`;
-  let p = cache.get(key);
+  const done = settled.get(key);
+  if (done) return Promise.resolve(done);
+  let pages = inFlight.get(pdf);
+  if (!pages) inFlight.set(pdf, (pages = new Map()));
+  let p = pages.get(pageNumber);
   if (!p) {
-    p = run(pdf, pageNumber).catch(() => ({ content: { x0: 0, y0: 0, x1: 1, y1: 1 }, systems: [] }));
-    cache.set(key, p);
+    p = run(pdf, pageNumber).then(
+      (layout) => {
+        settled.set(key, layout);
+        return layout;
+      },
+      () => FALLBACK,
+    );
+    p.finally(() => pages!.delete(pageNumber)).catch(() => undefined);
+    pages.set(pageNumber, p);
   }
   return p;
 }
@@ -75,6 +95,7 @@ export function pageRaster(pdf: PDFDocumentProxy, pageNumber: number): Promise<P
  *  score holds, so the viewer drops them as soon as the score closes. */
 export function dropRasters(pdf: PDFDocumentProxy): void {
   rasters.delete(pdf);
+  inFlight.delete(pdf);
 }
 
 async function rasterise(pdf: PDFDocumentProxy, pageNumber: number): Promise<PageRaster> {
@@ -88,60 +109,94 @@ async function rasterise(pdf: PDFDocumentProxy, pageNumber: number): Promise<Pag
   if (!ctx) throw new Error('no 2d context');
   ctx.fillStyle = '#fff';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const t0 = performance.now();
   await page.render({ canvas, canvasContext: ctx, viewport }).promise;
+  const tRender = performance.now() - t0;
   const { width: W, height: H } = canvas;
   const data = ctx.getImageData(0, 0, W, H).data;
-  const image = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+  // The worker analyses the pixels and encodes the PNG; encoding a page on
+  // the main thread took several seconds on an old tablet and swallowed taps.
+  const r = await analyseOffThread(data, W, H);
+  const image = r.image ?? (await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png')));
+  dbg(`raster p${pageNumber} doc ${docId(pdf)}: render ${Math.round(tRender)}ms, analyse+png ${Math.round(performance.now() - t0 - tRender)}ms (${r.image ? 'worker' : 'main thread'}), ${image?.size ?? 0} bytes`);
   canvas.width = canvas.height = 0;
-  return { image, width: W, height: H, layout: await analyseOffThread(data, W, H) };
+  return { image, width: W, height: H, layout: r.layout };
 }
 
 // One worker for all analysis; null once it has failed (e.g. a browser that
 // can't load it), and analysis then runs on the main thread as before.
 let worker: Worker | null | undefined;
 let nextJob = 0;
-const jobs = new Map<number, { data: Uint8ClampedArray; width: number; height: number; done: (l: PageLayout) => void; timer: ReturnType<typeof setTimeout> }>();
+interface Analysed {
+  layout: PageLayout;
+  /** The page as a PNG, when the worker could encode it (OffscreenCanvas). */
+  image: Blob | null;
+}
+const jobs = new Map<number, { data: Uint8ClampedArray; width: number; height: number; done: (r: Analysed) => void }>();
 
 /** iOS Safari kills a worker under memory pressure without an error event,
  *  which would leave every page's analysis hanging and "My line" blank. A
  *  page takes under a second to analyse, so an unanswered job after this
- *  long means the worker is gone: finish it, and the rest, on this thread. */
+ *  long means the worker is gone: finish it, and the rest, on this thread.
+ *  The worker takes jobs in order, so the clock runs on the job at the head
+ *  of the queue only: a slow tablet with six pages queued must not count
+ *  the wait behind the others against the last one. */
 const JOB_TIMEOUT_MS = 20_000;
+let watchdog: ReturnType<typeof setTimeout> | null = null;
+
+function armWatchdog(): void {
+  if (watchdog !== null) clearTimeout(watchdog);
+  watchdog = jobs.size > 0 ? setTimeout(workerLost, JOB_TIMEOUT_MS) : null;
+}
 
 function workerLost(): void {
+  if (watchdog !== null) clearTimeout(watchdog);
+  watchdog = null;
   worker?.terminate();
   worker = null;
-  for (const j of jobs.values()) {
-    clearTimeout(j.timer);
-    j.done(analyseBitmap(j.data, j.width, j.height));
-  }
+  for (const j of jobs.values()) j.done({ layout: analyseBitmap(j.data, j.width, j.height), image: null });
   jobs.clear();
 }
 
-function analyseOffThread(data: Uint8ClampedArray, width: number, height: number): Promise<PageLayout> {
+function analyseOffThread(data: Uint8ClampedArray, width: number, height: number): Promise<Analysed> {
   if (worker === undefined) {
     try {
       worker = new Worker(new URL('./pageBitmap.worker.ts', import.meta.url), { type: 'module' });
-      worker.onmessage = (e: MessageEvent<{ id: number; layout: PageLayout }>) => {
+      worker.onmessage = (e: MessageEvent<{ id: number; layout: PageLayout; image: Blob | null; error?: string | null }>) => {
         const j = jobs.get(e.data.id);
         if (!j) return;
-        clearTimeout(j.timer);
+        if (e.data.error) dbg('worker png failed:', e.data.error);
         jobs.delete(e.data.id);
-        j.done(e.data.layout);
+        armWatchdog();
+        j.done({ layout: e.data.layout, image: e.data.image ?? null });
       };
       worker.onerror = workerLost;
     } catch {
       worker = null;
     }
   }
-  if (!worker) return Promise.resolve(analyseBitmap(data, width, height));
+  if (!worker) return Promise.resolve({ layout: analyseBitmap(data, width, height), image: null });
   const w = worker;
   return new Promise((done) => {
     const id = nextJob++;
     // Copied, not transferred, so the main thread can still analyse it if the worker fails.
-    jobs.set(id, { data, width, height, done, timer: setTimeout(workerLost, JOB_TIMEOUT_MS) });
+    jobs.set(id, { data, width, height, done });
+    if (jobs.size === 1) armWatchdog();
     w.postMessage({ id, data, width, height });
   });
+}
+
+/** Set localStorage cf.debug=1 to log how long each page takes to prepare,
+ *  and when documents open, warm and close; handy over adb on a tablet. */
+export const DEBUG = typeof localStorage !== 'undefined' && localStorage.getItem('cf.debug') === '1';
+const dbg = (...a: unknown[]): void => { if (DEBUG) console.log('[layout]', ...a); };
+const docIds = new WeakMap<object, number>();
+let nextDocId = 1;
+/** Debug: a short serial for a document. */
+export function docId(doc: object): number {
+  let id = docIds.get(doc);
+  if (!id) docIds.set(doc, (id = nextDocId++));
+  return id;
 }
 
 async function run(pdf: PDFDocumentProxy, pageNumber: number): Promise<PageLayout> {

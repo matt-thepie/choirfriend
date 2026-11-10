@@ -1,6 +1,7 @@
 import { EdgeTurnZones, ReadModeControls, ReadModeHideTab, useTurnMode } from '@/components/ReadModeControls.tsx';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { openPdf, type PDFDocumentProxy } from '@/lib/pdfjs.ts';
+import { dropWarmPdf, takeWarmPdf, warmPdf } from '@/lib/pdfWarm.ts';
 import { Button, Icon } from '@/components/ui/button.tsx';
 import { Popover } from '@/components/ui/popover.tsx';
 import { usePlayer } from '@/player/PlayerContext.tsx';
@@ -27,7 +28,7 @@ import { useSections, type Section } from '@/hooks/useSections.ts';
 import { replaceFile } from '@/hooks/useUploadFile.ts';
 import { useAnnotations, type NewAnnotationInput } from '@/hooks/useAnnotations.ts';
 import { PdfPage } from './PdfPage.tsx';
-import { analysePage, dropRasters, type Box, type PageLayout } from '@/lib/pageLayout.ts';
+import { analysePage, DEBUG, docId, dropRasters, type Box, type PageLayout } from '@/lib/pageLayout.ts';
 import { labelScore, overrideKey, partFromSection, resolvePartLine, type PartLineOverrides } from '@/lib/partLine.ts';
 import type { StaveTarget } from './PdfPage.tsx';
 import { UploadButton } from './UploadButton.tsx';
@@ -407,8 +408,16 @@ export function PdfViewer({
   const activeInk = { color: inkColors[activePen], width: INK_WIDTH[activePen] };
   const inkTool = tool === 'pen' || tool === 'highlighter';
 
+  // Keyed by the URL, not the file object: the piece is refetched now and
+  // then, and reopening the same PDF each time destroyed the document under
+  // pages still being analysed, which stalled "Preparing pages".
+  const pdfUrl = pdfFile?.url ?? null;
+  /** Which file `pdf` was opened for. Switching parts commits the new file
+   *  a render before the new document loads, and effects that ran on the
+   *  old document with the new file's id hung on its destroyed worker. */
+  const pdfDocUrlRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!pdfFile) {
+    if (!pdfUrl) {
       setPdf(null);
       return;
     }
@@ -418,7 +427,11 @@ export function PdfViewer({
     setIntrinsicPageSize(null);
     setPdfLoadError(null);
     setPdfProgress(null);
-    const task = openPdf({ url: pdfFile.url, disableRange: true }); // whole file, so the service worker can cache it
+    // The part the viewer warmed ahead, if this is it; otherwise the whole
+    // file, so the service worker can cache it.
+    const warmTask = takeWarmPdf(pdfUrl);
+    if (DEBUG) console.log('[open]', pdfUrl.split('/').pop(), warmTask ? 'from warm' : 'fresh');
+    const task = warmTask ?? openPdf({ url: pdfUrl, disableRange: true });
     // Scanned scores can be 10MB+; show how far along the download is.
     task.onProgress = ({ loaded, total }: { loaded: number; total: number }) => {
       if (!cancelled && total > 0) setPdfProgress(Math.min(1, loaded / total));
@@ -427,6 +440,8 @@ export function PdfViewer({
       async (loaded) => {
         if (cancelled) return;
         doc = loaded;
+        if (DEBUG) console.log('[open] loaded', pdfUrl.split('/').pop(), 'doc', docId(loaded));
+        pdfDocUrlRef.current = pdfUrl;
         setPdf(loaded);
         try {
           const p = await loaded.getPage(1);
@@ -445,10 +460,11 @@ export function PdfViewer({
       cancelled = true;
       // Give back the page images and the document (and its worker) as soon
       // as the score closes: an old tablet runs out of memory otherwise.
+      if (DEBUG) console.log('[open] close', pdfUrl.split('/').pop(), 'doc', doc ? docId(doc) : 'unloaded');
       if (doc) dropRasters(doc);
       task.destroy();
     };
-  }, [pdfFile]);
+  }, [pdfUrl]);
 
   // Read mode crops margins and can step by system, and "My line" needs the
   // staves, so analyse each page once (cached per file) when either is on.
@@ -457,7 +473,7 @@ export function PdfViewer({
   currentPageRef.current = currentPage;
   useEffect(() => {
     setLayouts(new Map());
-    if (!pdf || !needLayouts || !pdfFile) return;
+    if (!pdf || !needLayouts || !pdfFile || pdfDocUrlRef.current !== pdfFile.url) return;
     const fileId = pdfFile.id;
     let cancelled = false;
     // Nearest pages first, ahead before behind: each analysis also draws the
@@ -469,6 +485,7 @@ export function PdfViewer({
       for (const p of order) {
         const L = await analysePage(pdf, p, `${fileId}`);
         if (cancelled) return;
+        if (DEBUG) console.log('[layouts] file', fileId, 'page', p, 'ready');
         setLayouts((m) => new Map(m).set(p, L));
       }
     })();
@@ -709,10 +726,14 @@ export function PdfViewer({
 
   const effectiveScale = effectiveNavMode === 'page' ? chunkScale ?? fitScale : scrollBaseScale * zoom;
 
-  // Switching to a different PDF in the piece starts at its first page.
+  // Switching to a different PDF in the piece starts at its first page,
+  // unless the reader turned back into it from the part after: then it
+  // opens at its end, where they left it.
+  const landAtEndRef = useRef(false);
   useEffect(() => {
     setCurrentPage(1);
-    setChunkY(0);
+    // A chunkY past any system picks the last step of the page.
+    setChunkY(landAtEndRef.current ? 1 : 0);
   }, [pdfFile?.id]);
 
   // Clamp currentPage when the PDF changes.
@@ -720,6 +741,21 @@ export function PdfViewer({
   useEffect(() => {
     if (pageCount > 0 && currentPage > pageCount) setCurrentPage(1);
   }, [pageCount, currentPage]);
+  useEffect(() => {
+    if (pageCount === 0 || !landAtEndRef.current) return;
+    landAtEndRef.current = false;
+    setCurrentPage(pageCount);
+    if (effectiveNavMode !== 'scroll') return;
+    // Scroll view: wait for the pages to take their size, then go to the bottom.
+    let tries = 60;
+    const toBottom = (): void => {
+      const sc = scrollContainerRef.current;
+      const last = sc?.querySelector<HTMLElement>(`[data-page="${pageCount}"]`);
+      if (sc && last && last.offsetHeight > 0) sc.scrollTo({ top: sc.scrollHeight, behavior: 'auto' });
+      else if (tries-- > 0) requestAnimationFrame(toBottom);
+    };
+    requestAnimationFrame(toBottom);
+  }, [pageCount, effectiveNavMode]);
 
   const goToChunk = useCallback((c: Chunk | undefined) => {
     if (!c) return;
@@ -735,21 +771,32 @@ export function PdfViewer({
   const partIndex = pdfFile ? parts.findIndex((f) => f.id === pdfFile.id) : -1;
   const nextPart = partIndex >= 0 ? parts[partIndex + 1] ?? null : null;
   const prevPart = partIndex >= 0 ? parts[partIndex - 1] ?? null : null;
+  /** Open a part of the piece at its start, or (turning back) at its end. */
+  const openPart = useCallback((file: PieceFile, at: 'start' | 'end' = 'start') => {
+    landAtEndRef.current = at === 'end';
+    setSelectedPdfId(file.id);
+  }, []);
+  // Attacca: warm the next part while reading the last pages of this one.
+  useEffect(() => {
+    if (!pdf || !nextPart || pageCount === 0 || pdfDocUrlRef.current !== pdfUrl) return;
+    if (atEnd || currentPage >= pageCount - 1) warmPdf(nextPart.url, `${nextPart.id}`);
+  }, [pdf, pdfUrl, nextPart, pageCount, atEnd, currentPage]);
+  useEffect(() => dropWarmPdf, []);
   const nextPage = useCallback(() => {
     // Turning past the last page opens the next part of the piece, or,
     // performing a set list, the next song.
     if (atEnd && pageCount > 0) {
-      if (nextPart) return setSelectedPdfId(nextPart.id);
+      if (nextPart) return openPart(nextPart);
       if (nextSong && onOpenSong) return onOpenSong(nextSong.id);
     }
     if (chunked) return goToChunk(chunks[chunkIndex + 1]);
     setCurrentPage((p) => Math.min(pageCount, p + 1));
-  }, [pageCount, chunked, chunks, chunkIndex, goToChunk, atEnd, nextPart, nextSong, onOpenSong]);
+  }, [pageCount, chunked, chunks, chunkIndex, goToChunk, atEnd, nextPart, nextSong, onOpenSong, openPart]);
   const prevPage = useCallback(() => {
-    if (atStart && prevPart) return setSelectedPdfId(prevPart.id);
+    if (atStart && prevPart) return openPart(prevPart, 'end');
     if (chunked) return goToChunk(chunks[chunkIndex - 1]);
     setCurrentPage((p) => Math.max(1, p - 1));
-  }, [chunked, chunks, chunkIndex, goToChunk, atStart, prevPart]);
+  }, [chunked, chunks, chunkIndex, goToChunk, atStart, prevPart, openPart]);
   /** Scroll view: move most of a screen; for marking up, when a finger draws. */
   const scrollByScreen = (dir: 1 | -1): void => {
     const sc = scrollContainerRef.current;
@@ -1553,7 +1600,7 @@ export function PdfViewer({
                   </p>
                 )}
                 {nextPart ? (
-                  <Button size="lg" onClick={() => setSelectedPdfId(nextPart.id)} className="h-14 text-base">
+                  <Button size="lg" onClick={() => openPart(nextPart)} className="h-14 text-base">
                     Next: {sheetName(nextPart, 'sheet')} <Icon name="arrow_forward" />
                   </Button>
                 ) : nextSong && onOpenSong ? (
@@ -1569,7 +1616,7 @@ export function PdfViewer({
                   </Button>
                 )}
                 {prevPart ? (
-                  <Button size="sm" variant="ghost" onClick={() => setSelectedPdfId(prevPart.id)}>
+                  <Button size="sm" variant="ghost" onClick={() => openPart(prevPart, 'end')}>
                     <Icon name="arrow_back" /> Previous: {sheetName(prevPart, 'sheet')}
                   </Button>
                 ) : prevSong && onOpenSong ? (
@@ -1587,7 +1634,7 @@ export function PdfViewer({
             {atEnd && nextPart && (
               <button
                 type="button"
-                onClick={() => setSelectedPdfId(nextPart.id)}
+                onClick={() => openPart(nextPart)}
                 className="absolute right-3 bottom-3 z-20 max-w-[70%] truncate rounded-full bg-primary text-primary-foreground px-4 py-2 text-sm font-medium shadow-md"
               >
                 Next: {sheetName(nextPart, 'sheet')} ›
@@ -1620,7 +1667,7 @@ export function PdfViewer({
             {atStart && (prevPart || (prevSong && onOpenSong)) && (
               <button
                 type="button"
-                onClick={() => (prevPart ? setSelectedPdfId(prevPart.id) : onOpenSong!(prevSong!.id))}
+                onClick={() => (prevPart ? openPart(prevPart, 'end') : onOpenSong!(prevSong!.id))}
                 className={cn('absolute left-3 z-20 max-w-[45%] truncate rounded-full bg-card border px-3 py-2 text-sm text-muted-foreground shadow-sm', atEnd && onBackToList ? 'bottom-14' : 'bottom-3')}
               >
                 ‹ {prevPart ? sheetName(prevPart, 'sheet') : prevSong!.title}
