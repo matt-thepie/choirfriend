@@ -12,6 +12,7 @@
 import { db } from './index.ts';
 import { getPieceWithFiles, storageUrl, type FileDTO } from './pieces.ts';
 import { imageExists } from './images.ts';
+import { sharedUrl } from '../storage/b2.ts';
 
 export type SetListStatus = 'active' | 'archived';
 
@@ -60,7 +61,7 @@ export interface SetListDTO extends SetListSummaryDTO {
   songs: SetListSongDTO[];
 }
 
-type SummaryRow = SetListRow & { song_count: number; image_storage: 'b2' | 'local' | null; image_key: string | null };
+type SummaryRow = SetListRow & { song_count: number; image_storage: 'b2' | 'local' | null; image_key: string | null; image_shared: number | null };
 
 function toSummary(r: SummaryRow, viewerUserId: number | undefined): SetListSummaryDTO {
   return {
@@ -72,7 +73,9 @@ function toSummary(r: SummaryRow, viewerUserId: number | undefined): SetListSumm
     personal: r.owner_user_id !== null,
     mine: r.owner_user_id !== null && r.owner_user_id === viewerUserId,
     imageId: r.image_id,
-    imageUrl: r.image_id !== null && r.image_storage && r.image_key ? storageUrl(r.image_storage, r.image_key) : null,
+    imageUrl: r.image_id !== null && r.image_storage && r.image_key
+      ? (r.image_shared ? sharedUrl(r.image_key) : storageUrl(r.image_storage, r.image_key))
+      : null,
     songCount: r.song_count,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -81,7 +84,7 @@ function toSummary(r: SummaryRow, viewerUserId: number | undefined): SetListSumm
 
 const SUMMARY_SELECT = `
   SELECT s.*, (SELECT COUNT(*) FROM set_list_items i WHERE i.set_list_id = s.id) AS song_count,
-         im.storage AS image_storage, im.storage_key AS image_key
+         im.storage AS image_storage, im.storage_key AS image_key, im.shared AS image_shared
   FROM set_lists s LEFT JOIN images im ON im.id = s.image_id
 `;
 /** Choir lists plus the viewer's own. Personal lists sort after choir ones. */
