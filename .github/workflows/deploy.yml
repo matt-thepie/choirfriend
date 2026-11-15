@@ -9,37 +9,17 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy to VPS
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: matt
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
-            set -e
-            # Load nvm. This activates the default Node (where pm2 is installed,
-            # managing all the other apps). The choirfriend app itself is pinned
-            # to Node 24 below via --interpreter "$(nvm which 24)".
-            export NVM_DIR="$HOME/.nvm"
-            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-
-            cd ~/github/choirfriend
-            git pull origin main
-
-            # Server: runs .ts directly under Node 24, no build step.
-            cd server
-            npm ci
-            mkdir -p data   # SQLite lives at ./data/choirfriend.db (cwd = server/)
-
-            # Client: Vite SPA served statically by nginx from client/dist.
-            cd ../client
-            npm ci
-            npm run build
-
-            # Start (or reload) the Fastify app on the pinned Node 24 interpreter.
-            cd ../server
-            pm2 restart choirfriend --update-env || pm2 start src/server.ts \
-              --name choirfriend \
-              --interpreter "$(nvm which 24)" \
-              --node-args="--env-file=../.env"
-            pm2 save
+      # The deploy key is locked on the VPS (authorized_keys command=) to running
+      # ~/github/choirfriend/deploy.sh, so no remote command is given here. To change
+      # what a deploy does, edit deploy.sh.
+      - name: Deploy over SSH
+        env:
+          DEPLOY_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o BatchMode=yes \
+            "matt@${{ secrets.SSH_HOST }}"
