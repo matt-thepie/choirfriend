@@ -62,10 +62,34 @@ export interface Config {
      *  services. Should end with a trailing slash. */
     keyPrefix: string;
     publicBaseUrl: string;
+    /** A separate, private bucket for the music itself (scores, PDFs, audio).
+     *  Null = music lives in the bucket above and is read from publicBaseUrl,
+     *  as it always was. Set B2_MUSIC_BUCKET to turn it on; the other
+     *  B2_MUSIC_* values default to the ones above. Cover pictures always
+     *  stay in the public bucket. */
+    music: {
+      keyId: string;
+      applicationKey: string;
+      bucket: string;
+      endpoint: string;
+      region: string;
+      keyPrefix: string;
+    } | null;
   };
 }
 
+/** An env value that falls back when unset or left empty in .env. */
+function orElse(name: string, fallback: string): string {
+  return process.env[name] || fallback;
+}
+
 export function getConfig(): Config {
+  const keyId = optional('B2_KEY_ID', '');
+  const applicationKey = optional('B2_APPLICATION_KEY', '');
+  const endpoint = optional('B2_ENDPOINT', '');
+  const region = optional('B2_REGION', '');
+  const keyPrefix = normalisePrefix(optional('B2_KEY_PREFIX', 'music/'));
+  const musicBucket = optional('B2_MUSIC_BUCKET', '');
   return {
     port: Number(optional('PORT', '3001')),
     nodeEnv: (optional('NODE_ENV', 'development') as Config['nodeEnv']),
@@ -77,13 +101,23 @@ export function getConfig(): Config {
     features: { confidence: optional('FEATURE_CONFIDENCE', 'true') !== 'false' },
     mscoreCommand: optional('MSCORE_COMMAND', ''),
     b2: {
-      keyId: optional('B2_KEY_ID', ''),
-      applicationKey: optional('B2_APPLICATION_KEY', ''),
+      keyId,
+      applicationKey,
       bucket: optional('B2_BUCKET', ''),
-      endpoint: optional('B2_ENDPOINT', ''),
-      region: optional('B2_REGION', ''),
-      keyPrefix: normalisePrefix(optional('B2_KEY_PREFIX', 'music/')),
-      publicBaseUrl: optional('B2_PUBLIC_BASE_URL', 'https://media.mgd.scot'),
+      endpoint,
+      region,
+      keyPrefix,
+      publicBaseUrl: optional('B2_PUBLIC_BASE_URL', 'https://media.sgmc.org.uk'),
+      music: musicBucket
+        ? {
+            keyId: orElse('B2_MUSIC_KEY_ID', keyId),
+            applicationKey: orElse('B2_MUSIC_APPLICATION_KEY', applicationKey),
+            bucket: musicBucket,
+            endpoint: orElse('B2_MUSIC_ENDPOINT', endpoint),
+            region: orElse('B2_MUSIC_REGION', region),
+            keyPrefix: process.env.B2_MUSIC_KEY_PREFIX !== undefined ? normalisePrefix(process.env.B2_MUSIC_KEY_PREFIX) : keyPrefix,
+          }
+        : null,
     },
   };
 }

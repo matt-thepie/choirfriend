@@ -13,6 +13,7 @@ import { setListsRoutes } from './routes/setlists.ts';
 import { imagesRoutes } from './routes/images.ts';
 import { meRoutes } from './routes/me.ts';
 import { offlineRoutes } from './routes/offline.ts';
+import { mediaRoutes } from './routes/media.ts';
 import { backfillAudioSections, seedSectionsIfEmpty } from './db/sections.ts';
 import { getConfig } from './config.ts';
 import { seedIfEmpty } from './seed.ts';
@@ -52,6 +53,7 @@ await app.register(setListsRoutes, { prefix: '/api' });
 await app.register(imagesRoutes, { prefix: '/api' });
 await app.register(meRoutes, { prefix: '/api' });
 await app.register(offlineRoutes, { prefix: '/api' });
+await app.register(mediaRoutes, { prefix: '/api' });
 await app.register(authRoutes, { prefix: '/auth' });
 
 // First-boot seed (no-op if pieces already exist).

@@ -6,6 +6,7 @@
 
 import { db } from './index.ts';
 import { getConfig } from '../config.ts';
+import { isMusicPrivate } from '../storage/b2.ts';
 
 export interface PieceRow {
   id: number;
@@ -79,7 +80,7 @@ export interface FileDTO {
   mimeType: string | null;
   sortOrder: number;
   /** Browser-resolvable URL. Local files served by the client dev server;
-   *  B2 files served via the public CDN domain. */
+   *  B2 files by the app (private music bucket) or the public CDN domain. */
   url: string;
   createdAt: number;
   /** Internal id of the uploader, or null for seeded/legacy files. */
@@ -113,11 +114,30 @@ function toPieceDTO(row: PieceRow): PieceDTO {
   };
 }
 
-export function resolveFileUrl(row: FileRow): string {
+/** Where the app serves private music from; see routes/media.ts. */
+export const MEDIA_PATH = '/api/media/';
+
+/**
+ * Address of a piece of music (a file, or a score's flowing MusicXML).
+ *
+ * With a private music bucket this is an address on the app itself, which
+ * checks the member is signed in before sending the bytes. It is built from
+ * the storage key, so it is the same on every request (the service worker
+ * and the offline sync cache by address), it changes when the file is
+ * replaced (a replacement gets a new key), and it keeps the file's
+ * extension, which the service worker uses to spot sheet music.
+ *
+ * Without one, and for locally stored files, it is the public address.
+ */
+export function resolveFileUrl(row: Pick<FileRow, 'storage' | 'storage_key'>): string {
+  if (row.storage === 'b2' && isMusicPrivate()) {
+    return MEDIA_PATH + row.storage_key.split('/').map(encodeURIComponent).join('/');
+  }
   return storageUrl(row.storage, row.storage_key);
 }
 
-/** Public URL for any stored object (files, cover pictures). */
+/** Public URL for a stored object: cover pictures, and music while it still
+ *  lives in the public bucket. */
 export function storageUrl(storage: 'b2' | 'local', storageKey: string): string {
   if (storage === 'local') {
     // Served by the client (Vite dev server in dev, the static-served

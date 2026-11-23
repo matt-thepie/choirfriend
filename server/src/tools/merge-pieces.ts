@@ -107,7 +107,7 @@ try {
 }
 for (const f of toDelete) {
   try {
-    if (f.storage === 'b2' && isB2Configured()) await deleteObject(f.storage_key);
+    if (f.storage === 'b2' && isB2Configured()) await deleteObject('music', f.storage_key);
     else await deleteLocalFile(f.storage_key);
   } catch (e) {
     console.warn(`  ! could not delete object ${f.storage_key}: ${(e as Error).message}`);

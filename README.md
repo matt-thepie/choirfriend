@@ -67,11 +67,11 @@ choirfriend/
 │   │   ├── config.ts       Env-driven config
 │   │   ├── seed.ts
 │   │   ├── routes/         health, pieces, files, annotations, setlists,
-│   │   │                   sections, me, offline, import
+│   │   │                   sections, me, offline, import, media (private music)
 │   │   ├── db/             node:sqlite schema + migrations (index.ts), and one
 │   │   │                   module per area: pieces, pieceExtras, annotations,
 │   │   │                   sections, setlists
-│   │   ├── storage/b2.ts   Presigned B2 uploads/downloads
+│   │   ├── storage/b2.ts   B2 adapter: presigned uploads, the public and private (music) buckets
 │   │   ├── import/         ChoirMate importer, PDF analysis for bulk import
 │   │   ├── tools/          One-off maintenance scripts (backfills, merge, dedupe)
 │   │   └── auth/
@@ -141,6 +141,12 @@ b2 account authorize <YOUR_KEY_ID> <YOUR_APPLICATION_KEY>
 The origins you pass are the only sites allowed to upload; reads are allowed from anywhere. With no origins, the script uses `CLIENT_ORIGIN` from `.env` plus `http://localhost:5173`, which is right when you run it on the server but drops your live site if your local `.env` points at localhost. The rest of the rules are in `scripts/b2-cors-rules.json`. Both files are checked into the repo so the configuration is version-controlled, not buried in a Backblaze admin tab.
 
 ⚠️ The script replaces the bucket's entire CORS array. If you share the bucket with other services and they also have CORS rules, merge by hand.
+
+### Private music
+
+By default the music is read straight from the bucket's public address, so anyone who has the address of a file can fetch it. To keep it to signed-in members, give the music its own **private** bucket and set `B2_MUSIC_BUCKET` (see `.env.example`). Scores, PDFs and audio are then stored there and served through `/api/media/…` on the app, which checks the session and applies the same rules as the rest of the API (a member's private upload is theirs alone; editable scores are for the roles in `SCORE_ROLES`). Cover pictures stay in the public bucket.
+
+The private bucket needs the same CORS rules for uploads (`./scripts/apply-b2-cors.sh <MUSIC_BUCKET> …`). Moving a choir that already has music in the public bucket is a short sequence with a copy step; follow [docs/private-music-runbook.md](docs/private-music-runbook.md).
 
 ## Deployment
 
@@ -248,3 +254,8 @@ validation and private-access checks use an isolated temporary SQLite database:
 ```bash
 node --test server/tests/annotations.test.ts
 ```
+
+`npm --prefix server test` runs every server test. `server/tests/media.test.ts`
+covers private music against an in-memory stand-in for the bucket: refused
+without a session, served with one, cover pictures still public, and the
+copy tool.

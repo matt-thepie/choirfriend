@@ -164,6 +164,7 @@ export const filesRoutes: FastifyPluginAsync = async (app) => {
       // the name legible while still collision-proof and hard to guess).
       const storageKey = `pieces/${pieceId}/files/${readableStoredName(body.filename)}`;
       const signed = await presignPut({
+        store: 'music',
         storageKey,
         contentType: body.mimeType,
       });
@@ -351,7 +352,7 @@ export const filesRoutes: FastifyPluginAsync = async (app) => {
       }
 
       const storageKey = `pieces/${row.piece_id}/files/${readableStoredName(body.filename)}`;
-      const signed = await presignPut({ storageKey, contentType: body.mimeType });
+      const signed = await presignPut({ store: 'music', storageKey, contentType: body.mimeType });
       return signed;
     },
   );
@@ -403,7 +404,7 @@ export const filesRoutes: FastifyPluginAsync = async (app) => {
 
       if (oldKey !== body.storageKey) {
         if (oldStorage === 'b2' && isB2Configured()) {
-          await deleteObject(oldKey);
+          await deleteObject('music', oldKey);
         } else if (oldStorage === 'local') {
           await deleteLocalFile(oldKey);
         }
@@ -452,7 +453,7 @@ export const filesRoutes: FastifyPluginAsync = async (app) => {
       // unreferenced file. Both object deletes are best-effort.
       deleteFileRow(id);
       if (row.storage === 'b2' && isB2Configured()) {
-        await deleteObject(row.storage_key);
+        await deleteObject('music', row.storage_key);
       } else if (row.storage === 'local') {
         await deleteLocalFile(row.storage_key);
       }

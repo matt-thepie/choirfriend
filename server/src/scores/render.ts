@@ -69,12 +69,12 @@ function runMscore(input: string, output: string): Promise<void> {
 
 async function readSource(row: FileRow): Promise<Uint8Array> {
   if (row.storage === 'local') return readLocalFile(row.storage_key);
-  return getObject(row.storage_key);
+  return getObject('music', row.storage_key);
 }
 
 async function removeStored(storage: 'b2' | 'local' | null, key: string | null): Promise<void> {
   if (!key) return;
-  if (storage === 'b2' && isB2Configured()) await deleteObject(key);
+  if (storage === 'b2' && isB2Configured()) await deleteObject('music', key);
   else if (storage === 'local') await deleteLocalFile(key);
 }
 

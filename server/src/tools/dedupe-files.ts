@@ -37,7 +37,7 @@ try {
 } catch (e) { db.exec('ROLLBACK'); throw e; }
 for (const { dup } of dups) {
   try {
-    if (dup.storage === 'b2' && isB2Configured()) await deleteObject(dup.storage_key);
+    if (dup.storage === 'b2' && isB2Configured()) await deleteObject('music', dup.storage_key);
     else await deleteLocalFile(dup.storage_key);
   } catch (e) { console.warn(`  ! could not delete ${dup.storage_key}: ${(e as Error).message}`); }
 }

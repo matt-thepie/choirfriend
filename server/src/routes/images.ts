@@ -48,7 +48,7 @@ export const imagesRoutes: FastifyPluginAsync = async (app) => {
     if (err) return reply.code(400).send({ error: err });
     const body = req.body as { filename: string; mimeType: string };
     const storageKey = `${KEY_PREFIX}${readableStoredName(body.filename)}`;
-    return presignPut({ storageKey, contentType: body.mimeType });
+    return presignPut({ store: 'public', storageKey, contentType: body.mimeType });
   });
 
   app.post<{ Body: CompleteBody }>('/images/complete-upload', { preHandler: requireAdmin }, async (req, reply) => {
@@ -110,7 +110,7 @@ export const imagesRoutes: FastifyPluginAsync = async (app) => {
     if (!deleteImage(id)) return reply.code(404).send({ error: 'not found' });
     // Website pictures belong to the website; only the pool entry goes.
     if (loc.storage === 'b2' && !loc.shared && isB2Configured()) {
-      await deleteObject(loc.storageKey).catch((e) => req.log.warn({ err: e, key: loc.storageKey }, 'failed to delete picture from B2'));
+      await deleteObject('public', loc.storageKey).catch((e) => req.log.warn({ err: e, key: loc.storageKey }, 'failed to delete picture from B2'));
     }
     return reply.code(204).send();
   });

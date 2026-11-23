@@ -17,6 +17,11 @@
  *     `engraver` cache once someone opens a flowing score. Its file name
  *     carries a content hash, so a new version simply replaces the old.
  * Learning tracks are deliberately left to the network.
+ *
+ * Music is addressed either on the public media host or, once the choir's
+ * music is in a private bucket, under /api/media/ on the app (signed-in
+ * members only). Both end in the same storage path, so a score saved under
+ * one address is still found under the other (see scoreFirst).
  */
 /* global VERSION, PRECACHE */
 
@@ -84,6 +89,10 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   if (url.origin !== self.location.origin) return; // audio on the CDN etc: network only
+  // Private music that is not sheet music (learning tracks, editable scores):
+  // network only, like audio on the CDN. Must come before the /api/ rule,
+  // which would keep a copy of every track.
+  if (url.pathname.startsWith('/api/media/')) return;
 
   if (req.mode === 'navigate') {
     event.respondWith(navigation(req));
@@ -158,13 +167,43 @@ async function apiNetworkFirst(event, req, url) {
   }
 }
 
+/** The part of a music address that is the same on the public media host and
+ *  under /api/media/: "/pieces/<id>/files/<folder>/<name>". Null for anything else. */
+function storagePath(href) {
+  const m = /\/pieces\/\d+\/files\/[^?#]+$/.exec(new URL(href).pathname);
+  return m ? m[0] : null;
+}
+
+/** A page loaded before the music moved asks for scores without cookies,
+ *  which was right for the public media host and is refused by /api/media.
+ *  Send the session with requests to the app itself. */
+function withSession(req) {
+  if (req.credentials !== 'omit' || new URL(req.url).origin !== self.location.origin) return req;
+  return new Request(req, { credentials: 'same-origin' });
+}
+
 async function scoreFirst(req) {
   const cache = await caches.open(SCORES);
   const hit = await cache.match(req.url, { ignoreVary: true, ignoreSearch: false });
   if (hit) return hit;
-  const res = await fetch(req);
-  if (res.ok && res.status === 200) await cache.put(req.url, res.clone());
-  return res;
+  try {
+    const res = await fetch(withSession(req));
+    if (res.ok && res.status === 200) await cache.put(req.url, res.clone());
+    return res;
+  } catch (err) {
+    // Offline, and asked for by an address this score was not saved under
+    // (a page saved before the music moved, or after): same file, other address.
+    const want = storagePath(req.url);
+    if (want) {
+      for (const key of await cache.keys()) {
+        if (storagePath(key.url) === want) {
+          const moved = await cache.match(key);
+          if (moved) return moved;
+        }
+      }
+    }
+    throw err;
+  }
 }
 
 async function engraverFirst(req) {

@@ -63,7 +63,7 @@ export async function storeImportedFile(opts: {
 
   if (isB2Configured()) {
     const key = `pieces/${opts.pieceId}/files/${name}`;
-    await putObject({ unprefixedKey: key, body: opts.bytes, contentType: opts.contentType });
+    await putObject({ store: 'music', unprefixedKey: key, body: opts.bytes, contentType: opts.contentType });
     return { storage: 'b2', storageKey: key };
   }
 

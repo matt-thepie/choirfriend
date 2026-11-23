@@ -157,7 +157,8 @@ export function ScoreViewer({
     let cancelled = false;
     setModel(null);
     setLoadError(null);
-    fetch(url, { mode: 'cors', credentials: 'omit' })
+    // same-origin: the session cookie goes to the app's own /api/media, never to a public media host.
+    fetch(url, { mode: 'cors', credentials: 'same-origin' })
       .then((r) => (r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((xml) => {
         if (!cancelled) setModel(parseScore(xml));

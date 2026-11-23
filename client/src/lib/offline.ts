@@ -80,6 +80,34 @@ async function cachedUrls(): Promise<Set<string>> {
   return new Set((await cache.keys()).map((r) => r.url));
 }
 
+/** The part of a music address that is the same on the public media host and
+ *  under /api/media/: "/pieces/<id>/files/<folder>/<name>". Null for anything else. */
+function storagePath(href: string): string | null {
+  const m = /\/pieces\/\d+\/files\/[^?#]+$/.exec(new URL(href).pathname);
+  return m ? m[0] : null;
+}
+
+/**
+ * When the music moves (to a private bucket, or to another media host) every
+ * score gets a new address. The bytes are the same, so scores already saved
+ * are filed under their new address instead of being downloaded again.
+ */
+async function adoptMovedScores(cache: Cache, known: Set<string>): Promise<void> {
+  const byPath = new Map<string, string>();
+  for (const url of known) {
+    const p = storagePath(url);
+    if (p) byPath.set(p, url);
+  }
+  for (const req of await cache.keys()) {
+    if (known.has(req.url)) continue;
+    const p = storagePath(req.url);
+    const now = p ? byPath.get(p) : undefined;
+    if (!now || (await cache.match(now))) continue;
+    const saved = await cache.match(req);
+    if (saved) await cache.put(now, saved);
+  }
+}
+
 export async function getStatus(): Promise<OfflineStatus> {
   const scope = getScope();
   const base: OfflineStatus = { supported: offlineSupported, scope, wanted: 0, saved: 0, wantedBytes: 0, allBytes: 0, allCount: 0, lastSync: getLastSync() };
@@ -112,6 +140,7 @@ export async function syncScores(scope: OfflineScope, onProgress?: (p: SyncProgr
   const list = await fetchScoreList();
   const cache = await caches.open(SCORES_CACHE);
   const known = new Set(list.map((s) => new URL(s.url, location.href).href));
+  await adoptMovedScores(cache, known).catch(() => undefined);
   for (const req of await cache.keys()) if (!known.has(req.url)) await cache.delete(req);
 
   const have = await cachedUrls();
@@ -133,7 +162,8 @@ export async function syncScores(scope: OfflineScope, onProgress?: (p: SyncProgr
     while (next < todo.length) {
       const url = todo[next++];
       try {
-        const res = await fetch(url, { mode: 'cors', credentials: 'omit', cache: 'no-store' });
+        // same-origin: the session cookie goes to the app's own /api/media, never to a public media host.
+        const res = await fetch(url, { mode: 'cors', credentials: 'same-origin', cache: 'no-store' });
         if (!res.ok) throw new Error(String(res.status));
         await cache.put(url, res);
       } catch {

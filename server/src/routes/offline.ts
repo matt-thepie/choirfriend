@@ -63,7 +63,7 @@ export const offlineRoutes: FastifyPluginAsync = async (app) => {
           fileId: r.file_id,
           pieceId: r.piece_id,
           pieceTitle: r.piece_title,
-          url: resolveFileUrl({ storage: r.storage, storage_key: r.storage_key } as FileRow),
+          url: resolveFileUrl({ storage: r.storage, storage_key: r.storage_key }),
           sizeBytes: r.size_bytes ?? null,
           inSetList: r.in_set_list === 1,
         })),

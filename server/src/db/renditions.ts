@@ -4,7 +4,7 @@
  */
 
 import { db } from './index.ts';
-import { resolveFileUrl, type FileRow } from './pieces.ts';
+import { resolveFileUrl } from './pieces.ts';
 
 export type RenditionStatus = 'pending' | 'ready' | 'failed';
 
@@ -93,7 +93,7 @@ export function listFlowingScores(pieceId: number, includeUnready: boolean): Flo
       status: r.status,
       url:
         r.status === 'ready' && r.storage && r.storage_key
-          ? resolveFileUrl({ storage: r.storage, storage_key: r.storage_key } as FileRow)
+          ? resolveFileUrl({ storage: r.storage, storage_key: r.storage_key })
           : null,
       error: r.error,
     }));

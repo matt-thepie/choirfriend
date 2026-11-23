@@ -9,7 +9,8 @@
   },
   "scripts": {
     "dev": "node --watch --env-file=../.env src/server.ts",
-    "start": "node --env-file=../.env src/server.ts"
+    "start": "node --env-file=../.env src/server.ts",
+    "test": "node --test tests/*.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.100.1",
