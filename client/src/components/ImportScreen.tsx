@@ -990,11 +990,13 @@ function PdfThumb({ blob }: { blob: Blob | undefined }) {
       try {
         const data = new Uint8Array(await blob.arrayBuffer());
         if (cancelled) return;
-        const doc = await openPdf({ data }).promise;
+        // pdf.js 6 dropped PDFDocumentProxy.destroy(); the loading task owns teardown.
+        const task = openPdf({ data });
+        const doc = await task.promise;
         const page = await doc.getPage(1);
         const canvas = canvasRef.current;
         if (cancelled || !canvas) {
-          doc.destroy();
+          void task.destroy();
           return;
         }
         const scale = 600 / page.getViewport({ scale: 1 }).width;
@@ -1004,7 +1006,7 @@ function PdfThumb({ blob }: { blob: Blob | undefined }) {
         // CPU canvas: GPU canvases garble pdf.js output on weak GPUs (see PdfPage).
         const ctx = canvas.getContext('2d', { willReadFrequently: true });
         if (ctx) await page.render({ canvas, canvasContext: ctx, viewport }).promise;
-        doc.destroy();
+        void task.destroy();
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       }
