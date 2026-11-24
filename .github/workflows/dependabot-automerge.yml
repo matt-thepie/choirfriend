@@ -64,4 +64,5 @@ jobs:
           gh workflow run deploy.yml --ref main
       - name: Leave major updates for a human
         if: steps.meta.outputs.update-type == 'version-update:semver-major'
-        run: gh pr comment "$PR_URL" --body "Major-version update: not auto-merged. Checks passed, but this may need code changes."
+        run: |
+          gh pr comment "$PR_URL" --body "Major-version update, so not auto-merged. Checks passed, but this may need code changes."
