@@ -1,0 +1,67 @@
+name: Dependabot auto-merge
+
+# Dependabot's security PRs (see ../dependabot.yml) are built and tested here.
+# If that passes and nothing in the PR is a major-version bump, the PR is merged
+# and the site is deployed, with nobody needing to look at it.
+#
+# Major-version bumps, and anything that fails the checks, are left open as a
+# normal PR to deal with by hand.
+#
+# The deploy is started explicitly at the end: a merge made with the workflow's
+# own token does not fire deploy.yml's push trigger.
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch: # run the checks by hand against any branch
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Client typecheck and build
+        working-directory: client
+        run: |
+          npm ci
+          npm run lint
+          npm run build
+      - name: Server tests
+        working-directory: server
+        run: |
+          npm ci
+          npm test
+
+  merge:
+    needs: check
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      PR_URL: ${{ github.event.pull_request.html_url }}
+    steps:
+      - name: Read what the PR updates
+        id: meta
+        uses: dependabot/fetch-metadata@v2
+      - name: Merge and deploy (patch and minor only)
+        if: steps.meta.outputs.update-type != 'version-update:semver-major'
+        run: |
+          gh pr merge "$PR_URL" --squash
+          gh workflow run deploy.yml --ref main
+      - name: Leave major updates for a human
+        if: steps.meta.outputs.update-type == 'version-update:semver-major'
+        run: gh pr comment "$PR_URL" --body "Major-version update: not auto-merged. Checks passed, but this may need code changes."
