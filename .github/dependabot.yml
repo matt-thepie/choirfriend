@@ -1,0 +1,20 @@
+# Dependabot opens pull requests for security advisories only (the `npm audit`
+# chores). open-pull-requests-limit: 0 switches off routine version-bump PRs;
+# security PRs are not affected by that limit.
+#
+# Merging one of its PRs is a push to main, so it deploys.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directories:
+      - /client
+      - /server
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+    groups:
+      # One PR per directory for all outstanding advisories, instead of one each.
+      security:
+        applies-to: security-updates
+        patterns:
+          - "*"
